@@ -89,12 +89,24 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 - [x] Build-Pipeline in GitHub Actions auf self-hosted Runner (Build, Test, Lint,
       Container-Image via ko oder Dockerfile); Runner-Anforderungen dokumentieren
       (Docker/Podman für Testcontainer, kind für E2E)
-      → `.github/workflows/ci.yml`, Dockerfile statt ko (ADR-010), `docs/ci-runner.md`;
+      → `.github/workflows/release.yml`, Dockerfile statt ko (ADR-010), `docs/ci-runner.md`;
       Runner-Registrierung selbst ist Ops-seitig noch offen
 - [x] Registry-Ziel: Container-Images nach `docker.io/guidedtraffic` (Push-Credentials
       als GitHub-Secrets, Tagging: SemVer + `sha-<commit>`)
-      → Secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (dokumentiert in `docs/ci-runner.md`),
-      Push nur auf `main`/Tags; Secrets in GitHub anlegen ist noch offen
+      → Secret `DOCKERHUB_PAT` (dokumentiert in `docs/ci-runner.md`), Push nur beim Release
+- [x] CI/Release-Pipeline nach Standard-Workflow:
+      1. Pull Request gegen `main` → Tests (Lint, Unit-/Integrationstests mit
+         Coverage-Gate ≥ 80 %, Build)
+      2. Push auf `main` → dieselben Tests, danach `semantic-release`: analysiert
+         Conventional Commits, erzeugt Tag `vX.Y.Z` + GitHub-Release (via `BOT_PAT`,
+         damit das Release den Build-Workflow triggert)
+      3. Release published → Docker-Image bauen und nach
+         `docker.io/guidedtraffic/guided-ssh` pushen (Tags: `X.Y.Z`, `X.Y`, `X`,
+         `sha-<commit>`; Provenance + SBOM)
+      → `.github/workflows/release.yml` (Test + Semantic Release),
+      `.github/workflows/build.yml` (Docker-Build auf Release),
+      `.releaserc` + `package.json` (semantic-release, Preset conventionalcommits);
+      Secrets: `DOCKERHUB_PAT`, `BOT_PAT`
 - [x] Coverage-Gate in Pipeline: ≥ 80 % Testabdeckung für allen Go-Code (Backend, CLI,
       Host-Agent) — Frontend ausgenommen; Build bricht bei Unterschreitung
       → `make cover` + `hack/coverage.sh`, lokal und in CI identisch

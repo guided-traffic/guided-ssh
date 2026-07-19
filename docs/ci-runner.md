@@ -1,6 +1,6 @@
 # Self-hosted Runner — Anforderungen
 
-Die CI-Pipeline (`.github/workflows/ci.yml`) läuft vollständig auf self-hosted
+Die CI-Pipeline (`.github/workflows/release.yml` + `build.yml`) läuft vollständig auf self-hosted
 Runnern (`runs-on: self-hosted`). Anforderungen an die Runner-Maschine:
 
 ## Software
@@ -26,8 +26,8 @@ keine feste Go-Installation auf dem Runner nötig.
 
 | Secret | Zweck |
 |---|---|
-| `DOCKERHUB_USERNAME` | Push nach `docker.io/guidedtraffic` |
-| `DOCKERHUB_TOKEN` | Docker-Hub-Access-Token (Scope Read/Write, kein Account-Passwort) |
+| `DOCKERHUB_PAT` | Docker-Hub-Access-Token für Push nach `docker.io/guidedtraffic` (Scope Read/Write, kein Account-Passwort) |
+| `BOT_PAT` | GitHub-PAT für `semantic-release` (Tag + Release erzeugen); nötig, damit das erzeugte Release den Build-Workflow triggert — mit `GITHUB_TOKEN` erzeugte Events starten keine Workflows |
 
 ## Sicherheit
 
