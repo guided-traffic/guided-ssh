@@ -66,7 +66,7 @@ func newTestServer(t *testing.T, fs *fakeStore) *httptest.Server {
 		t.Fatalf("EnsureCAKeys: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(api.New(certAuthority, logger))
+	srv := httptest.NewServer(api.New(api.Deps{CA: certAuthority, Logger: logger}))
 	t.Cleanup(srv.Close)
 	return srv
 }

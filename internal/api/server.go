@@ -1,22 +1,35 @@
 // Package api stellt die HTTP-API des gssh-servers bereit.
-// Phase 2: CA-Bundle-Endpoint und Health-Check; Sign-Endpoints folgen ab Phase 3.
+// Phase 2: CA-Bundle-Endpoint und Health-Check; Phase 3: POST /v1/sign/user
+// (ID-Token rein, SSH-Benutzerzertifikat raus).
 package api
 
 import (
 	"log/slog"
 	"net/http"
 
+	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
+
+// Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier und Store sind
+// optional: ohne sie antwortet der Sign-Endpoint mit 503 (OIDC nicht
+// konfiguriert).
+type Deps struct {
+	CA       *ca.CA
+	Store    auth.Store
+	Verifier TokenVerifier
+	Logger   *slog.Logger
+}
 
 // New baut den HTTP-Handler.
 //
 // Routen:
 //
-//	GET /healthz                  – Liveness
-//	GET /v1/ca/bundle/{purpose}   – CA-Bundle (authorized_keys-Format), purpose: user|host
-func New(certAuthority *ca.CA, logger *slog.Logger) http.Handler {
+//	GET  /healthz                  – Liveness
+//	GET  /v1/ca/bundle/{purpose}   – CA-Bundle (authorized_keys-Format), purpose: user|host
+//	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
+func New(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -30,15 +43,24 @@ func New(certAuthority *ca.CA, logger *slog.Logger) http.Handler {
 			http.Error(w, "unbekannter zweck (erlaubt: user, host)", http.StatusNotFound)
 			return
 		}
-		bundle, err := certAuthority.Bundle(r.Context(), purpose)
+		bundle, err := deps.CA.Bundle(r.Context(), purpose)
 		if err != nil {
-			logger.Error("ca-bundle laden fehlgeschlagen", "purpose", purpose, "error", err)
+			deps.Logger.Error("ca-bundle laden fehlgeschlagen", "purpose", purpose, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(bundle))
 	})
+
+	if deps.Verifier != nil && deps.Store != nil {
+		mux.HandleFunc("POST /v1/sign/user",
+			handleSignUser(deps.CA, deps.Verifier, auth.NewMapper(deps.Store), deps.Logger))
+	} else {
+		mux.HandleFunc("POST /v1/sign/user", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "oidc nicht konfiguriert", http.StatusServiceUnavailable)
+		})
+	}
 
 	return mux
 }

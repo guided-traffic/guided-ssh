@@ -172,13 +172,23 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 3 — Benutzer-Authentifizierung (OIDC/SSO)
 
-- [ ] OIDC-Integration (Authorization Code + PKCE für CLI, Device-Flow als Fallback)
-- [ ] Token-Validierung: Issuer, Audience, Signatur (JWKS-Cache), Ablauf
-- [ ] Claim-Mapping: `sub`/`email`/`groups` → interner User + Principal-Ableitung
-- [ ] Periodischer Gruppen-Sync vom IdP (Group-Claims bzw. Directory-API) → sofortiger
+- [x] OIDC-Integration (Authorization Code + PKCE für CLI, Device-Flow als Fallback)
+      → `internal/auth/flow.go` (x/oauth2; PKCE mit 127.0.0.1-Callback, Device-Flow),
+      CLI-Kommandos selbst folgen in Phase 4 (ADR-015)
+- [x] Token-Validierung: Issuer, Audience, Signatur (JWKS-Cache), Ablauf
+      → `internal/auth/verifier.go` (go-oidc/v3, JWKS-Cache mit Auto-Reload)
+- [x] Claim-Mapping: `sub`/`email`/`groups` → interner User + Principal-Ableitung
+      → `internal/auth/mapper.go`; Principals = Username + E-Mail, Gruppen aus
+      Token-Claims bei jeder Ausstellung; inaktive Benutzer werden abgewiesen
+- [x] Periodischer Gruppen-Sync vom IdP (Group-Claims bzw. Directory-API) → sofortiger
       Entzug wirkt auf Neuausstellung UND Host-ACLs
-- [ ] Endpoint `POST /v1/sign/user`: ID-Token rein, SSH-Zertifikat raus (Policy-geprüft)
-- [ ] Integrationstests gegen Keycloak in Testcontainer
+      → `internal/auth/sync.go` + Keycloak-Admin-API-Source (`keycloak.go`);
+      Env `GSSH_KC_*`, Default-Intervall 5 m; Audit-Events bei De-/Reaktivierung
+- [x] Endpoint `POST /v1/sign/user`: ID-Token rein, SSH-Zertifikat raus (Policy-geprüft)
+      → `internal/api/sign.go` (Bearer-Token, 401/403/400-Fehlerpfade, Default 16 h)
+- [x] Integrationstests gegen Keycloak in Testcontainer
+      → `internal/auth/keycloak_integration_test.go` (Realm-Import; Token-Validierung,
+      Sign-Endpoint inkl. CertChecker gegen CA-Bundle, Gruppen-Entzug, Offboarding)
 
 ## Phase 4 — CLI für Benutzer (`gssh`)
 
