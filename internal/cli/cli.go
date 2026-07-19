@@ -74,7 +74,7 @@ kommandos:
 // loadConfigCmd lädt die Konfiguration für ein Kommando; bei fehlender Datei
 // gibt es zusätzlich einen Hinweis mit Beispielinhalt.
 func loadConfigCmd(flagValue string, stderr io.Writer) (*Config, bool) {
-	path := resolveConfigPath(flagValue)
+	path := ResolveConfigPath(flagValue)
 	if path == "" {
 		fmt.Fprintln(stderr, "gssh: kein konfigurationspfad ermittelbar (HOME nicht gesetzt?)")
 		return nil, false
@@ -137,7 +137,7 @@ func runStatusCmd(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	path := resolveConfigPath(*configPath)
+	path := ResolveConfigPath(*configPath)
 	if cfg, err := LoadConfig(path); err == nil {
 		fmt.Fprintf(stdout, "konfiguration: %s (api %s, issuer %s)\n", path, cfg.APIURL, cfg.Issuer)
 	} else {

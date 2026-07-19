@@ -247,7 +247,7 @@ func TestKeycloakIntegration(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(api.New(api.Deps{
-		CA: certAuthority, Store: st, Verifier: verifier, Logger: logger,
+		CA: certAuthority, Store: st, Grants: st, Verifier: verifier, Logger: logger,
 	}))
 	defer srv.Close()
 
@@ -258,6 +258,28 @@ func TestKeycloakIntegration(t *testing.T) {
 		ClientSecret: kcSyncSecret,
 	})
 	syncer := auth.NewSyncer(st, source, logger)
+
+	// Phase 6: ohne Grant stellt der Server keine Zertifikate aus. Die Gruppe
+	// wird wie über die Admin-API vorab angelegt (der erste Login bzw. Sync
+	// verknüpft Mitglieder); "admins" bekommt einen Grant auf den lokalen
+	// Benutzer deploy (leerer Selektor = alle Hosts).
+	adminsGroup := &store.Group{Issuer: env.issuer, Name: "admins"}
+	if err := st.CreateGroup(ctx, adminsGroup); err != nil {
+		t.Fatalf("gruppe admins anlegen: %v", err)
+	}
+	grant := &store.AccessGrant{
+		GroupID:            adminsGroup.ID,
+		Principals:         []string{"deploy"},
+		MaxValiditySeconds: 16 * 3600,
+	}
+	if err := st.CreateGrant(ctx, "test", grant); err != nil {
+		t.Fatalf("grant anlegen: %v", err)
+	}
+	// Host für die Host-ACL-Prüfungen (AuthorizedPrincipalsCommand-Pfad).
+	host := &store.Host{Name: "web1.example.com"}
+	if err := st.CreateHost(ctx, host); err != nil {
+		t.Fatalf("host anlegen: %v", err)
+	}
 
 	idToken := env.passwordGrant(t, "alice", kcAlicePass)
 
@@ -363,6 +385,15 @@ func TestKeycloakIntegration(t *testing.T) {
 		if len(groups) != 2 {
 			t.Errorf("db-gruppen: %d, erwartet 2", len(groups))
 		}
+
+		// Host-ACL: alice ist über den admins-Grant als deploy berechtigt.
+		principals, err := st.ListAuthorizedPrincipals(ctx, host.ID, "deploy")
+		if err != nil {
+			t.Fatalf("ListAuthorizedPrincipals: %v", err)
+		}
+		if !slices.Contains(principals, "alice") {
+			t.Errorf("host-acl ohne alice: %v", principals)
+		}
 	})
 
 	t.Run("GruppenSyncEntferntGruppe", func(t *testing.T) {
@@ -395,6 +426,27 @@ func TestKeycloakIntegration(t *testing.T) {
 		}
 		if len(dbGroups) != 1 || dbGroups[0].Name != "dev" {
 			t.Errorf("db-gruppen nach sync: %+v, erwartet nur dev", dbGroups)
+		}
+	})
+
+	// E2E Phase 6: Gruppe entfernt (voriger Subtest) ⇒ der nächste Login mit
+	// frischem Token schlägt fehl und die Host-ACL ist aktualisiert.
+	t.Run("GrantEntzugBlockiertAusstellungUndHostACL", func(t *testing.T) {
+		freshToken := env.passwordGrant(t, "alice", kcAlicePass)
+		status, body := signOnce(t, freshToken)
+		if status != http.StatusForbidden {
+			t.Fatalf("sign ohne grant: status %d (erwartet 403): %s", status, body)
+		}
+		if !strings.Contains(string(body), "grants") {
+			t.Errorf("fehlermeldung ohne hinweis auf grants: %s", body)
+		}
+
+		principals, err := st.ListAuthorizedPrincipals(ctx, host.ID, "deploy")
+		if err != nil {
+			t.Fatalf("ListAuthorizedPrincipals: %v", err)
+		}
+		if len(principals) != 0 {
+			t.Errorf("host-acl nicht aktualisiert: %v", principals)
 		}
 	})
 

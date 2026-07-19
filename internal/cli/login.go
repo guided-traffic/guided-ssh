@@ -65,7 +65,7 @@ func login(ctx context.Context, cfg *Config, opts loginOptions, stdout, stderr i
 		return fmt.Errorf("public key konvertieren: %w", err)
 	}
 
-	idToken, err := fetchIDToken(ctx, cfg, opts.device, stderr)
+	idToken, err := FetchIDToken(ctx, cfg, opts.device, stderr)
 	if err != nil {
 		return err
 	}
@@ -91,9 +91,9 @@ func login(ctx context.Context, cfg *Config, opts loginOptions, stdout, stderr i
 	return nil
 }
 
-// fetchIDToken führt den OIDC-Flow aus: Authorization Code + PKCE mit
-// Browser (Default) oder Device-Flow (--device).
-func fetchIDToken(ctx context.Context, cfg *Config, device bool, stderr io.Writer) (string, error) {
+// FetchIDToken führt den OIDC-Flow aus: Authorization Code + PKCE mit
+// Browser (Default) oder Device-Flow (--device); auch von gssh-admin genutzt.
+func FetchIDToken(ctx context.Context, cfg *Config, device bool, stderr io.Writer) (string, error) {
 	flow, err := auth.NewFlow(ctx, auth.FlowConfig{
 		IssuerURL: cfg.Issuer,
 		ClientID:  cfg.ClientID,

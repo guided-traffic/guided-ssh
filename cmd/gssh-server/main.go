@@ -2,7 +2,8 @@
 // Phase 2: CA-Bootstrap (Migrationen, CA-Keys) und CA-Bundle-Endpoint;
 // Phase 3: OIDC-Token-Validierung, POST /v1/sign/user, Gruppen-Sync;
 // Phase 5: Host-Enrollment (POST /v1/enroll), Agent-API hinter mTLS,
-// Subkommando enroll-token.
+// Subkommando enroll-token;
+// Phase 6: Grant-Verwaltung (/v1/admin/grants…, GSSH_ADMIN_GROUP).
 package main
 
 import (
@@ -48,6 +49,9 @@ const (
 
 	// Agent-API (Phase 5): SANs des mTLS-Server-Zertifikats, Komma-getrennt.
 	envAgentTLSNames = "GSSH_AGENT_TLS_NAMES" // Default: localhost,127.0.0.1
+
+	// Admin-API (Phase 6): IdP-Gruppe der Admins; leer ⇒ Admin-API deaktiviert.
+	envAdminGroup = "GSSH_ADMIN_GROUP"
 )
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
@@ -177,10 +181,15 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 	}
 	startGroupSync(ctx, st, logger)
 
+	adminGroup := os.Getenv(envAdminGroup)
+	if adminGroup == "" {
+		logger.Warn("admin-api nicht konfiguriert — grant-verwaltung deaktiviert", "env", envAdminGroup)
+	}
 	server := &http.Server{
 		Addr: listen,
 		Handler: api.New(api.Deps{
-			CA: certAuthority, Store: st, Hosts: st, Verifier: verifier, Logger: logger,
+			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st,
+			Verifier: verifier, Logger: logger, AdminGroup: adminGroup,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

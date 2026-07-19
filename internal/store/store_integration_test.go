@@ -293,7 +293,7 @@ func TestGrantsCRUD(t *testing.T) {
 		Sudo:               true,
 		MaxValiditySeconds: 3600,
 	}
-	mustNoErr(t, testStore.CreateGrant(ctx, grant))
+	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", grant))
 	if grant.MaxValidity() != time.Hour {
 		t.Fatalf("MaxValidity = %v", grant.MaxValidity())
 	}
@@ -304,9 +304,20 @@ func TestGrantsCRUD(t *testing.T) {
 		t.Fatalf("Grant = %+v", got)
 	}
 
+	detailed, err := testStore.GetGrantDetailed(ctx, grant.ID)
+	mustNoErr(t, err)
+	if detailed.GroupName != "deployers" || detailed.GroupIssuer != "idp" {
+		t.Fatalf("GrantDetailed = %+v", detailed)
+	}
+	allDetailed, err := testStore.ListGrantsDetailed(ctx)
+	mustNoErr(t, err)
+	if len(allDetailed) != 1 || allDetailed[0].GroupName != "deployers" {
+		t.Fatalf("ListGrantsDetailed = %+v", allDetailed)
+	}
+
 	grant.Principals = []string{"deploy", "root"}
 	grant.Sudo = false
-	mustNoErr(t, testStore.UpdateGrant(ctx, grant))
+	mustNoErr(t, testStore.UpdateGrant(ctx, "admin:test", grant))
 	if len(grant.Principals) != 2 || grant.Sudo {
 		t.Fatalf("Update nicht übernommen: %+v", grant)
 	}
@@ -330,14 +341,150 @@ func TestGrantsCRUD(t *testing.T) {
 
 	// CHECK-Constraint: Laufzeit muss > 0 sein.
 	bad := &store.AccessGrant{GroupID: g.ID, Principals: []string{"x"}, MaxValiditySeconds: 0}
-	if err := testStore.CreateGrant(ctx, bad); err == nil {
+	if err := testStore.CreateGrant(ctx, "admin:test", bad); err == nil {
 		t.Fatal("CHECK-Verletzung erwartet")
 	}
 
-	mustNoErr(t, testStore.DeleteGrant(ctx, grant.ID))
-	wantNotFound(t, testStore.DeleteGrant(ctx, grant.ID))
+	mustNoErr(t, testStore.DeleteGrant(ctx, "admin:test", grant.ID))
+	wantNotFound(t, testStore.DeleteGrant(ctx, "admin:test", grant.ID))
 	_, err = testStore.GetGrant(ctx, grant.ID)
 	wantNotFound(t, err)
+
+	// Jede Mutation hat ein Audit-Event mit Actor hinterlassen
+	// (created, updated, deleted — der CHECK-Fehler rollte zurück).
+	for _, eventType := range []string{store.EventGrantCreated, store.EventGrantUpdated, store.EventGrantDeleted} {
+		events, err := testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: eventType})
+		mustNoErr(t, err)
+		if len(events) != 1 || events[0].Actor != "admin:test" {
+			t.Errorf("%s: %d Events (actor %s), erwartet 1 von admin:test",
+				eventType, len(events), eventActor(events))
+		}
+	}
+}
+
+// eventActor liefert den Actor des ersten Events (für Fehlermeldungen).
+func eventActor(events []store.AuditEvent) string {
+	if len(events) == 0 {
+		return "<keins>"
+	}
+	return events[0].Actor
+}
+
+func TestListGrantsForUser(t *testing.T) {
+	cleanDB(t)
+	ctx := context.Background()
+
+	alice := &store.User{Issuer: "idp", Subject: "s1", Username: "alice", Email: "alice@example.com", Active: true}
+	mustNoErr(t, testStore.CreateUser(ctx, alice))
+	ops := &store.Group{Issuer: "idp", Name: "ops"}
+	dev := &store.Group{Issuer: "idp", Name: "dev"}
+	mustNoErr(t, testStore.CreateGroup(ctx, ops))
+	mustNoErr(t, testStore.CreateGroup(ctx, dev))
+	mustNoErr(t, testStore.SetUserGroups(ctx, alice.ID, []uuid.UUID{ops.ID}))
+
+	opsGrant := &store.AccessGrant{GroupID: ops.ID, Principals: []string{"deploy"}, MaxValiditySeconds: 3600}
+	devGrant := &store.AccessGrant{GroupID: dev.ID, Principals: []string{"root"}, MaxValiditySeconds: 7200}
+	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", opsGrant))
+	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", devGrant))
+
+	// Nur der Grant der eigenen Gruppe zählt.
+	grants, err := testStore.ListGrantsForUser(ctx, alice.ID)
+	mustNoErr(t, err)
+	if len(grants) != 1 || grants[0].ID != opsGrant.ID {
+		t.Fatalf("grants = %+v, erwartet nur ops-grant", grants)
+	}
+
+	// Gruppen entzogen ⇒ keine Grants mehr.
+	mustNoErr(t, testStore.SetUserGroups(ctx, alice.ID, nil))
+	grants, err = testStore.ListGrantsForUser(ctx, alice.ID)
+	mustNoErr(t, err)
+	if len(grants) != 0 {
+		t.Fatalf("grants nach entzug = %+v, erwartet leer", grants)
+	}
+}
+
+func TestApplyGrants(t *testing.T) {
+	cleanDB(t)
+	ctx := context.Background()
+
+	// Bestand: zwei Grants für ops (einer bleibt, einer fällt weg).
+	ops := &store.Group{Issuer: "idp", Name: "ops"}
+	mustNoErr(t, testStore.CreateGroup(ctx, ops))
+	keep := &store.AccessGrant{
+		GroupID: ops.ID, TagSelector: map[string]string{"env": "prod"},
+		Principals: []string{"deploy"}, MaxValiditySeconds: 3600,
+	}
+	drop := &store.AccessGrant{
+		GroupID: ops.ID, TagSelector: map[string]string{"env": "dev"},
+		Principals: []string{"deploy"}, MaxValiditySeconds: 3600,
+	}
+	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", keep))
+	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", drop))
+
+	result, err := testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
+		{ // identisch ⇒ unchanged
+			Group: "ops", TagSelector: map[string]string{"env": "prod"},
+			Principals: []string{"deploy"}, MaxValiditySeconds: 3600,
+		},
+		{ // neue Gruppe wird angelegt ⇒ created
+			Group: "auditors", Principals: []string{"audit"}, MaxValiditySeconds: 7200,
+		},
+	})
+	mustNoErr(t, err)
+	if result.Created != 1 || result.Updated != 0 || result.Deleted != 1 || result.Unchanged != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := testStore.GetGrant(ctx, drop.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("nicht deklarierter grant existiert noch (err=%v)", err)
+	}
+	if _, err := testStore.GetGroupByName(ctx, "idp", "auditors"); err != nil {
+		t.Errorf("gruppe auditors nicht angelegt: %v", err)
+	}
+
+	// Zweiter Lauf mit geänderten Feldern ⇒ updated, Rest unchanged.
+	result, err = testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
+		{
+			Group: "ops", TagSelector: map[string]string{"env": "prod"},
+			Principals: []string{"deploy", "root"}, Sudo: true, MaxValiditySeconds: 3600,
+		},
+		{Group: "auditors", Principals: []string{"audit"}, MaxValiditySeconds: 7200},
+	})
+	mustNoErr(t, err)
+	if result.Created != 0 || result.Updated != 1 || result.Deleted != 0 || result.Unchanged != 1 {
+		t.Fatalf("zweiter lauf: result = %+v", result)
+	}
+	updated, err := testStore.GetGrant(ctx, keep.ID)
+	mustNoErr(t, err)
+	if !updated.Sudo || len(updated.Principals) != 2 {
+		t.Fatalf("update nicht übernommen: %+v", updated)
+	}
+
+	// Leere Liste räumt alles ab.
+	result, err = testStore.ApplyGrants(ctx, "admin:test", "idp", nil)
+	mustNoErr(t, err)
+	if result.Deleted != 2 {
+		t.Fatalf("leerer zielzustand: result = %+v", result)
+	}
+	remaining, err := testStore.ListGrants(ctx)
+	mustNoErr(t, err)
+	if len(remaining) != 0 {
+		t.Fatalf("%d grants übrig", len(remaining))
+	}
+
+	// Ungültige Specs brechen transaktional ab.
+	_, err = testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
+		{Group: "ops", Principals: nil, MaxValiditySeconds: 3600},
+	})
+	if !errors.Is(err, store.ErrInvalidGrantSpec) {
+		t.Fatalf("ErrInvalidGrantSpec erwartet, bekommen: %v", err)
+	}
+	_, err = testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
+		{Group: "ops", Principals: []string{"deploy"}, MaxValiditySeconds: 3600},
+		{Group: "ops", Principals: []string{"root"}, MaxValiditySeconds: 3600},
+	})
+	if !errors.Is(err, store.ErrInvalidGrantSpec) {
+		t.Fatalf("doppelter schlüssel: ErrInvalidGrantSpec erwartet, bekommen: %v", err)
+	}
 }
 
 func TestCAKeys(t *testing.T) {

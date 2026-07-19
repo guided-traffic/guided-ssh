@@ -40,8 +40,10 @@ func (c *Claims) Username() string {
 	return c.Subject
 }
 
-// Principals sind die SSH-Principals des Benutzers (Username, E-Mail);
-// die Grant-basierte Ableitung zusätzlicher Principals folgt in Phase 6.
+// Principals sind die SSH-Principals des Benutzers (Username, E-Mail).
+// Zertifikate tragen bewusst nur diese Identitäts-Principals — welche
+// lokalen Benutzer sie erreichen, entscheiden die Grants auf dem Host
+// (ADR-018); Grants steuern bei der Ausstellung nur ob und wie lange.
 func (c *Claims) Principals() []string {
 	principals := []string{c.Username()}
 	if c.Email != "" && c.Email != principals[0] {

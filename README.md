@@ -13,12 +13,12 @@ Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 
 | Pfad | Inhalt |
 |---|---|
-| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI), `gssh-agentd` (Host-Agent); später `gssh-admin` |
+| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI), `gssh-agentd` (Host-Agent), `gssh-admin` (Admin-CLI) |
 | `internal/` | Go-Pakete (nicht öffentlich importierbar) |
 | `api/` | OpenAPI-Spezifikation — Single Source of Truth der REST-API (ab Phase 8) |
 | `web/` | Angular-Frontend, eingebettet ins Go-Binary (ab Phase 8) |
 | `deploy/helm/` | Helm-Chart (ab Phase 11) |
-| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
+| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
 | `hack/` | Hilfsskripte für Build und CI |
 
 ## gssh-server
@@ -42,6 +42,7 @@ Konfiguration über Umgebungsvariablen:
 | `GSSH_DB_DSN` | PostgreSQL-DSN, z. B. `postgres://user:pass@host:5432/db` |
 | `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`) |
 | `GSSH_AGENT_TLS_NAMES` | SANs des mTLS-Server-Zertifikats der Agent-API (Komma-getrennt; Default `localhost,127.0.0.1`) |
+| `GSSH_ADMIN_GROUP` | IdP-Gruppe, deren Mitglieder die Admin-API (`/v1/admin/…`) nutzen dürfen; leer ⇒ Admin-API deaktiviert |
 
 Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
 
@@ -94,6 +95,25 @@ Transparente Integration in natives `ssh` (`gssh integrate >> ~/.ssh/config`):
 ```
 Match host "*.example.com" exec "gssh login --if-needed"
 ```
+
+## gssh-admin (Admin-CLI)
+
+Verwaltet die Zugriffsregeln (Grants) über die Admin-API
+([docs/grants.md](docs/grants.md), [ADR-018](docs/adr/018-grants-additiv.md)).
+Nutzt dieselbe Konfigurationsdatei wie `gssh`; Voraussetzung serverseitig:
+`GSSH_ADMIN_GROUP`.
+
+```sh
+gssh-admin grant list
+gssh-admin grant create --group deployers --tags env=prod \
+    --principals deploy --max-validity 8h
+gssh-admin grant update <id> --principals deploy,root
+gssh-admin grant delete <id>
+gssh-admin apply -f grants.yaml   # deklarativer Vollabgleich (GitOps)
+```
+
+Authentifizierung: OIDC wie `gssh` (Browser bzw. `--device`), alternativ
+fertiges ID-Token via `--token` oder `GSSH_ID_TOKEN` (CI).
 
 ## gssh-agentd (Host-Agent)
 

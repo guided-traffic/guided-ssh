@@ -65,9 +65,9 @@ func DefaultConfigPath() string {
 	return filepath.Join(base, "guided-ssh", "config.yaml")
 }
 
-// resolveConfigPath löst den Konfigurationspfad auf: Flag vor GSSH_CONFIG
-// vor Standardpfad.
-func resolveConfigPath(flagValue string) string {
+// ResolveConfigPath löst den Konfigurationspfad auf: Flag vor GSSH_CONFIG
+// vor Standardpfad (auch von gssh-admin genutzt).
+func ResolveConfigPath(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
 	}
@@ -100,14 +100,14 @@ func LoadConfig(path string) (*Config, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("konfiguration %s: pflichtfelder fehlen: %s", path, strings.Join(missing, ", "))
 	}
-	if _, err := cfg.pin(); err != nil {
+	if _, err := cfg.Pin(); err != nil {
 		return nil, fmt.Errorf("konfiguration %s: %w", path, err)
 	}
 	return &cfg, nil
 }
 
-// pin dekodiert den gepinnten SPKI-Fingerprint (nil = kein Pinning).
-func (c *Config) pin() ([]byte, error) {
+// Pin dekodiert den gepinnten SPKI-Fingerprint (nil = kein Pinning).
+func (c *Config) Pin() ([]byte, error) {
 	if c.PinSHA256 == "" {
 		return nil, nil
 	}

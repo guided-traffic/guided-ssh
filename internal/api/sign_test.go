@@ -42,12 +42,16 @@ func (f *fakeVerifier) Verify(_ context.Context, rawToken string) (*auth.Claims,
 
 // fakeAuthStore ist ein minimaler In-Memory-Store für den Sign-Endpoint
 // (auth.Store-Anteil; der CA-Anteil kommt aus fakeStore in server_test.go).
+// Als GrantSource liefert er standardmäßig einen Grant mit 16 h Maximum;
+// noGrants bzw. grantMaxSeconds steuern die Phase-6-Fälle.
 type fakeAuthStore struct {
 	fakeStore
-	users        map[uuid.UUID]*store.User
-	groups       map[uuid.UUID]*store.Group
-	userGroups   map[uuid.UUID][]uuid.UUID
-	mappingError error
+	users           map[uuid.UUID]*store.User
+	groups          map[uuid.UUID]*store.Group
+	userGroups      map[uuid.UUID][]uuid.UUID
+	mappingError    error
+	noGrants        bool
+	grantMaxSeconds int64
 }
 
 func newFakeAuthStore() *fakeAuthStore {
@@ -108,6 +112,20 @@ func (f *fakeAuthStore) CreateGroup(_ context.Context, g *store.Group) error {
 	return nil
 }
 
+func (f *fakeAuthStore) ListGrantsForUser(_ context.Context, _ uuid.UUID) ([]store.AccessGrant, error) {
+	if f.noGrants {
+		return nil, nil
+	}
+	maxSeconds := f.grantMaxSeconds
+	if maxSeconds == 0 {
+		maxSeconds = 16 * 3600
+	}
+	return []store.AccessGrant{{
+		ID: uuid.New(), GroupID: uuid.New(),
+		Principals: []string{"deploy"}, MaxValiditySeconds: maxSeconds,
+	}}, nil
+}
+
 const testToken = "gueltiges-test-token" //#nosec G101 -- Testwert, kein Credential
 
 func testClaims() *auth.Claims {
@@ -133,7 +151,7 @@ func newSignServer(t *testing.T, fs *fakeAuthStore, verifier api.TokenVerifier) 
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(api.New(api.Deps{
-		CA: certAuthority, Store: fs, Verifier: verifier, Logger: logger,
+		CA: certAuthority, Store: fs, Grants: fs, Verifier: verifier, Logger: logger,
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -252,6 +270,9 @@ func TestSignUserDefaultLaufzeit(t *testing.T) {
 
 func TestSignUserFehlerfaelle(t *testing.T) {
 	fs := newFakeAuthStore()
+	// Grant erlaubt 24 h, damit die Policy (16 h) und nicht der Grant die
+	// überlange Anfrage ablehnt.
+	fs.grantMaxSeconds = 24 * 3600
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 	validKey := testPublicKey(t)
 
@@ -273,6 +294,44 @@ func TestSignUserFehlerfaelle(t *testing.T) {
 		if status, body := postSign(t, srv.URL, c.token, c.body); status != c.wantStatus {
 			t.Errorf("%s: status %d (erwartet %d): %s", c.name, status, c.wantStatus, body)
 		}
+	}
+}
+
+func TestSignUserOhneGrantAbgelehnt(t *testing.T) {
+	fs := newFakeAuthStore()
+	fs.noGrants = true
+	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
+
+	status, body := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)})
+	if status != http.StatusForbidden {
+		t.Fatalf("ohne grant: status %d (erwartet 403): %s", status, body)
+	}
+	if !strings.Contains(string(body), "grants") {
+		t.Errorf("fehlermeldung ohne hinweis auf grants: %s", body)
+	}
+}
+
+func TestSignUserLaufzeitDurchGrantGedeckelt(t *testing.T) {
+	fs := newFakeAuthStore()
+	fs.grantMaxSeconds = 3600 // Grant erlaubt maximal 1 h
+	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
+
+	// Anfrage über dem Grant-Maximum wird gekappt statt abgelehnt.
+	status, body := postSign(t, srv.URL, testToken, map[string]any{
+		"public_key": testPublicKey(t), "validity_seconds": 8 * 3600,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	var resp struct {
+		ValidAfter  time.Time `json:"valid_after"`
+		ValidBefore time.Time `json:"valid_before"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("antwort dekodieren: %v", err)
+	}
+	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime != time.Hour {
+		t.Errorf("laufzeit %s, erwartet 1h (grant-maximum)", lifetime)
 	}
 }
 

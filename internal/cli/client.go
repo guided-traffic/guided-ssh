@@ -27,7 +27,7 @@ type apiClient struct {
 // Hostname-Prüfung entfallen bewusst (der Pin ersetzt das CA-Vertrauen und
 // deckt damit auch selbstsignierte Deployments ab).
 func newAPIClient(cfg *Config) (*apiClient, error) {
-	pin, err := cfg.pin()
+	pin, err := cfg.Pin()
 	if err != nil {
 		return nil, err
 	}

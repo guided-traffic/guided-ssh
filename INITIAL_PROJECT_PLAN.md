@@ -242,15 +242,28 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 6 — Zugriffssteuerung (Grants)
 
-- [ ] Grant-Modell umsetzen: IdP-Gruppe × Tag-Selektor → Ziel-Principals (z. B. `deploy`,
+- [x] Grant-Modell umsetzen: IdP-Gruppe × Tag-Selektor → Ziel-Principals (z. B. `deploy`,
       `root`), sudo ja/nein, maximale Zertifikatslaufzeit
-- [ ] Auswertung an zwei Stellen: bei Zertifikatsausstellung (welche Principals bekommt
+      → `access_grants` (Schema Phase 1) + `internal/store/grants.go`; jede Mutation
+      schreibt transaktional ein Audit-Event (`grant.created/updated/deleted`) mit Actor
+- [x] Auswertung an zwei Stellen: bei Zertifikatsausstellung (welche Principals bekommt
       der Requester) und auf dem Host (welche Principals akzeptiert dieser lokale User)
-- [ ] Grant-Verwaltung: CRUD via API + CLI (`gssh-admin grant …`); deklarativer
+      → Ausstellung: ohne Grant kein Zertifikat (403), Laufzeit = min(Anfrage, Maximum
+      über Grants); Principals bleiben Identitäts-Principals (ADR-018). Host:
+      `ListAuthorizedPrincipals` (Selektor ⊆ Host-Tags, aktive Gruppenmitglieder)
+- [x] Grant-Verwaltung: CRUD via API + CLI (`gssh-admin grant …`); deklarativer
       YAML-Import (`gssh-admin apply -f grants.yaml`) für GitOps-Pflege der Zugriffsregeln
-- [ ] Konfliktregeln definieren (deny gibt es nicht — nur additive Grants, dokumentieren)
-- [ ] Bastion-Muster dokumentieren (ProxyJump, Grants für Bastion + Ziel getrennt)
-- [ ] E2E-Test: Gruppe entfernen → nächster Login schlägt fehl, Host-ACL aktualisiert
+      → `/v1/admin/grants…` (OIDC + `GSSH_ADMIN_GROUP`, fail-closed) +
+      `cmd/gssh-admin`/`internal/admincli`; Apply = Vollabgleich über
+      (Issuer, Gruppe, Tag-Selektor), Token via OIDC-Flow oder `GSSH_ID_TOKEN`
+- [x] Konfliktregeln definieren (deny gibt es nicht — nur additive Grants, dokumentieren)
+      → ADR-018 + `docs/grants.md`: Vereinigung der Wirkungen, Laufzeit = Maximum,
+      sudo = oder; Entzug nur über Grant-/Gruppenentfernung
+- [x] Bastion-Muster dokumentieren (ProxyJump, Grants für Bastion + Ziel getrennt)
+      → `docs/grants.md` (eigene Tags/Grants pro Hop, ProxyJump ohne Agent-Forwarding)
+- [x] E2E-Test: Gruppe entfernen → nächster Login schlägt fehl, Host-ACL aktualisiert
+      → `keycloak_integration_test.go`: Grant auf „admins“, Sign ok + Host-ACL enthält
+      alice; nach Gruppen-Entzug + Sync: frisches Token ⇒ 403, Host-ACL leer
 
 ## Phase 7 — GitLab-CI-Integration (Kernanforderung)
 

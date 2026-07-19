@@ -33,7 +33,7 @@ validity: 8h
 	if time.Duration(cfg.Validity) != 8*time.Hour {
 		t.Errorf("validity = %v, erwartet 8h", time.Duration(cfg.Validity))
 	}
-	decoded, err := cfg.pin()
+	decoded, err := cfg.Pin()
 	if err != nil || len(decoded) != sha256.Size {
 		t.Errorf("pin() = %v, %v", decoded, err)
 	}
@@ -102,14 +102,14 @@ func TestDefaultConfigPathHome(t *testing.T) {
 
 func TestResolveConfigPath(t *testing.T) {
 	t.Setenv(envConfig, "/env/config.yaml")
-	if got := resolveConfigPath("/flag/config.yaml"); got != "/flag/config.yaml" {
+	if got := ResolveConfigPath("/flag/config.yaml"); got != "/flag/config.yaml" {
 		t.Errorf("flag muss gewinnen, bekam %q", got)
 	}
-	if got := resolveConfigPath(""); got != "/env/config.yaml" {
+	if got := ResolveConfigPath(""); got != "/env/config.yaml" {
 		t.Errorf("env muss vor default kommen, bekam %q", got)
 	}
 	t.Setenv(envConfig, "")
-	if got := resolveConfigPath(""); !strings.HasSuffix(got, "config.yaml") {
+	if got := ResolveConfigPath(""); !strings.HasSuffix(got, "config.yaml") {
 		t.Errorf("default-pfad fehlt, bekam %q", got)
 	}
 }

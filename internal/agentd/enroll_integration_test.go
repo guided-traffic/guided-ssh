@@ -141,7 +141,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		GroupID: ops.ID, TagSelector: map[string]string{"env": "prod"},
 		Principals: []string{"alice", "deploy"}, MaxValiditySeconds: 3600,
 	}
-	if err := st.CreateGrant(ctx, grant); err != nil {
+	if err := st.CreateGrant(ctx, "test", grant); err != nil {
 		t.Fatal(err)
 	}
 

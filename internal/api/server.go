@@ -12,15 +12,21 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier und Store sind
-// optional: ohne sie antwortet der Sign-Endpoint mit 503 (OIDC nicht
-// konfiguriert). Ohne Hosts bleibt das Enrollment deaktiviert (Tests).
+// Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier, Store und Grants
+// sind optional: ohne sie antwortet der Sign-Endpoint mit 503 (OIDC nicht
+// konfiguriert). Ohne Hosts bleibt das Enrollment deaktiviert (Tests); ohne
+// Admin/AdminGroup antwortet die Admin-API mit 503.
 type Deps struct {
 	CA       *ca.CA
 	Store    auth.Store
 	Hosts    HostStore
+	Grants   GrantSource
+	Admin    AdminStore
 	Verifier TokenVerifier
 	Logger   *slog.Logger
+	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API nutzen
+	// dürfen; leer ⇒ Admin-API deaktiviert (fail-closed).
+	AdminGroup string
 }
 
 // New baut den HTTP-Handler.
@@ -31,6 +37,8 @@ type Deps struct {
 //	GET  /v1/ca/bundle/{purpose}   – CA-Bundle (authorized_keys-Format), purpose: user|host
 //	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
 //	POST /v1/enroll                – Host-Enrollment gegen einmaliges Token
+//	/v1/admin/grants…              – Grant-Verwaltung (CRUD + deklaratives Apply),
+//	                                 nur für Mitglieder der Admin-Gruppe
 //
 // Die Agent-Endpunkte (/v1/agent/…) liegen im separaten mTLS-Handler, siehe NewAgent.
 func New(deps Deps) http.Handler {
@@ -61,14 +69,16 @@ func New(deps Deps) http.Handler {
 		mux.HandleFunc("POST /v1/enroll", handleEnroll(deps.CA, deps.Hosts, deps.Logger))
 	}
 
-	if deps.Verifier != nil && deps.Store != nil {
+	if deps.Verifier != nil && deps.Store != nil && deps.Grants != nil {
 		mux.HandleFunc("POST /v1/sign/user",
-			handleSignUser(deps.CA, deps.Verifier, auth.NewMapper(deps.Store), deps.Logger))
+			handleSignUser(deps.CA, deps.Verifier, auth.NewMapper(deps.Store), deps.Grants, deps.Logger))
 	} else {
 		mux.HandleFunc("POST /v1/sign/user", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "oidc nicht konfiguriert", http.StatusServiceUnavailable)
 		})
 	}
+
+	registerAdminRoutes(mux, deps)
 
 	return mux
 }

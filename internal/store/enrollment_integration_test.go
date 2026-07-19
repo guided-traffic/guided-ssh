@@ -136,7 +136,7 @@ func TestListAuthorizedPrincipals(t *testing.T) {
 		GroupID: ops.ID, TagSelector: map[string]string{"env": "prod"},
 		Principals: []string{"deploy"}, MaxValiditySeconds: 3600,
 	}
-	mustNoErr(t, testStore.CreateGrant(ctx, grant))
+	mustNoErr(t, testStore.CreateGrant(ctx, "test", grant))
 
 	// alice (aktiv) berechtigt, bob (inaktiv) nicht.
 	principals, err := testStore.ListAuthorizedPrincipals(ctx, host.ID, "deploy")
@@ -168,7 +168,7 @@ func TestListAuthorizedPrincipals(t *testing.T) {
 		GroupID: ops.ID, TagSelector: map[string]string{},
 		Principals: []string{"root"}, MaxValiditySeconds: 3600,
 	}
-	mustNoErr(t, testStore.CreateGrant(ctx, all))
+	mustNoErr(t, testStore.CreateGrant(ctx, "test", all))
 	principals, err = testStore.ListAuthorizedPrincipals(ctx, devHost.ID, "root")
 	mustNoErr(t, err)
 	if len(principals) != 2 {

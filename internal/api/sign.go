@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/guided-traffic/guided-ssh/internal/auth"
@@ -20,6 +21,12 @@ import (
 // Tests nutzen einen Fake).
 type TokenVerifier interface {
 	Verify(ctx context.Context, rawToken string) (*auth.Claims, error)
+}
+
+// GrantSource liefert die Zugriffsregeln eines Benutzers (Phase 6;
+// *store.Store erfüllt das Interface, Tests nutzen einen Fake).
+type GrantSource interface {
+	ListGrantsForUser(ctx context.Context, userID uuid.UUID) ([]store.AccessGrant, error)
 }
 
 // signUserRequest ist der Body von POST /v1/sign/user.
@@ -48,8 +55,7 @@ const defaultUserValidity = 16 * time.Hour
 // bleibt unter dem Policy-Limit von 5 Minuten.
 const signBackdate = time.Minute
 
-// userExtensions sind die Standard-Extensions von Benutzer-Zertifikaten;
-// feinere Steuerung pro Grant folgt in Phase 6.
+// userExtensions sind die Standard-Extensions von Benutzer-Zertifikaten.
 func userExtensions() map[string]string {
 	return map[string]string{
 		"permit-X11-forwarding":   "",
@@ -62,8 +68,13 @@ func userExtensions() map[string]string {
 
 // handleSignUser tauscht ein validiertes ID-Token gegen ein kurzlebiges
 // SSH-Benutzerzertifikat: Token prüfen, Claims auf Benutzer/Gruppen mappen
-// (inkl. Aktiv-Check), Policy-geprüft signieren, Audit transaktional.
-func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.Mapper, logger *slog.Logger) http.HandlerFunc {
+// (inkl. Aktiv-Check), Grants auswerten (ohne Grant kein Zertifikat, Laufzeit
+// gedeckelt), Policy-geprüft signieren, Audit transaktional.
+//
+// Die Zertifikats-Principals bleiben Identitäts-Principals (Username,
+// E-Mail) — welche lokalen Benutzer sie auf einem Host erreichen, entscheidet
+// der Host über AuthorizedPrincipalsCommand anhand der Grants (ADR-018).
+func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.Mapper, grants GrantSource, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rawToken, ok := bearerToken(r)
 		if !ok {
@@ -103,9 +114,26 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 			return
 		}
 
+		userGrants, err := grants.ListGrantsForUser(r.Context(), user.ID)
+		if err != nil {
+			logger.Error("sign/user: grants laden fehlgeschlagen", "subject", claims.Subject, "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if len(userGrants) == 0 {
+			logger.Info("sign/user: keine grants", "subject", claims.Subject, "groups", claims.Groups)
+			http.Error(w, "keine zugriffsregeln (grants) für diesen benutzer — zertifikat wird nicht ausgestellt", http.StatusForbidden)
+			return
+		}
+
 		validity := defaultUserValidity
 		if req.ValiditySeconds > 0 {
 			validity = time.Duration(req.ValiditySeconds) * time.Second
+		}
+		// Grants sind additiv: es gilt die höchste erlaubte Laufzeit über alle
+		// Grants des Benutzers; eine höhere Anfrage wird gekappt (ADR-018).
+		if allowed := maxGrantValidity(userGrants); validity > allowed {
+			validity = allowed
 		}
 		// Laufzeit zählt ab dem rückdatierten ValidAfter, damit die
 		// Gesamtlaufzeit exakt der angeforderten entspricht (Policy-Maximum).
@@ -150,6 +178,18 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 			ValidBefore: record.ValidBefore,
 		})
 	}
+}
+
+// maxGrantValidity liefert die höchste maximale Laufzeit über alle Grants
+// (additive Semantik: jeder Grant berechtigt unabhängig bis zu seinem Maximum).
+func maxGrantValidity(grants []store.AccessGrant) time.Duration {
+	var allowed time.Duration
+	for _, g := range grants {
+		if v := g.MaxValidity(); v > allowed {
+			allowed = v
+		}
+	}
+	return allowed
 }
 
 // bearerToken extrahiert das Bearer-Token aus dem Authorization-Header.
