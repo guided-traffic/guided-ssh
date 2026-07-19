@@ -281,13 +281,18 @@ func (e *env) deployInfra() {
 // deployServer installiert das produktive Helm-Chart mit E2E-Werten.
 func (e *env) deployServer() {
 	e.t.Helper()
+	chart := filepath.Join(e.repoRoot, "deploy/helm/guided-ssh")
+	// charts/ ist nicht eingecheckt (.gitignore); das postgresql-Subchart muss
+	// gemäß Chart.lock nachgeladen werden, sonst scheitert der Install.
+	if out, err := run("", "", "helm", "dependency", "build", chart); err != nil {
+		e.t.Fatalf("helm dependency build: %v\n%s", err, out)
+	}
 	values := filepath.Join(e.tmp, "values-e2e.yaml")
 	if err := os.WriteFile(values, []byte(render(helmValues, map[string]string{"NS": e.ns})), 0o644); err != nil {
 		e.t.Fatal(err)
 	}
 	out, err := run("", "", "helm", "--kube-context", e.context(),
-		"upgrade", "--install", "guided-ssh",
-		filepath.Join(e.repoRoot, "deploy/helm/guided-ssh"),
+		"upgrade", "--install", "guided-ssh", chart,
 		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m")
 	if err != nil {
 		e.t.Fatalf("helm install: %v\n%s", err, out)
