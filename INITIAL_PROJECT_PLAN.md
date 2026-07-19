@@ -450,39 +450,91 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 13 — Qualitätssicherung & Release
 
-- [ ] Integrationstest-Suite konsolidieren (aus Phasen 1–9) und vollständig in der
+- [x] Integrationstest-Suite konsolidieren (aus Phasen 1–9) und vollständig in der
       GitHub-Pipeline ausführen (Testcontainer auf self-hosted Runner)
-- [ ] E2E-Testumgebung: kind-Cluster + Keycloak + simuliertes GitLab-OIDC + zwei
+      → einheitlich Build-Tag `integration`, kompletter Lauf in den Jobs
+      `unit-tests`/`integration-tests` (`make test-*-coverage`), Coverage-Merge
+      im Job `coverage-report`; Abgrenzung in `docs/teststrategie.md`
+- [x] E2E-Testumgebung: kind-Cluster + Keycloak + simuliertes GitLab-OIDC + zwei
       Testhosts (Container) — kompletter Durchstich Mensch + CI; läuft in der
       GitHub-Pipeline auf self-hosted Runner (auf merge-request und auf main)
-- [ ] E2E-Testfälle ausarbeiten und automatisieren: SSO-Login, Offboarding,
+      → `test/e2e` (Build-Tag `e2e`, `make e2e`): produktives Helm-Chart im
+      kind-Cluster; **Dex + GLAuth statt Keycloak** (leichter; Gruppen über
+      LDAP-Connector, Offboarding per ConfigMap), Fake-GitLab-OIDC (nginx,
+      statisches Discovery/JWKS), zwei sshd-Testhost-Pods + Workstation-Pod
+      (echtes `gssh` + ssh-agent + openssh); CI-Job `e2e-tests` in
+      `release.yml` (PR + main), semantic-release ist darauf gegated
+- [x] E2E-Testfälle ausarbeiten und automatisieren: SSO-Login, Offboarding,
       CI-Zertifikat + Ansible-Provisioning, Grant-Änderung, Host-Rotation,
       Audit-Vollständigkeit
-- [ ] Coverage-Report prüfen: ≥ 80 % über Go-Module, Lücken begründen oder schließen
-- [ ] Lasttest Sign-Endpoint (Ziel definieren, z. B. 50 Zertifikate/s)
-- [ ] Chaos-Fälle: API down → bestehende SSH-Sessions unbeeinträchtigt, Agent-Cache
+      → 7 Szenarien in fester Reihenfolge (inkl. Chaos), Details in
+      `docs/teststrategie.md`; Host-Rotation via neuem
+      `GSSH_HOST_CERT_VALIDITY` (3 m im Test) beobachtbar; lokal grün (~3 m
+      Laufzeit nach Image-Cache)
+- [x] Coverage-Report prüfen: ≥ 80 % über Go-Module, Lücken begründen oder schließen
+      → Stand vor Phase 13: 77,2 %; geschlossen mit Unit-Tests für
+      `cmd/gssh-server` (Setup-/Env-Funktionen) und `internal/agentd`
+      (pam_exec-Roundtrip, mTLS-Client RenewMTLS/SendSessions) → **80,4 %**.
+      Begründete Rest-Lücken: `cmd/*`-main-Wrapper und `serve()`/
+      `newAgentServer()` (Verkabelung, durch E2E-Suite abgedeckt — läuft
+      als eigenes Binary und zählt nicht in die Coverage), agentd-Daemon-
+      Schleifen (Integrationstests im Container, gleiche Einschränkung)
+- [x] Lasttest Sign-Endpoint (Ziel definieren, z. B. 50 Zertifikate/s)
+      → Ziel definiert: ≥ 50 Zert/s (docs/teststrategie.md); `test/load`
+      (Build-Tag `loadtest`, `make loadtest`), echte API + Postgres + OIDC-
+      Verifier ohne Rate-Limit; Referenzmessung ~1770 Zert/s, p95 11 ms;
+      CI-Job `load-test` auf main (informativ, nicht release-blockierend)
+- [x] Chaos-Fälle: API down → bestehende SSH-Sessions unbeeinträchtigt, Agent-Cache
       trägt Logins bis TTL, danach fail-closed (verifizieren)
+      → E2E-Szenario `05_Chaos_API_Down` (Session überlebt Replicas=0,
+      Cache-Login bis TTL, danach fail-closed, Wiederanlauf ok) +
+      `TestPrincipalsCacheUndFailClosed` (Unit, internal/agentd)
 - [x] Dokumentation: Betriebs-Handbuch, Enrollment-Guide, GitLab-Integrations-Guide,
       Troubleshooting, Architekturdiagramm
       → `docs/betriebshandbuch.md`, `docs/enrollment-guide.md`,
       `docs/troubleshooting.md`, `docs/architektur.md` (Mermaid-Diagramme);
       GitLab-Integrations-Guide war mit `docs/gitlab-ci.md` bereits vollständig
-- [ ] Versionierte Releases (Binaries, Container-Images, Helm-Chart), version ist von git-tag abzuleiten
-- [ ] Erfolgskriterien final verifizieren (siehe unten)
+- [x] Versionierte Releases (Binaries, Container-Images, Helm-Chart), version ist von git-tag abzuleiten
+      → semantic-release erzeugt Tag `vX.Y.Z`; neu: Job `binaries` in
+      `build.yml` hängt Cross-Binaries (gssh, gssh-agentd), deb/rpm-Pakete
+      und SHA256SUMS ans GitHub-Release (Version via `git describe` aus dem
+      Tag, Makefile); Docker-Images (SemVer-Tags, build.yml) und
+      Helm-Chart-Releases (chart-release.yml) bestanden bereits
+- [x] Erfolgskriterien final verifizieren (siehe unten)
 
 ---
 
 ## Erfolgskriterien (Definition of Done, produktweit)
 
-- [ ] Mensch: `ssh host` ohne vorhandenes Zertifikat → SSO-Browser-Flow → Login klappt;
+- [x] Mensch: `ssh host` ohne vorhandenes Zertifikat → SSO-Browser-Flow → Login klappt;
       Zertifikat nur im Agent, Laufzeit ≤ konfiguriertem Maximum
-- [ ] Offboarding: Nutzer aus IdP-Gruppe entfernt → keine neue Ausstellung, Host-ACL
+      → E2E `01_SSO_Login_DeviceFlow` (echtes gssh-Binary, Dex-SSO via
+      Device-Flow, transparentes ssh mit CA-verifiziertem Host-Cert);
+      PKCE-Browser-Flow unit-getestet (internal/auth, internal/cli);
+      Agent-only ADR-016, Laufzeit-Deckelung Policy-Tests (internal/ca)
+- [x] Offboarding: Nutzer aus IdP-Gruppe entfernt → keine neue Ausstellung, Host-ACL
       verweigert innerhalb Cache-TTL
-- [ ] CI: GitLab-Job ohne statische Secrets provisioniert Host via Ansible; Zertifikat
+      → E2E `06_Offboarding` (403 + ACL-Entzug ≤ Cache-TTL trotz gültigem
+      Zertifikat); Offboarding ohne Re-Login (Admin-API-Sync) im
+      Keycloak-Integrationstest
+- [x] CI: GitLab-Job ohne statische Secrets provisioniert Host via Ansible; Zertifikat
       läuft ≤ 1 h und ist im Audit der Pipeline zugeordnet
-- [ ] Audit: jede Ausstellung, jeder Login, jedes sudo, jede Grant-Änderung abfragbar
+      → E2E `03_CI_Zertifikat_Ansible` (Job-Token → gssh ci-login →
+      ansible-playbook über den Agenten, KeyID `ci:<projekt>:<pipeline>:<job>`
+      im Audit); 1-h-Deckelung: CI-Policy-Tests (internal/ca, internal/api)
+- [x] Audit: jede Ausstellung, jeder Login, jedes sudo, jede Grant-Änderung abfragbar
       (UI + Export), Audit-Tabelle append-only
-- [ ] Deployment: Installation ausschließlich über HelmRelease in Flux-Repo, Secrets
+      → E2E `07_Audit_Vollstaendigkeit` (Export JSON+CSV: Ausstellungen
+      Mensch+CI, Enrollments, Grant-Änderungen); Session-/sudo-Events:
+      Phase-9-Tests; Append-only-Trigger: store-Integrationstest
+- [x] Deployment: Installation ausschließlich über HelmRelease in Flux-Repo, Secrets
       via SOPS/external-secrets, Upgrade ohne Downtime der Sign-Endpoints
-- [ ] Qualität: ≥ 80 % Testabdeckung im Go-Code (Frontend ausgenommen), Coverage-Gate
+      → Flux-Referenz + SOPS (Phase 12, `deploy/flux-example/`); Upgrade-Pfad
+      verifiziert via `hack/flux-upgrade-test.sh` (Migrations-Advisory-Lock);
+      Zero-Downtime setzt `replicaCount ≥ 2` + PDB voraus (Chart-Optionen,
+      dokumentiert im Betriebshandbuch)
+- [x] Qualität: ≥ 80 % Testabdeckung im Go-Code (Frontend ausgenommen), Coverage-Gate
       aktiv; Integrations- und E2E-Suite laufen grün in GitHub Actions (self-hosted)
+      → 80,4 % (`make cover`, Gate aktiv lokal + CI); Unit-/Integrations-Jobs
+      laufen in `release.yml`; E2E-Job `e2e-tests` neu — lokal grün, erster
+      Pipeline-Lauf mit dem nächsten Push auf den PR

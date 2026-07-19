@@ -234,8 +234,8 @@ func TestEnrollHostCertValidityOverride(t *testing.T) {
 		t.Fatalf("host-zertifikat parsen: %v", err)
 	}
 	cert := parsed.(*ssh.Certificate)
-	if lifetime := time.Duration(cert.ValidBefore-cert.ValidAfter) * time.Second; lifetime != time.Hour {
-		t.Errorf("laufzeit = %s, erwartet %s", lifetime, time.Hour)
+	if lifetime := cert.ValidBefore - cert.ValidAfter; lifetime != uint64(time.Hour/time.Second) {
+		t.Errorf("laufzeit = %ds, erwartet 3600s", lifetime)
 	}
 }
 

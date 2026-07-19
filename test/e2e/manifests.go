@@ -105,10 +105,14 @@ spec:
       labels: {app: glauth}
     spec:
       containers:
+        # Kein args-Override: der Image-Entrypoint (dumb-init + Start-Skript)
+        # liest /app/config/config.cfg — genau dorthin mountet die ConfigMap.
         - name: glauth
           image: glauth/glauth:v2.3.2
-          args: ["-c", "/app/config/config.cfg"]
           ports: [{containerPort: 3893}]
+          readinessProbe:
+            tcpSocket: {port: 3893}
+            periodSeconds: 2
           volumeMounts:
             - {name: config, mountPath: /app/config}
       volumes:

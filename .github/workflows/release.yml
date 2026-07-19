@@ -23,9 +23,8 @@ env:
 
 # Job-Untergliederung wie valkey-operator (parallel auf self-hosted Runnern):
 # linter, gosec, govulncheck, cyclomatic-complexity, malware-scan, unit-tests,
-# integration-tests, web-build, coverage-report, container-malware-scan,
-# semantic-release.
-# e2e-tests (kind-Cluster) folgen mit Phase 13, sobald es eine E2E-Suite gibt.
+# integration-tests, e2e-tests (kind-Cluster, Phase 13), web-build,
+# coverage-report, container-malware-scan, semantic-release.
 jobs:
   linter:
     name: Code Linting
@@ -198,6 +197,59 @@ jobs:
           name: integration-coverage
           path: coverage/integration.out
           retention-days: 7
+
+  e2e-tests:
+    name: E2E Tests (kind)
+    runs-on: self-hosted
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential ansible
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: Install kind und kubectl
+        run: |
+          # renovate: datasource=github-releases depName=kubernetes-sigs/kind
+          KIND_VERSION=v0.29.0
+          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+          curl -fsSLo kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
+      - name: E2E-Suite (kind-Cluster, kompletter Durchstich Mensch + CI)
+        run: make e2e
+      - name: Cleanup kind-Cluster
+        if: always()
+        run: kind delete cluster --name gssh-e2e || true
+
+  # Lasttest des Sign-Endpoints (Ziel ≥ 50 Zert/s, docs/teststrategie.md).
+  # Nur auf main und nicht release-blockierend — der geteilte Runner macht
+  # Durchsatzmessungen auf PRs zu flaky für ein hartes Gate.
+  load-test:
+    name: Load Test Sign-Endpoint
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Lasttest (Testcontainer-Postgres, ohne Rate-Limit)
+        run: make loadtest
 
   build:
     name: Build
@@ -506,6 +558,7 @@ jobs:
         container-malware-scan,
         unit-tests,
         integration-tests,
+        e2e-tests,
         coverage-report,
         build,
         web-build,

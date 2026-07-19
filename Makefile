@@ -16,7 +16,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.date=$(DATE)
 
 .PHONY: all build cross packages test cover test-unit-coverage test-integration-coverage \
-	lint fmt gosec vuln cyclo image clean web web-api web-test
+	e2e loadtest lint fmt gosec vuln cyclo image clean web web-api web-test
 
 # Zielplattformen des Benutzer-CLI gssh (Plan Phase 4)
 CROSS_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
@@ -71,6 +71,16 @@ test-unit-coverage:
 test-integration-coverage:
 	@mkdir -p $(COVERAGE_DIR)
 	go test -race -tags integration -count=1 -covermode=atomic -coverpkg=./... -coverprofile=$(COVERAGE_DIR)/integration.out ./...
+
+## e2e: End-to-End-Suite im kind-Cluster (Docker, kind, kubectl, helm nötig;
+## ansible optional). Schalter: E2E_KEEP=1, E2E_SKIP_BUILD=1, E2E_CLUSTER=name
+e2e:
+	go test -tags e2e -count=1 -timeout 45m -v ./test/e2e
+
+## loadtest: Lasttest des Sign-Endpoints (Docker für Postgres nötig);
+## Ziel per GSSH_LOAD_TARGET_RATE (Default 50 Zertifikate/s)
+loadtest:
+	go test -tags loadtest -count=1 -timeout 10m -v ./test/load
 
 ## lint: golangci-lint (Linter + Formatierungsprüfung)
 lint:

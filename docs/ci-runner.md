@@ -12,7 +12,9 @@ Runnern (`runs-on: self-hosted`). Anforderungen an die Runner-Maschine:
 | git ≥ 2.30 | Checkout, `git describe` | sofort |
 | ClamAV (`clamscan`, `freshclam`) | Malware-Scan des Quellcodes (Job `malware-scan`); Workflow installiert via `sudo apt-get`, alternativ vorinstallieren | sofort |
 | Trivy | Container-Image-Scan (Job `container-malware-scan`); wird von `aquasecurity/trivy-action` installiert, Netzugriff reicht | sofort |
-| kind + kubectl + helm | E2E-Tests im Wegwerf-Cluster | Phase 13 (nightly/Release) |
+| kind + kubectl | E2E-Suite im Wegwerf-Cluster (Job `e2e-tests`, PR + main); Workflow installiert beide via curl (kind gepinnt, Renovate-gepflegt), Vorinstallation beschleunigt nur | Phase 13 |
+| helm | E2E-Suite + Chart-Lint; wird via `azure/setup-helm` installiert, Netzugriff reicht | Phase 11/13 |
+| ansible | Ansible-Provisioning-Pfad der E2E-Suite (Job `e2e-tests`); Workflow installiert via `sudo apt-get`; fehlt es, deckt der Go-SSH-Fallback denselben Zertifikatspfad ab | Phase 13 |
 | Node.js LTS | Angular-Build (wird via `actions/setup-node` installiert, Netzugriff reicht) | Phase 8 |
 
 Go selbst wird von `actions/setup-go` anhand `go.mod` installiert und gecacht —
@@ -23,7 +25,8 @@ keine feste Go-Installation auf dem Runner nötig.
 - ≥ 4 CPU-Kerne, ≥ 8 GB RAM (Testcontainer + kind parallel)
 - ≥ 40 GB freier Plattenplatz (Container-Images, Build-Caches)
 - Netzzugriff: github.com, registry-1.docker.io (Pull + Push), gcr.io (distroless), proxy.golang.org,
-  ghcr.io (Trivy-DB), database.clamav.net (freshclam)
+  ghcr.io (Trivy-DB, Dex-Image), database.clamav.net (freshclam), dl.k8s.io (kubectl),
+  kind.sigs.k8s.io (kind)
 
 ## Secrets (GitHub Repository-Secrets)
 

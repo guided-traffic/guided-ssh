@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -125,7 +126,9 @@ func approveDeviceFlow(dexLocalURL, verificationURI, userCode, username, passwor
 		if match == nil {
 			return nil // keine Formulare mehr — Flow abgeschlossen
 		}
-		action, fields := match[1], match[2]
+		// Dex escapet das action-Attribut HTML-mäßig (&amp;) — erst dekodieren,
+		// sonst geht der state-Parameter verloren.
+		action, fields := html.UnescapeString(match[1]), match[2]
 		form := url.Values{}
 		for _, input := range inputRe.FindAllStringSubmatch(fields, -1) {
 			name := input[1]
