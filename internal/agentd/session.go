@@ -172,7 +172,9 @@ func (d *Daemon) requeueSpool(lines []byte) {
 	d.spoolMu.Lock()
 	defer d.spoolMu.Unlock()
 	existing, _ := os.ReadFile(d.paths.SpoolFile())
-	if err := os.WriteFile(d.paths.SpoolFile(), append(lines, existing...), 0o600); err != nil {
+	// G703-Falschmeldung: SpoolFile() ist StateDir + fester Dateiname (config.go),
+	// kein Nutzer-/Netzwerkeingang — kein Path-Traversal möglich.
+	if err := os.WriteFile(d.paths.SpoolFile(), append(lines, existing...), 0o600); err != nil { //nolint:gosec // siehe Kommentar
 		d.logger.Warn("session-spool zurückschreiben fehlgeschlagen", "error", err)
 	}
 }

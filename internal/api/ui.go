@@ -43,6 +43,9 @@ func NewUIHandler(dist fs.FS) http.Handler {
 		} else if hashedAsset.MatchString(path) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
-		http.ServeFileFS(w, r, dist, path)
+		// G703-Falschmeldung: dist ist ein eingebettetes fs.FS (fs.ValidPath),
+		// ServeFileFS lehnt ".."-Elemente in r.URL.Path ab, und path wurde per
+		// fs.Stat geprüft — kein Path-Traversal möglich.
+		http.ServeFileFS(w, r, dist, path) //nolint:gosec // siehe Kommentar
 	})
 }

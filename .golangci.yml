@@ -23,6 +23,12 @@ linters:
       - common-false-positives
       - std-error-handling
     rules:
+      # gosec ist auf Testcode Rauschen: Fixtures (Fake-IdP, bewusste Redirects,
+      # feste Hostnamen) tun absichtlich „unsichere" Dinge und werden nie
+      # ausgeliefert. Deckt u. a. die G710-Open-Redirect-Meldungen der Fake-IdPs ab.
+      - path: _test\.go
+        linters:
+          - gosec
       # internal/version ist idiomatisch; Kollision mit stdlib go/version ist hier irrelevant.
       - path: internal/version/
         text: "avoid package names that conflict with Go standard library"

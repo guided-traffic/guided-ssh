@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -31,21 +30,22 @@ func DecodePin(encoded string) ([]byte, error) {
 // Hostname-Prüfung entfallen bewusst (der Pin ersetzt das CA-Vertrauen).
 func Transport(pin []byte) *http.Transport {
 	return &http.Transport{TLSClientConfig: &tls.Config{
-		MinVersion:            tls.VersionTLS12,
-		InsecureSkipVerify:    true, //nolint:gosec // Pinning ersetzt die CA-Prüfung (VerifyPeerCertificate)
-		VerifyPeerCertificate: Verifier(pin),
+		MinVersion: tls.VersionTLS12,
+		// Pinning ersetzt die CA-/Hostname-Prüfung; verifiziert wird über den
+		// SPKI-Pin in VerifyConnection.
+		InsecureSkipVerify: true, //nolint:gosec // Pin-Prüfung erfolgt in VerifyConnection (siehe unten).
+		VerifyConnection:   Verifier(pin),
 	}}
 }
 
 // Verifier akzeptiert die Verbindung, sobald ein präsentiertes Zertifikat
-// den gepinnten SPKI-Hash trägt.
-func Verifier(pin []byte) func([][]byte, [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		for _, raw := range rawCerts {
-			cert, err := x509.ParseCertificate(raw)
-			if err != nil {
-				continue
-			}
+// den gepinnten SPKI-Hash trägt. Als VerifyConnection läuft die Prüfung auf
+// vollständigen wie wiederaufgenommenen Handshakes (anders als
+// VerifyPeerCertificate, das bei Session-Resumption übersprungen würde und so
+// den Pin umgehen ließe).
+func Verifier(pin []byte) func(tls.ConnectionState) error {
+	return func(cs tls.ConnectionState) error {
+		for _, cert := range cs.PeerCertificates {
 			sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
 			if bytes.Equal(sum[:], pin) {
 				return nil

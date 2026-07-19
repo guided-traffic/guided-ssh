@@ -29,7 +29,9 @@ func connectAgent() (agent.Agent, io.Closer, error) {
 	if sock == "" {
 		return nil, nil, errors.New("SSH_AUTH_SOCK nicht gesetzt — läuft ein ssh-agent?")
 	}
-	conn, err := net.Dial("unix", sock)
+	// G704-Falschmeldung: lokaler ssh-agent-Unix-Socket aus SSH_AUTH_SOCK
+	// (Prozessumgebung des Nutzers), kein Netzwerkziel — kein SSRF.
+	conn, err := net.Dial("unix", sock) //nolint:gosec // siehe Kommentar
 	if err != nil {
 		return nil, nil, fmt.Errorf("ssh-agent verbinden: %w", err)
 	}
