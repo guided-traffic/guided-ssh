@@ -1,0 +1,32 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: guided-ssh
+  namespace: guided-ssh
+spec:
+  chart:
+    spec:
+      # Staging folgt Patch-/Minor-Releases automatisch: Flux prüft das
+      # Helm-Repo im chart.spec.interval und rollt neue Versionen ohne
+      # Commit aus — Frühwarnung, bevor production gepinnt nachzieht.
+      version: ">=0.1.0 <0.2.0"
+  values:
+    config:
+      oidc:
+        issuer: https://idp.staging.example.com/realms/example
+        clientID: gssh-cli
+      groups:
+        admin: gssh-admins
+        auditor: gssh-auditors
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: gssh.staging.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: guided-ssh-tls
+          hosts:
+            - gssh.staging.example.com

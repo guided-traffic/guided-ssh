@@ -122,6 +122,28 @@ func TestDeviceFlow(t *testing.T) {
 	}
 }
 
+func TestClientCredentials(t *testing.T) {
+	idp := newFakeIDP(t)
+	flow := newFlow(t, idp)
+
+	raw, err := flow.ClientCredentials(context.Background(), fakeClientSecret)
+	if err != nil {
+		t.Fatalf("ClientCredentials: %v", err)
+	}
+	if raw == "" {
+		t.Fatal("leeres id_token")
+	}
+}
+
+func TestClientCredentialsFalschesSecret(t *testing.T) {
+	idp := newFakeIDP(t)
+	flow := newFlow(t, idp)
+
+	if _, err := flow.ClientCredentials(context.Background(), "falsch"); err == nil {
+		t.Fatal("erwartete fehler bei falschem client-secret")
+	}
+}
+
 func TestNewFlowDiscoveryFehler(t *testing.T) {
 	_, err := auth.NewFlow(context.Background(), auth.FlowConfig{IssuerURL: "http://127.0.0.1:1/realms/nix"})
 	if err == nil {

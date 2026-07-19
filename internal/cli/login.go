@@ -116,3 +116,22 @@ func FetchIDToken(ctx context.Context, cfg *Config, device bool, stderr io.Write
 		return nil
 	})
 }
+
+// FetchServiceToken holt ein ID-Token nicht-interaktiv per
+// Client-Credentials-Flow (Service-Account, z. B. der GitOps-Grants-Sync von
+// gssh-admin). clientID leer = client_id der Konfiguration; der IdP-Client
+// braucht den Scope openid, damit die Token-Antwort ein id_token enthält.
+func FetchServiceToken(ctx context.Context, cfg *Config, clientID, clientSecret string) (string, error) {
+	if clientID == "" {
+		clientID = cfg.ClientID
+	}
+	flow, err := auth.NewFlow(ctx, auth.FlowConfig{
+		IssuerURL: cfg.Issuer,
+		ClientID:  clientID,
+		Scopes:    []string{"openid"},
+	})
+	if err != nil {
+		return "", err
+	}
+	return flow.ClientCredentials(ctx, clientSecret)
+}

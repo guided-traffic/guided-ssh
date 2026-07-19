@@ -278,6 +278,68 @@ func TestTokenAusUmgebung(t *testing.T) {
 	}
 }
 
+// TestClientCredentialsAusUmgebung: GSSH_CLIENT_SECRET aktiviert den
+// nicht-interaktiven Client-Credentials-Flow, GSSH_CLIENT_ID übersteuert die
+// client_id der Konfiguration (GitOps-Sync-CronJob).
+func TestClientCredentialsAusUmgebung(t *testing.T) {
+	api := &fakeAdminAPI{t: t}
+	srv := httptest.NewServer(api.handler())
+	t.Cleanup(srv.Close)
+
+	// Minimaler IdP: Discovery + Token-Endpoint, der das erwartete Bearer-
+	// Token der fakeAdminAPI als id_token ausgibt.
+	var tokenClientID string
+	mux := http.NewServeMux()
+	var idp *httptest.Server
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer":         idp.URL,
+			"token_endpoint": idp.URL + "/token",
+			"jwks_uri":       idp.URL + "/keys",
+		})
+	})
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil || r.Form.Get("grant_type") != "client_credentials" {
+			http.Error(w, "grant_type falsch", http.StatusBadRequest)
+			return
+		}
+		id, secret, ok := r.BasicAuth()
+		if !ok {
+			id, secret = r.Form.Get("client_id"), r.Form.Get("client_secret")
+		}
+		if secret != "sync-secret" {
+			http.Error(w, "secret falsch", http.StatusUnauthorized)
+			return
+		}
+		tokenClientID = id
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "unbenutzt",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+			"id_token":     testToken,
+		})
+	})
+	idp = httptest.NewServer(mux)
+	t.Cleanup(idp.Close)
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "api_url: " + srv.URL + "\nissuer: " + idp.URL + "\nclient_id: gssh-cli\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config schreiben: %v", err)
+	}
+	t.Setenv(envClientSecret, "sync-secret")
+	t.Setenv(envClientID, "gssh-grants-sync")
+
+	var stdout, stderr bytes.Buffer
+	if code := Run(&stdout, &stderr, []string{"grant", "list", "--config", path}); code != 0 {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	if tokenClientID != "gssh-grants-sync" { //nolint:gosec // Client-ID, kein Credential
+		t.Errorf("token-endpoint sah client_id %q, erwartet gssh-grants-sync", tokenClientID)
+	}
+}
+
 func TestParseHelpers(t *testing.T) {
 	tags, err := parseTags("env=prod,role=web")
 	if err != nil || tags["env"] != "prod" || tags["role"] != "web" {

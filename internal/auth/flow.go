@@ -12,6 +12,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // ErrNoIDToken: Token-Antwort des IdP enthielt kein id_token.
@@ -148,6 +149,24 @@ func (f *Flow) DeviceFlow(ctx context.Context, prompt func(verificationURI, user
 	token, err := oauthCfg.DeviceAccessToken(ctx, response)
 	if err != nil {
 		return "", fmt.Errorf("auth: device-token: %w", err)
+	}
+	return idTokenFrom(token)
+}
+
+// ClientCredentials führt den Client-Credentials-Flow aus (Service-Account
+// ohne Benutzer, z. B. der GitOps-Grants-Sync): Token-Request mit
+// Client-Secret am Token-Endpoint. Rückgabe ist das rohe id_token — der IdP
+// muss dem Client dafür den Scope openid ausstellen.
+func (f *Flow) ClientCredentials(ctx context.Context, clientSecret string) (string, error) {
+	oauthCfg := clientcredentials.Config{
+		ClientID:     f.cfg.ClientID,
+		ClientSecret: clientSecret,
+		TokenURL:     f.endpoint.TokenURL,
+		Scopes:       f.cfg.Scopes,
+	}
+	token, err := oauthCfg.Token(ctx)
+	if err != nil {
+		return "", fmt.Errorf("auth: client-credentials-token: %w", err)
 	}
 	return idTokenFrom(token)
 }

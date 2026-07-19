@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: guided-ssh
+resources:
+  - ../../base/guided-ssh
+  # SOPS-verschlüsselt committen (siehe ../../../.sops.yaml und README) —
+  # Flux entschlüsselt beim Apply (decryption.provider: sops).
+  - secrets.yaml
+patches:
+  - path: helmrelease-patch.yaml
+  - path: sync-config-patch.yaml
+# grants.yaml (Zielzustand der Zugriffsregeln) landet als ConfigMap beim
+# Sync-CronJob. Kein Hash-Suffix: jeder Job-Pod liest beim Start ohnehin den
+# aktuellen Stand.
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: guided-ssh-grants
+    files:
+      - grants.yaml

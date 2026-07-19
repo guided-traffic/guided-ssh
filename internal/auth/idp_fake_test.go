@@ -31,10 +31,11 @@ type fakeIDP struct {
 }
 
 const (
-	fakeClientID   = "gssh-cli"
-	fakeAuthCode   = "test-auth-code"
-	fakeDeviceCode = "test-device-code"
-	fakeUserCode   = "ABCD-EFGH"
+	fakeClientID     = "gssh-cli"
+	fakeClientSecret = "test-client-secret"
+	fakeAuthCode     = "test-auth-code"
+	fakeDeviceCode   = "test-device-code"
+	fakeUserCode     = "ABCD-EFGH"
 )
 
 // newFakeIDP startet den Fake-IdP; Cleanup übernimmt t.
@@ -116,6 +117,15 @@ func (idp *fakeIDP) handleToken(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `{"error":"authorization_pending"}`)
+			return
+		}
+	case "client_credentials":
+		id, secret, ok := r.BasicAuth()
+		if !ok {
+			id, secret = r.Form.Get("client_id"), r.Form.Get("client_secret")
+		}
+		if id != fakeClientID || secret != fakeClientSecret {
+			http.Error(w, "client-credentials ungültig", http.StatusUnauthorized)
 			return
 		}
 	default:

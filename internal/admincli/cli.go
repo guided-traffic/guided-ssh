@@ -22,6 +22,14 @@ import (
 // den interaktiven OIDC-Flow.
 const envIDToken = "GSSH_ID_TOKEN" //nolint:gosec // Name der Env-Variable, kein Secret
 
+// envClientSecret aktiviert den Client-Credentials-Flow (Service-Account,
+// z. B. GitOps-Sync-CronJob): Token nicht-interaktiv vom Token-Endpoint des
+// Issuers; envClientID übersteuert dabei die client_id der Konfiguration.
+const (
+	envClientID     = "GSSH_CLIENT_ID"
+	envClientSecret = "GSSH_CLIENT_SECRET" //nolint:gosec // Name der Env-Variable, kein Secret
+)
+
 // Run führt das Admin-CLI aus und liefert den Exit-Code (0 ok, 1 Fehler,
 // 2 Aufruffehler).
 func Run(stdout, stderr io.Writer, args []string) int {
@@ -84,8 +92,11 @@ kommandos:
         version ausgeben
 
 gemeinsame flags: --config <pfad>, --token <id-token>, --device
-authentifizierung: --token, sonst GSSH_ID_TOKEN, sonst oidc-login (browser
-bzw. --device); erfordert mitgliedschaft in der admin-gruppe des servers.
+authentifizierung: --token, sonst GSSH_ID_TOKEN, sonst client-credentials
+(GSSH_CLIENT_SECRET gesetzt; GSSH_CLIENT_ID übersteuert die client_id der
+konfiguration — für service-accounts, z. b. gitops-sync), sonst oidc-login
+(browser bzw. --device); erfordert mitgliedschaft in der admin-gruppe des
+servers.
 `)
 }
 
@@ -117,7 +128,11 @@ func (c *commonFlags) connect(ctx context.Context, stderr io.Writer) (*client, e
 		token = os.Getenv(envIDToken)
 	}
 	if token == "" {
-		token, err = cli.FetchIDToken(ctx, cfg, c.device, stderr)
+		if secret := os.Getenv(envClientSecret); secret != "" {
+			token, err = cli.FetchServiceToken(ctx, cfg, os.Getenv(envClientID), secret)
+		} else {
+			token, err = cli.FetchIDToken(ctx, cfg, c.device, stderr)
+		}
 		if err != nil {
 			return nil, err
 		}

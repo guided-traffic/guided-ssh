@@ -3,6 +3,9 @@
 Deployt den guided-ssh-Server (API + eingebettete Web-UI, Agent-API mit mTLS,
 Prometheus-Metriken) auf Kubernetes.
 
+Für den Betrieb per GitOps (FluxCD: HelmRelease, SOPS-Secrets, deklarative
+Grants) siehe die Referenz-Manifeste in `deploy/flux-example/`.
+
 ## Installation
 
 ```bash

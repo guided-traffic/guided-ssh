@@ -426,14 +426,27 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 12 — GitOps (FluxCD)
 
-- [ ] Referenz-Repo-Struktur dokumentieren: `HelmRepository` (zeigt auf das
+- [x] Referenz-Repo-Struktur dokumentieren: `HelmRepository` (zeigt auf das
       GitHub-Pages-Helm-Repo) + `HelmRelease` für guided-ssh, Kustomize-Overlays
       pro Umgebung; Images aus `docker.io/guidedtraffic`
-- [ ] SOPS-Beispiel für Secrets im GitOps-Repo (age-Key, Flux-Decryption)
-- [ ] Grants deklarativ via GitOps: `grants.yaml` im Repo, Sync-Job/CronJob ruft
+      → `deploy/flux-example/README.md`: base + Overlays staging/production
+      (staging Version-Range, production exakter Pin), Cluster-Kustomizationen
+- [x] SOPS-Beispiel für Secrets im GitOps-Repo (age-Key, Flux-Decryption)
+      → `.sops.yaml` (age, encrypted_regex data/stringData),
+      `decryption.provider: sops` + Secret `sops-age` in den
+      Cluster-Kustomizationen; Chart bleibt secret-frei (existingSecret)
+- [x] Grants deklarativ via GitOps: `grants.yaml` im Repo, Sync-Job/CronJob ruft
       `gssh-admin apply` — Zugriffsregeln damit versioniert und reviewbar
-- [ ] Upgrade-Pfad testen: Chart-Version-Bump via Flux, Migrationen laufen automatisch
-- [ ] Beispiel-Manifeste in `deploy/flux-example/` pflegen
+      → CronJob `guided-ssh-grants-sync` (15 min, gssh-admin im Server-Image);
+      neu: Client-Credentials-Flow in gssh-admin (GSSH_CLIENT_SECRET /
+      GSSH_CLIENT_ID) für nicht-interaktive Service-Accounts, Keycloak-
+      Einrichtung (Audience-/Groups-Mapper) im README
+- [x] Upgrade-Pfad testen: Chart-Version-Bump via Flux, Migrationen laufen automatisch
+      → `hack/flux-upgrade-test.sh`: kind + Flux, Install 0.1.0 aus lokalem
+      Helm-Repo, Bump auf 0.1.1 → Upgrade rollt, migrate-Init-Container läuft
+- [x] Beispiel-Manifeste in `deploy/flux-example/` pflegen
+      → base (Namespace, HelmRepository, HelmRelease, Sync-Config, CronJob),
+      Overlays mit grants.yaml/secrets.yaml, kustomize-build-verifiziert
 
 ## Phase 13 — Qualitätssicherung & Release
 

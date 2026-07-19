@@ -1,0 +1,21 @@
+# Zielzustand der Zugriffsregeln (deklarativ, gitops): der Sync-CronJob
+# gleicht mit `gssh-admin apply -f grants.yaml` ab — Einträge, die hier
+# fehlen, werden gelöscht. Format siehe docs/grants.md.
+grants:
+  - group: gssh-devs
+    tags:
+      env: staging
+    principals: [deploy]
+    sudo: true
+    max_validity: 8h
+# Abschnitt ci_grants weglassen = CI-Grants unangetastet; leere Liste
+# (ci_grants: []) löscht alle.
+ci_grants:
+  - project: infra/ansible
+    ref: main
+    protected_only: true
+    environment: staging
+    tags:
+      env: staging
+    principals: [deploy]
+    max_validity: 1h

@@ -1,0 +1,13 @@
+# CLI-Konfiguration für den Grants-Sync-CronJob (gssh-admin). api_url zeigt
+# auf den in-cluster Service des Charts; issuer/client_id patchen die
+# Overlays passend zur Umgebung.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guided-ssh-sync-config
+  namespace: guided-ssh
+data:
+  config.yaml: |
+    api_url: http://guided-ssh
+    issuer: https://idp.example.com/realms/example
+    client_id: gssh-cli

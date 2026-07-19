@@ -1,0 +1,81 @@
+# Deklarative Grants via GitOps: grants.yaml liegt versioniert im Repo
+# (Overlay, configMapGenerator) und wird periodisch mit `gssh-admin apply`
+# abgeglichen — die Datei ist der Zielzustand, Änderungen laufen als
+# reviewbarer Merge-Request.
+#
+# Authentifizierung: Client-Credentials-Flow (GSSH_CLIENT_ID/-SECRET) gegen
+# den IdP — ein Service-Account-Client, dessen Tokens die Audience des
+# Servers (GSSH_OIDC_CLIENT_ID) und die Admin-Gruppe im groups-Claim tragen;
+# Einrichtung siehe README (Abschnitt Grants-Sync).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: guided-ssh-grants-sync
+  namespace: guided-ssh
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: gssh-admin
+              # gssh-admin liegt im Server-Image (distroless, kein Shell) —
+              # Tag zur ausgerollten appVersion passend halten.
+              image: docker.io/guidedtraffic/guided-ssh:0.1.0
+              command:
+                - /usr/local/bin/gssh-admin
+                - apply
+                - -f
+                - /etc/guided-ssh/grants.yaml
+                - --config
+                - /etc/guided-ssh/config.yaml
+              env:
+                - name: GSSH_CLIENT_ID
+                  value: gssh-grants-sync
+                - name: GSSH_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: guided-ssh-sync-oidc
+                      key: client-secret
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/guided-ssh
+                  readOnly: true
+          volumes:
+            # Ein Verzeichnis aus beiden ConfigMaps: config.yaml (base,
+            # von Overlays gepatcht) + grants.yaml (configMapGenerator im
+            # Overlay). Jobs starten frische Pods und lesen damit immer den
+            # aktuellen Stand.
+            - name: config
+              projected:
+                sources:
+                  - configMap:
+                      name: guided-ssh-sync-config
+                  - configMap:
+                      name: guided-ssh-grants

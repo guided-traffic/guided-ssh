@@ -23,15 +23,17 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
 
+# gssh-admin liegt mit im Image: der GitOps-Grants-Sync (CronJob, Phase 12)
+# ruft es mit überschriebenem command auf — distroless hat keine Shell.
 RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w \
         -X github.com/guided-traffic/guided-ssh/internal/version.version=${VERSION} \
         -X github.com/guided-traffic/guided-ssh/internal/version.commit=${COMMIT} \
         -X github.com/guided-traffic/guided-ssh/internal/version.date=${DATE}" \
-      -o /out/gssh-server ./cmd/gssh-server
+      -o /out/ ./cmd/gssh-server ./cmd/gssh-admin
 
-# Runtime-Stage: distroless, non-root, nur das statische Binary
+# Runtime-Stage: distroless, non-root, nur die statischen Binaries
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/gssh-server /usr/local/bin/gssh-server
+COPY --from=build /out/gssh-server /out/gssh-admin /usr/local/bin/
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/gssh-server"]
