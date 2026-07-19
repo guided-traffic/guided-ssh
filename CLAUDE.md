@@ -2,10 +2,17 @@
 
 ## Orientierung im Projekt
 
-Für einen schnellen Überblick über das Projekt und seine Abhängigkeiten den Skill
-`/graphify .` verwenden (Knowledge-Graph über den Code). Insbesondere zu Beginn einer
-Session bzw. bei Arbeit an unbekannten Teilen des Codes einsetzen, um Struktur und
-Abhängigkeiten schnell zu erfassen.
+Ich (Claude) nutze graphify selbst, um mich schnell im Projekt zurechtzufinden — nicht
+nur auf Zuruf. Vorgehen:
+
+- **Zu Session-Beginn / bei unbekanntem Code**: zuerst den vorhandenen Knowledge-Graph
+  in `graphify-out/` konsultieren (`GRAPH_REPORT.md` für God-Nodes/Communities,
+  `graph.json` für Details) statt blind Dateien zu durchsuchen. Gezielt fragen:
+  `/graphify query "<frage>"`, `/graphify path "<A>" "<B>"`, `/graphify explain "<node>"`.
+- **Graph fehlt oder ist veraltet**: `/graphify .` (voller Aufbau) bzw. `/graphify . --update`
+  (nur geänderte Dateien; bei reinen Code-Änderungen ohne LLM). Nach größeren Änderungen
+  aktuell halten.
+- `graphify-out/` ist Arbeitsartefakt (nicht committen, sofern nicht anders gewünscht).
 
 ## Projektkontext
 
