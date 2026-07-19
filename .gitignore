@@ -1,0 +1,9 @@
+# Build-Artefakte
+/bin/
+coverage.out
+
+# Tooling-Ausgaben
+graphify-out/
+
+# OS
+.DS_Store
