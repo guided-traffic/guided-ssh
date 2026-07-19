@@ -14,7 +14,10 @@ description: |
 homepage: https://github.com/guided-traffic/guided-ssh
 license: Apache-2.0
 contents:
-  - src: bin/gssh-agentd-linux-${ARCH}
+  # nfpm expandiert Env-Vars in Metadaten (name/arch/version), aber NICHT in
+  # contents[].src-Globs. Darum stellt `make packages` je Arch das passende
+  # Binary unter diesem stabilen Pfad bereit (siehe Makefile-Target packages).
+  - src: bin/pkg/gssh-agentd
     dst: /usr/bin/gssh-agentd
     file_info:
       mode: 0755

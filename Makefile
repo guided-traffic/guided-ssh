@@ -45,13 +45,15 @@ cross:
 ## packages: deb/rpm für gssh-agentd bauen (nach `make cross`; braucht nfpm)
 packages:
 	@command -v nfpm >/dev/null || { echo "nfpm fehlt — https://nfpm.goreleaser.com"; exit 1; }
-	@mkdir -p dist
+	@mkdir -p dist bin/pkg
 	@for arch in amd64 arm64; do \
+		cp bin/gssh-agentd-linux-$$arch bin/pkg/gssh-agentd; \
 		for fmt in deb rpm; do \
 			VERSION=$(patsubst v%,%,$(VERSION)) ARCH=$$arch \
 			nfpm package -f deploy/packaging/nfpm.yaml -p $$fmt -t dist/ || exit 1; \
 		done; \
 	done
+	@rm -rf bin/pkg
 
 ## test: Unit-Tests mit Race-Detector
 test:
