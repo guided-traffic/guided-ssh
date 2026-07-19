@@ -3,10 +3,7 @@ on:
   # Täglich um 2 Uhr morgens UTC ausführen
   schedule:
     - cron: '0 2 * * *'
-  # Nach jedem Push auf main
-  push:
-    branches:
-      - main
+      timezone: "Europe/Berlin"
   # Manueller Trigger
   workflow_dispatch:
     inputs:

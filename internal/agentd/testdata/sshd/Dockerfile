@@ -1,7 +1,7 @@
 # Test-Host für die Phase-5/7-Integrationstests: alpine + sshd + zwei lokale
 # Benutzer (alice: Principal-Match, deploy: Grant- und CI-Pfad).
 # python3: Ziel-Interpreter für den Ansible-Ping im Phase-7-E2E-Test.
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache openssh-server bash python3 \
     && ssh-keygen -A \
