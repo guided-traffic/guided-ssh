@@ -40,6 +40,10 @@ const (
 	envOIDCIssuer   = "GSSH_OIDC_ISSUER"    // Issuer-URL des IdP
 	envOIDCClientID = "GSSH_OIDC_CLIENT_ID" // erwartete Audience der ID-Tokens
 
+	// GitLab-CI (Phase 7); ohne Issuer bleibt /v1/sign/ci deaktiviert (503).
+	envCIIssuer   = "GSSH_CI_ISSUER"   // GitLab-Basis-URL (OIDC-Issuer)
+	envCIAudience = "GSSH_CI_AUDIENCE" // erwartete Audience, Default guided-ssh
+
 	// Gruppen-Sync via Keycloak-Admin-API (optional; ohne Client-ID deaktiviert).
 	envKCBaseURL      = "GSSH_KC_BASE_URL"      // Keycloak-Basis-URL
 	envKCRealm        = "GSSH_KC_REALM"         // Realm
@@ -179,6 +183,10 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 	if err != nil {
 		return err
 	}
+	ciVerifier, err := setupCIOIDC(ctx, logger)
+	if err != nil {
+		return err
+	}
 	startGroupSync(ctx, st, logger)
 
 	adminGroup := os.Getenv(envAdminGroup)
@@ -189,7 +197,8 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 		Addr: listen,
 		Handler: api.New(api.Deps{
 			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st,
-			Verifier: verifier, Logger: logger, AdminGroup: adminGroup,
+			Verifier: verifier, CIVerifier: ciVerifier, CIStore: st,
+			Logger: logger, AdminGroup: adminGroup,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -269,6 +278,25 @@ func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, err
 		return nil, err
 	}
 	logger.Info("oidc konfiguriert", "issuer", issuer)
+	return verifier, nil
+}
+
+// setupCIOIDC baut den Verifier für GitLab-Job-Tokens, falls konfiguriert;
+// ohne Issuer bleibt /v1/sign/ci deaktiviert.
+func setupCIOIDC(ctx context.Context, logger *slog.Logger) (api.CITokenVerifier, error) {
+	issuer := os.Getenv(envCIIssuer)
+	if issuer == "" {
+		logger.Warn("gitlab-ci nicht konfiguriert — /v1/sign/ci deaktiviert", "env", envCIIssuer)
+		return nil, nil //nolint:nilnil // nil-Interface schaltet den Endpoint gezielt ab
+	}
+	verifier, err := auth.NewCIVerifier(ctx, auth.CIVerifierConfig{
+		IssuerURL: issuer,
+		Audience:  os.Getenv(envCIAudience),
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("gitlab-ci konfiguriert", "issuer", issuer)
 	return verifier, nil
 }
 

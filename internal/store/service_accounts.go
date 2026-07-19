@@ -20,6 +20,23 @@ func (s *Store) CreateServiceAccount(ctx context.Context, a *ServiceAccount) err
 	return nil
 }
 
+// KindGitLabCI kennzeichnet Service-Accounts, die pro GitLab-Projekt bei der
+// ersten CI-Ausstellung angelegt werden (Phase 7).
+const KindGitLabCI = "gitlab-ci"
+
+// EnsureCIServiceAccount stellt den Service-Account eines GitLab-Projekts
+// sicher (Name = project_path) und liefert ihn zurück. Ein bestehender
+// Account behält seinen active-Status — active = false wirkt damit als
+// Not-Aus pro Projekt.
+func (s *Store) EnsureCIServiceAccount(ctx context.Context, issuer, projectPath string) (*ServiceAccount, error) {
+	return queryOne[ServiceAccount](ctx, s.pool, `
+		INSERT INTO service_accounts (name, kind, issuer, claim_matcher, active)
+		VALUES ($1, $2, $3, $4, true)
+		ON CONFLICT (name) DO UPDATE SET updated_at = now()
+		RETURNING *`,
+		projectPath, KindGitLabCI, issuer, map[string]string{"project_path": projectPath})
+}
+
 // GetServiceAccount liefert eine maschinelle Identität per ID.
 func (s *Store) GetServiceAccount(ctx context.Context, id uuid.UUID) (*ServiceAccount, error) {
 	return queryOne[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts WHERE id = $1`, id)

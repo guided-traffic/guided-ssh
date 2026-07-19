@@ -30,6 +30,19 @@ type Grant struct {
 	MaxValiditySeconds int64             `json:"max_validity_seconds"`
 }
 
+// CIGrant spiegelt die API-Repräsentation einer CI-Zugriffsregel
+// (internal/api ciGrantJSON, Phase 7).
+type CIGrant struct {
+	ID                 string            `json:"id,omitempty"`
+	Project            string            `json:"project,omitempty"`
+	RefPattern         string            `json:"ref_pattern,omitempty"`
+	ProtectedOnly      *bool             `json:"protected_only,omitempty"`
+	EnvironmentPattern string            `json:"environment_pattern,omitempty"`
+	TagSelector        map[string]string `json:"tag_selector,omitempty"`
+	Principals         []string          `json:"principals"`
+	MaxValiditySeconds int64             `json:"max_validity_seconds"`
+}
+
 // ApplyResult spiegelt die Antwort von POST /v1/admin/grants/apply.
 type ApplyResult struct {
 	Created   int `json:"created"`
@@ -131,5 +144,40 @@ func (c *client) applyGrants(ctx context.Context, grants []Grant) (*ApplyResult,
 	var result ApplyResult
 	err := c.do(ctx, http.MethodPost, "/v1/admin/grants/apply",
 		map[string]any{"grants": grants}, &result)
+	return &result, err
+}
+
+func (c *client) listCIGrants(ctx context.Context) ([]CIGrant, error) {
+	var grants []CIGrant
+	err := c.do(ctx, http.MethodGet, "/v1/admin/ci-grants", nil, &grants)
+	return grants, err
+}
+
+func (c *client) getCIGrant(ctx context.Context, id string) (*CIGrant, error) {
+	var grant CIGrant
+	err := c.do(ctx, http.MethodGet, "/v1/admin/ci-grants/"+id, nil, &grant)
+	return &grant, err
+}
+
+func (c *client) createCIGrant(ctx context.Context, g *CIGrant) (*CIGrant, error) {
+	var created CIGrant
+	err := c.do(ctx, http.MethodPost, "/v1/admin/ci-grants", g, &created)
+	return &created, err
+}
+
+func (c *client) updateCIGrant(ctx context.Context, id string, g *CIGrant) (*CIGrant, error) {
+	var updated CIGrant
+	err := c.do(ctx, http.MethodPut, "/v1/admin/ci-grants/"+id, g, &updated)
+	return &updated, err
+}
+
+func (c *client) deleteCIGrant(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/admin/ci-grants/"+id, nil, nil)
+}
+
+func (c *client) applyCIGrants(ctx context.Context, grants []CIGrant) (*ApplyResult, error) {
+	var result ApplyResult
+	err := c.do(ctx, http.MethodPost, "/v1/admin/ci-grants/apply",
+		map[string]any{"ci_grants": grants}, &result)
 	return &result, err
 }

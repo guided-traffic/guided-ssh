@@ -29,6 +29,8 @@ func Run(stdout, stderr io.Writer, args []string) int {
 	switch command {
 	case "login":
 		return runLoginCmd(ctx, rest, stdout, stderr)
+	case "ci-login":
+		return runCILoginCmd(ctx, rest, stdout, stderr)
 	case "ssh":
 		return runSSHCmd(ctx, rest, stdout, stderr)
 	case "status":
@@ -57,6 +59,9 @@ func usage(w io.Writer) {
 kommandos:
   login [--device] [--validity 8h] [--if-needed] [--config pfad]
         per sso anmelden; schlüsselpaar und zertifikat landen nur im ssh-agent
+  ci-login [--api-url url] [--token-env GSSH_CI_TOKEN] [--validity 1h] [--pin-sha256 pin]
+        gitlab-ci: job-token (id_tokens) gegen ci-zertifikat tauschen und in
+        den ssh-agent des jobs laden; api-url auch via GSSH_API_URL
   ssh <ssh-argumente…>
         wie ssh, stellt vorher ein gültiges zertifikat sicher (auto-login);
         konfigurationspfad ggf. über GSSH_CONFIG

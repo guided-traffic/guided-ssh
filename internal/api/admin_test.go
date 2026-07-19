@@ -27,16 +27,19 @@ const adminGroupName = "gssh-admins"
 // eingebetteten fakeAuthStore (gemeinsamer Zustand mit dem Mapper).
 type fakeAdminStore struct {
 	*fakeAuthStore
-	grants      map[uuid.UUID]*store.AccessGrant
-	applySpecs  []store.GrantSpec
-	applyResult *store.ApplyResult
-	applyErr    error
+	grants       map[uuid.UUID]*store.AccessGrant
+	ciGrants     map[uuid.UUID]*store.CIGrant
+	applySpecs   []store.GrantSpec
+	applyCISpecs []store.CIGrantSpec
+	applyResult  *store.ApplyResult
+	applyErr     error
 }
 
 func newFakeAdminStore(fs *fakeAuthStore) *fakeAdminStore {
 	return &fakeAdminStore{
 		fakeAuthStore: fs,
 		grants:        map[uuid.UUID]*store.AccessGrant{},
+		ciGrants:      map[uuid.UUID]*store.CIGrant{},
 	}
 }
 

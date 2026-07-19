@@ -1,0 +1,16 @@
+# Beispiel-Playbook: minimaler Durchstich für zertifikatsbasiertes
+# Provisioning aus GitLab-CI (docs/gitlab-ci.md). Authentifizierung kommt
+# vollständig aus dem ssh-agent des Jobs — kein Key-Material im Repo.
+- name: Zielhosts erreichbar und provisionierbar
+  hosts: webserver
+  gather_facts: false
+  tasks:
+    - name: Verbindung prüfen
+      ansible.builtin.ping:
+
+    - name: Beispiel-Task — Motd setzen
+      become: false
+      ansible.builtin.copy:
+        dest: /home/{{ ansible_user }}/provisioned-by-ci
+        content: "provisioniert durch pipeline {{ lookup('env', 'CI_PIPELINE_ID') | default('lokal', true) }}\n"
+        mode: "0644"

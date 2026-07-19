@@ -24,3 +24,4 @@ nie gelöscht — überholte Entscheidungen bekommen Status „abgelöst durch A
 | [016](016-cli-gssh-agent-only.md) | CLI `gssh`: Agent-only-Schlüssel, SPKI-Pinning, Match-exec-Integration | akzeptiert |
 | [017](017-host-enrollment-mtls.md) | Host-Enrollment: Einmal-Token, mTLS-Mini-PKI, Fail-closed-Principals | akzeptiert |
 | [018](018-grants-additiv.md) | Grant-Modell: additiv, Identitäts-Principals, deklarativer Abgleich | akzeptiert |
+| [019](019-gitlab-ci-grants.md) | GitLab-CI: eigener Verifier, CI-Grants, Projekt-Principals | akzeptiert |

@@ -36,6 +36,8 @@ func Run(stdout, stderr io.Writer, args []string) int {
 	switch command {
 	case "grant":
 		return runGrantCmd(ctx, rest, stdout, stderr)
+	case "ci-grant":
+		return runCIGrantCmd(ctx, rest, stdout, stderr)
 	case "apply":
 		return runApplyCmd(ctx, rest, stdout, stderr)
 	case "version":
@@ -65,8 +67,19 @@ kommandos:
         zugriffsregel ändern (nur angegebene felder)
   grant delete <id>
         zugriffsregel löschen
+  ci-grant list
+        alle ci-zugriffsregeln (gitlab-pipelines) anzeigen
+  ci-grant create --project <pfad> --principals <p1,p2> [--ref muster]
+                  [--protected-only=true|false] [--environment muster]
+                  [--tags k=v,…] [--max-validity 1h]
+        ci-zugriffsregel anlegen (projekt- oder gruppen-pfad)
+  ci-grant update <id> [flags wie create außer --project]
+        ci-zugriffsregel ändern (nur angegebene felder)
+  ci-grant delete <id>
+        ci-zugriffsregel löschen
   apply -f grants.yaml
-        deklarativer abgleich: datei ist der zielzustand (gitops)
+        deklarativer abgleich: datei ist der zielzustand (gitops);
+        abschnitt ci_grants wird nur abgeglichen, wenn er vorhanden ist
   version
         version ausgeben
 
@@ -344,7 +357,7 @@ func runApplyCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, "gssh-admin: apply -f <grants.yaml>")
 		return 2
 	}
-	grants, err := loadGrantsFile(*file)
+	grants, ciGrants, ciPresent, err := loadGrantsFile(*file)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -358,5 +371,13 @@ func runApplyCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	fmt.Fprintf(stdout, "abgleich fertig: %d angelegt, %d aktualisiert, %d gelöscht, %d unverändert\n",
 		result.Created, result.Updated, result.Deleted, result.Unchanged)
+	if ciPresent {
+		ciResult, err := apiClient.applyCIGrants(ctx, ciGrants)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		fmt.Fprintf(stdout, "ci-abgleich fertig: %d angelegt, %d aktualisiert, %d gelöscht, %d unverändert\n",
+			ciResult.Created, ciResult.Updated, ciResult.Deleted, ciResult.Unchanged)
+	}
 	return 0
 }

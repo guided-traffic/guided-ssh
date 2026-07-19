@@ -14,16 +14,19 @@ import (
 
 // Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier, Store und Grants
 // sind optional: ohne sie antwortet der Sign-Endpoint mit 503 (OIDC nicht
-// konfiguriert). Ohne Hosts bleibt das Enrollment deaktiviert (Tests); ohne
-// Admin/AdminGroup antwortet die Admin-API mit 503.
+// konfiguriert). Ohne CIVerifier/CIStore bleibt /v1/sign/ci deaktiviert (503);
+// ohne Hosts bleibt das Enrollment deaktiviert (Tests); ohne Admin/AdminGroup
+// antwortet die Admin-API mit 503.
 type Deps struct {
-	CA       *ca.CA
-	Store    auth.Store
-	Hosts    HostStore
-	Grants   GrantSource
-	Admin    AdminStore
-	Verifier TokenVerifier
-	Logger   *slog.Logger
+	CA         *ca.CA
+	Store      auth.Store
+	Hosts      HostStore
+	Grants     GrantSource
+	Admin      AdminStore
+	Verifier   TokenVerifier
+	CIVerifier CITokenVerifier
+	CIStore    CIStore
+	Logger     *slog.Logger
 	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API nutzen
 	// dürfen; leer ⇒ Admin-API deaktiviert (fail-closed).
 	AdminGroup string
@@ -36,9 +39,11 @@ type Deps struct {
 //	GET  /healthz                  – Liveness
 //	GET  /v1/ca/bundle/{purpose}   – CA-Bundle (authorized_keys-Format), purpose: user|host
 //	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
+//	POST /v1/sign/ci               – GitLab-Job-Token gegen CI-Zertifikat tauschen
 //	POST /v1/enroll                – Host-Enrollment gegen einmaliges Token
 //	/v1/admin/grants…              – Grant-Verwaltung (CRUD + deklaratives Apply),
 //	                                 nur für Mitglieder der Admin-Gruppe
+//	/v1/admin/ci-grants…           – CI-Grant-Verwaltung (analog)
 //
 // Die Agent-Endpunkte (/v1/agent/…) liegen im separaten mTLS-Handler, siehe NewAgent.
 func New(deps Deps) http.Handler {
@@ -75,6 +80,15 @@ func New(deps Deps) http.Handler {
 	} else {
 		mux.HandleFunc("POST /v1/sign/user", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "oidc nicht konfiguriert", http.StatusServiceUnavailable)
+		})
+	}
+
+	if deps.CIVerifier != nil && deps.CIStore != nil {
+		mux.HandleFunc("POST /v1/sign/ci",
+			handleSignCI(deps.CA, deps.CIVerifier, deps.CIStore, deps.Logger))
+	} else {
+		mux.HandleFunc("POST /v1/sign/ci", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "gitlab-ci nicht konfiguriert", http.StatusServiceUnavailable)
 		})
 	}
 

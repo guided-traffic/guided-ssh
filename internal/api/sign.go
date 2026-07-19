@@ -88,18 +88,8 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 			return
 		}
 
-		var req signUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "request-body ungültig", http.StatusBadRequest)
-			return
-		}
-		publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.PublicKey))
-		if err != nil {
-			http.Error(w, "public_key ungültig (authorized_keys-format erwartet)", http.StatusBadRequest)
-			return
-		}
-		if _, isCert := publicKey.(*ssh.Certificate); isCert {
-			http.Error(w, "public_key ist bereits ein zertifikat", http.StatusBadRequest)
+		publicKey, req, ok := decodeSignRequest(w, r)
+		if !ok {
 			return
 		}
 
@@ -190,6 +180,26 @@ func maxGrantValidity(grants []store.AccessGrant) time.Duration {
 		}
 	}
 	return allowed
+}
+
+// decodeSignRequest parst Body und Public Key eines Sign-Requests; bei
+// Fehlern ist die 400-Antwort bereits geschrieben (ok = false).
+func decodeSignRequest(w http.ResponseWriter, r *http.Request) (ssh.PublicKey, signUserRequest, bool) {
+	var req signUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "request-body ungültig", http.StatusBadRequest)
+		return nil, req, false
+	}
+	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.PublicKey))
+	if err != nil {
+		http.Error(w, "public_key ungültig (authorized_keys-format erwartet)", http.StatusBadRequest)
+		return nil, req, false
+	}
+	if _, isCert := publicKey.(*ssh.Certificate); isCert {
+		http.Error(w, "public_key ist bereits ein zertifikat", http.StatusBadRequest)
+		return nil, req, false
+	}
+	return publicKey, req, true
 }
 
 // bearerToken extrahiert das Bearer-Token aus dem Authorization-Header.

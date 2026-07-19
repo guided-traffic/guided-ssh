@@ -1,0 +1,13 @@
+# Inventory-Muster für zertifikatsbasiertes Provisioning (guided-ssh).
+# ansible_user muss Principal eines CI-Grants sein, der auf die Tags der
+# Zielhosts passt (docs/gitlab-ci.md).
+all:
+  children:
+    webserver:
+      hosts:
+        web1.example.com:
+        web2.example.com:
+      vars:
+        ansible_user: deploy
+        # Kein ansible_ssh_private_key_file: der ssh-agent des CI-Jobs
+        # liefert Schlüssel + Zertifikat (gssh ci-login).

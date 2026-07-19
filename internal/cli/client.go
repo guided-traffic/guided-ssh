@@ -46,11 +46,21 @@ type signUserRequest struct {
 
 // signUser tauscht das ID-Token gegen ein signiertes Benutzerzertifikat.
 func (c *apiClient) signUser(ctx context.Context, idToken, publicKey string, validity time.Duration) (*ssh.Certificate, error) {
+	return c.sign(ctx, "/v1/sign/user", idToken, publicKey, validity)
+}
+
+// signCI tauscht das GitLab-Job-Token gegen ein signiertes CI-Zertifikat.
+func (c *apiClient) signCI(ctx context.Context, jobToken, publicKey string, validity time.Duration) (*ssh.Certificate, error) {
+	return c.sign(ctx, "/v1/sign/ci", jobToken, publicKey, validity)
+}
+
+// sign ruft einen Sign-Endpoint auf: Bearer-Token rein, Zertifikat raus.
+func (c *apiClient) sign(ctx context.Context, path, idToken, publicKey string, validity time.Duration) (*ssh.Certificate, error) {
 	body, err := json.Marshal(signUserRequest{PublicKey: publicKey, ValiditySeconds: int64(validity / time.Second)})
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/sign/user", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

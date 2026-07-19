@@ -135,7 +135,7 @@ func newFakeSign(t *testing.T, wantToken string, validity time.Duration, tlsMode
 	fs := &fakeSign{signer: signer, wantToken: wantToken, validity: validity}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/sign/user", func(w http.ResponseWriter, r *http.Request) {
+	signHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+fs.wantToken {
 			http.Error(w, "id-token ungültig", http.StatusUnauthorized)
 			return
@@ -162,7 +162,9 @@ func newFakeSign(t *testing.T, wantToken string, validity time.Duration, tlsMode
 			"key_id":      cert.KeyId,
 			"principals":  cert.ValidPrincipals,
 		})
-	})
+	}
+	mux.HandleFunc("POST /v1/sign/user", signHandler)
+	mux.HandleFunc("POST /v1/sign/ci", signHandler)
 
 	if tlsMode {
 		fs.server = httptest.NewTLSServer(mux)

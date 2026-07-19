@@ -29,6 +29,7 @@ func writeConfig(t *testing.T, apiURL string) string {
 type fakeAdminAPI struct {
 	t        *testing.T
 	grants   []Grant
+	ciGrants []CIGrant
 	lastBody map[string]any
 	lastPath string
 	method   string
@@ -48,18 +49,34 @@ func (f *fakeAdminAPI) handler() http.Handler {
 				f.lastBody = body
 			}
 		}
+		isCI := strings.HasPrefix(r.URL.Path, "/v1/admin/ci-grants")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/grants":
 			_ = json.NewEncoder(w).Encode(f.grants)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/ci-grants":
+			_ = json.NewEncoder(w).Encode(f.ciGrants)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/grants/apply":
 			_ = json.NewEncoder(w).Encode(ApplyResult{Created: 2, Deleted: 1})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/ci-grants/apply":
+			_ = json.NewEncoder(w).Encode(ApplyResult{Created: 1, Unchanged: 1})
+		case r.Method == http.MethodPost && isCI:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(CIGrant{ID: "ci-neu-1", Project: "infra/ansible"})
 		case r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(Grant{ID: "neu-1", Group: "deployers"})
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && isCI:
+			_ = json.NewEncoder(w).Encode(CIGrant{ID: strings.TrimPrefix(r.URL.Path, "/v1/admin/ci-grants/"), Project: "infra/ansible"})
 		case r.Method == http.MethodPut:
 			_ = json.NewEncoder(w).Encode(Grant{ID: strings.TrimPrefix(r.URL.Path, "/v1/admin/grants/"), Group: "deployers"})
+		case r.Method == http.MethodGet && isCI:
+			if len(f.ciGrants) == 0 {
+				http.Error(w, "nicht gefunden", http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(f.ciGrants[0])
 		case r.Method == http.MethodGet:
 			if len(f.grants) == 0 {
 				http.Error(w, "nicht gefunden", http.StatusNotFound)
@@ -236,14 +253,14 @@ func TestApply(t *testing.T) {
 }
 
 func TestLoadGrantsFileFehler(t *testing.T) {
-	if _, err := loadGrantsFile(filepath.Join(t.TempDir(), "fehlt.yaml")); err == nil {
+	if _, _, _, err := loadGrantsFile(filepath.Join(t.TempDir(), "fehlt.yaml")); err == nil {
 		t.Error("fehlende datei: fehler erwartet")
 	}
 	path := filepath.Join(t.TempDir(), "kaputt.yaml")
 	if err := os.WriteFile(path, []byte("grants: [max_validity: quatsch"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadGrantsFile(path); err == nil {
+	if _, _, _, err := loadGrantsFile(path); err == nil {
 		t.Error("kaputtes yaml: fehler erwartet")
 	}
 }

@@ -18,7 +18,7 @@ Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 | `api/` | OpenAPI-Spezifikation — Single Source of Truth der REST-API (ab Phase 8) |
 | `web/` | Angular-Frontend, eingebettet ins Go-Binary (ab Phase 8) |
 | `deploy/helm/` | Helm-Chart (ab Phase 11) |
-| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
+| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [GitLab-CI](docs/gitlab-ci.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
 | `hack/` | Hilfsskripte für Build und CI |
 
 ## gssh-server
@@ -68,7 +68,12 @@ gssh ssh <host> …        # wie ssh, mit Auto-Login bei fehlendem Zertifikat
 gssh status              # Zertifikatsstatus; Exit-Code 1 ohne gültiges Zertifikat
 gssh logout              # guided-ssh-Einträge aus dem Agenten entfernen
 gssh integrate           # ssh_config-Schnipsel für transparentes natives ssh
+gssh ci-login            # GitLab-CI: Job-Token gegen CI-Zertifikat tauschen
 ```
+
+`gssh ci-login` läuft ohne Konfigurationsdatei (Flags/`GSSH_API_URL`,
+Job-Token aus `GSSH_CI_TOKEN` via `id_tokens`) — Details und Referenz-Pipeline
+in [docs/gitlab-ci.md](docs/gitlab-ci.md).
 
 Konfiguration in `~/.config/guided-ssh/config.yaml` (Override: `--config`
 bzw. `GSSH_CONFIG`):
@@ -109,7 +114,10 @@ gssh-admin grant create --group deployers --tags env=prod \
     --principals deploy --max-validity 8h
 gssh-admin grant update <id> --principals deploy,root
 gssh-admin grant delete <id>
-gssh-admin apply -f grants.yaml   # deklarativer Vollabgleich (GitOps)
+gssh-admin ci-grant list          # CI-Zugriffsregeln (GitLab-Pipelines)
+gssh-admin ci-grant create --project infra/ansible --ref main \
+    --tags env=prod --principals deploy --max-validity 1h
+gssh-admin apply -f grants.yaml   # deklarativer Vollabgleich (GitOps, inkl. ci_grants)
 ```
 
 Authentifizierung: OIDC wie `gssh` (Browser bzw. `--device`), alternativ

@@ -25,6 +25,14 @@ type AdminStore interface {
 	UpdateGrant(ctx context.Context, actor string, g *store.AccessGrant) error
 	DeleteGrant(ctx context.Context, actor string, id uuid.UUID) error
 	ApplyGrants(ctx context.Context, actor, defaultIssuer string, specs []store.GrantSpec) (*store.ApplyResult, error)
+
+	// CI-Grants (Phase 7).
+	ListCIGrants(ctx context.Context) ([]store.CIGrant, error)
+	GetCIGrant(ctx context.Context, id uuid.UUID) (*store.CIGrant, error)
+	CreateCIGrant(ctx context.Context, actor string, g *store.CIGrant) error
+	UpdateCIGrant(ctx context.Context, actor string, g *store.CIGrant) error
+	DeleteCIGrant(ctx context.Context, actor string, id uuid.UUID) error
+	ApplyCIGrants(ctx context.Context, actor string, specs []store.CIGrantSpec) (*store.ApplyResult, error)
 }
 
 // grantJSON ist die API-Repräsentation einer Zugriffsregel; die Gruppe wird
@@ -108,6 +116,12 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("PUT /v1/admin/grants/{id}", admin.authorized(admin.handleUpdateGrant))
 	mux.HandleFunc("DELETE /v1/admin/grants/{id}", admin.authorized(admin.handleDeleteGrant))
 	mux.HandleFunc("POST /v1/admin/grants/apply", admin.authorized(admin.handleApplyGrants))
+	mux.HandleFunc("GET /v1/admin/ci-grants", admin.authorized(admin.handleListCIGrants))
+	mux.HandleFunc("POST /v1/admin/ci-grants", admin.authorized(admin.handleCreateCIGrant))
+	mux.HandleFunc("GET /v1/admin/ci-grants/{id}", admin.authorized(admin.handleGetCIGrant))
+	mux.HandleFunc("PUT /v1/admin/ci-grants/{id}", admin.authorized(admin.handleUpdateCIGrant))
+	mux.HandleFunc("DELETE /v1/admin/ci-grants/{id}", admin.authorized(admin.handleDeleteCIGrant))
+	mux.HandleFunc("POST /v1/admin/ci-grants/apply", admin.authorized(admin.handleApplyCIGrants))
 }
 
 // adminHandler ist ein Handler mit authentifiziertem Admin-Kontext; actor ist

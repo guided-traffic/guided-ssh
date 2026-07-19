@@ -78,8 +78,9 @@ func run(m *testing.M) (int, error) {
 func cleanDB(t *testing.T) {
 	t.Helper()
 	_, err := rawPool.Exec(context.Background(), `
-		TRUNCATE users, groups, hosts, access_grants, ca_keys, service_accounts,
-			certificates, audit_events, enrollment_tokens RESTART IDENTITY CASCADE`)
+		TRUNCATE users, groups, hosts, access_grants, ci_grants, ca_keys,
+			service_accounts, certificates, audit_events, enrollment_tokens
+			RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("cleanDB: %v", err)
 	}

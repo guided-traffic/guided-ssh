@@ -267,21 +267,39 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 7 — GitLab-CI-Integration (Kernanforderung)
 
-- [ ] GitLab als OIDC-Issuer registrieren: Konfiguration von Issuer-URL + JWKS,
+- [x] GitLab als OIDC-Issuer registrieren: Konfiguration von Issuer-URL + JWKS,
       Audience-Vorgabe (`aud: guided-ssh`)
-- [ ] Endpoint `POST /v1/sign/ci`: validiert GitLab `id_token`, mappt Claims
+      → `auth.CIVerifier` (eigener Issuer/Audience, strikt getrennt vom IdP);
+      Env `GSSH_CI_ISSUER`/`GSSH_CI_AUDIENCE` (ADR-019)
+- [x] Endpoint `POST /v1/sign/ci`: validiert GitLab `id_token`, mappt Claims
       (`project_path`, `ref`, `ref_protected`, `pipeline_id`, `environment`) auf
       CI-Grant-Regeln
-- [ ] CI-Grants: Projekt/Gruppe × Branch-Bedingung (z. B. nur `ref_protected: true`)
+      → `internal/api/sign_ci.go`; Service-Account pro Projekt (`active=false`
+      als Not-Aus); Principals = `ci:<project_path>` + Namespace-Vorfahren
+- [x] CI-Grants: Projekt/Gruppe × Branch-Bedingung (z. B. nur `ref_protected: true`)
       × Tag-Selektor → Principals; Laufzeit gedeckelt (Default 1 h, max. Job-Timeout)
-- [ ] KeyID-Format `ci:<project_path>:<pipeline_id>:<job_id>` → jede Ausstellung im
+      → Tabelle `ci_grants` (Migration 0003) + `store/ci_grants.go`; Verwaltung via
+      `/v1/admin/ci-grants…`, `gssh-admin ci-grant …` und `ci_grants:` in grants.yaml;
+      Laufzeit = min(Grant-Maximum, Policy 1 h, Token-`exp` = Job-Timeout);
+      Host-ACL liefert `ci:<project>` über AuthorizedPrincipalsCommand
+- [x] KeyID-Format `ci:<project_path>:<pipeline_id>:<job_id>` → jede Ausstellung im
       Audit eindeutig einer Pipeline zuordenbar
-- [ ] Helper-Kommando `gssh ci-login` (nutzt `CI_JOB_JWT`/`id_tokens`), lädt Zertifikat
+      → `ca.CIKeyID`; Audit-Actor = KeyID, Claims im issuer_context
+- [x] Helper-Kommando `gssh ci-login` (nutzt `CI_JOB_JWT`/`id_tokens`), lädt Zertifikat
       in Agent des Jobs
-- [ ] Referenz-Pipeline dokumentieren: `.gitlab-ci.yml` mit `id_tokens`, `gssh ci-login`,
+      → nur `id_tokens` (Env `GSSH_CI_TOKEN`, `--token-env`); `CI_JOB_JWT` ist in
+      GitLab entfernt und wird bewusst nicht unterstützt; API-URL via
+      `--api-url`/`GSSH_API_URL`, SPKI-Pinning wie gssh login
+- [x] Referenz-Pipeline dokumentieren: `.gitlab-ci.yml` mit `id_tokens`, `gssh ci-login`,
       dann `ansible-playbook` gegen Zielhosts (Ansible nutzt den ssh-agent automatisch)
-- [ ] Beispiel-Ansible-Playbook + Inventory-Muster für zertifikatsbasiertes Provisioning
-- [ ] E2E-Test: simuliertes GitLab-Token → Zertifikat → Ansible-Ping gegen Testhost
+      → `docs/gitlab-ci.md` + `deploy/examples/gitlab-ci/.gitlab-ci.yml`
+- [x] Beispiel-Ansible-Playbook + Inventory-Muster für zertifikatsbasiertes Provisioning
+      → `deploy/examples/ansible/` (site.yml, inventory.yml)
+- [x] E2E-Test: simuliertes GitLab-Token → Zertifikat → Ansible-Ping gegen Testhost
+      → `internal/agentd/ci_integration_test.go`: Fake-GitLab (Discovery+JWKS),
+      Sign, SSH-Login als deploy (fail-closed für root), Audit-Zuordnung;
+      Ansible-Ping läuft, wenn ansible auf dem Runner installiert ist —
+      sonst deckt der Go-SSH-Durchstich denselben Pfad ab
 
 ## Phase 8 — Web-UI & Auditing-Oberfläche
 

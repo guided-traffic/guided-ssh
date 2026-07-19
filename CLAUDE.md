@@ -14,6 +14,8 @@ nur auf Zuruf. Vorgehen:
   aktuell halten.
 - `graphify-out/` ist Arbeitsartefakt (nicht committen, sofern nicht anders gewünscht).
 
+GRAPHIFY ERSTMAL NICHT AKTUALISIEREN, DAUERT ZU LANGE.
+
 ## Projektkontext
 
 - Plan und Fortschritt: `INITIAL_PROJECT_PLAN.md` (Phasen mit abhakbaren Steps — dort abhaken, was erledigt ist)

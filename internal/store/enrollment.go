@@ -136,10 +136,11 @@ func (s *Store) TouchHostLastSeen(ctx context.Context, id uuid.UUID) error {
 }
 
 // ListAuthorizedPrincipals liefert für einen Host und einen lokalen Benutzer
-// die Zertifikats-Principals (Username + E-Mail aktiver Benutzer), die sich
-// als dieser lokale Benutzer anmelden dürfen: alle Mitglieder von Gruppen,
-// deren Grant den lokalen Benutzer als Ziel-Principal enthält und deren
-// Tag-Selektor auf die Host-Tags passt (Selektor ⊆ Host-Tags; leer = alle).
+// die Zertifikats-Principals, die sich als dieser lokale Benutzer anmelden
+// dürfen: Username + E-Mail aktiver Mitglieder von Gruppen, deren Grant den
+// lokalen Benutzer als Ziel-Principal enthält und deren Tag-Selektor auf die
+// Host-Tags passt (Selektor ⊆ Host-Tags; leer = alle) — plus
+// ci:<project_path> jedes passenden CI-Grants (ADR-019).
 func (s *Store) ListAuthorizedPrincipals(ctx context.Context, hostID uuid.UUID, localUser string) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT u.username, u.email
@@ -158,17 +159,42 @@ func (s *Store) ListAuthorizedPrincipals(ctx context.Context, hostID uuid.UUID, 
 
 	var principals []string
 	seen := map[string]bool{}
+	add := func(p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			principals = append(principals, p)
+		}
+	}
 	for rows.Next() {
 		var username, email string
 		if err := rows.Scan(&username, &email); err != nil {
 			return nil, err
 		}
-		for _, p := range []string{username, email} {
-			if p != "" && !seen[p] {
-				seen[p] = true
-				principals = append(principals, p)
-			}
-		}
+		add(username)
+		add(email)
 	}
-	return principals, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	ciRows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT 'ci:' || g.project_path
+		FROM ci_grants g
+		WHERE $2 = ANY (g.principals)
+		  AND g.tag_selector <@ (
+		      SELECT COALESCE(jsonb_object_agg(key, value), '{}'::jsonb)
+		      FROM host_tags WHERE host_id = $1)
+		ORDER BY 1`, hostID, localUser)
+	if err != nil {
+		return nil, err
+	}
+	defer ciRows.Close()
+	for ciRows.Next() {
+		var principal string
+		if err := ciRows.Scan(&principal); err != nil {
+			return nil, err
+		}
+		add(principal)
+	}
+	return principals, ciRows.Err()
 }
