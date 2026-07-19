@@ -41,13 +41,19 @@ func auditFilterArgs(f AuditFilter) []any {
 }
 
 // insertAuditEvent schreibt ein Audit-Event (append-only) über den gegebenen
-// querier (Pool oder Transaktion). Nil-Payload wird zu {}.
+// querier (Pool oder Transaktion). Nil-Payload wird zu {}. Ein gesetztes
+// OccurredAt wird übernommen (z. B. auf dem Host aufgetretene, verzögert
+// eingelieferte Session-Events); Zero-Value ⇒ now().
 func insertAuditEvent(ctx context.Context, q querier, e *AuditEvent) error {
+	var occurredAt *time.Time
+	if !e.OccurredAt.IsZero() {
+		occurredAt = &e.OccurredAt
+	}
 	created, err := queryOne[AuditEvent](ctx, q, `
-		INSERT INTO audit_events (event_type, actor, payload)
-		VALUES ($1, $2, COALESCE($3, '{}'::jsonb))
+		INSERT INTO audit_events (event_type, actor, payload, occurred_at)
+		VALUES ($1, $2, COALESCE($3, '{}'::jsonb), COALESCE($4, now()))
 		RETURNING *`,
-		e.EventType, e.Actor, e.Payload)
+		e.EventType, e.Actor, e.Payload, occurredAt)
 	if err != nil {
 		return err
 	}

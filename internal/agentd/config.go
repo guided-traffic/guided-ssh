@@ -18,6 +18,7 @@ import (
 const (
 	DefaultStateDir = "/var/lib/guided-ssh"
 	DefaultSSHDir   = "/etc/ssh"
+	DefaultPAMDir   = "/etc/pam.d"
 
 	defaultCacheTTL       = 5 * time.Minute
 	defaultBundleInterval = time.Hour
@@ -49,6 +50,10 @@ type Config struct {
 	// ReloadCommand wird nach dem Schreiben eines neuen Host-Zertifikats
 	// ausgeführt (z. B. "systemctl reload sshd"); leer = nichts.
 	ReloadCommand string `yaml:"reload_command,omitempty"`
+	// SessionAudit aktiviert das Host-Session-/sudo-Audit (Phase 9, Opt-in beim
+	// Enroll): schreibende Socket-Endpunkte, Spool und Flush an den Server. Ohne
+	// das Flag verhält sich der Daemon wie in Phase 5.
+	SessionAudit bool `yaml:"session_audit,omitempty"`
 }
 
 // Duration ist time.Duration mit YAML-Marshalling als Go-Duration-String
@@ -82,6 +87,14 @@ func (p Paths) AgentCertFile() string { return filepath.Join(p.StateDir, "agent.
 func (p Paths) ServerCAFile() string  { return filepath.Join(p.StateDir, "server-ca.pem") }
 func (p Paths) CacheFile() string     { return filepath.Join(p.StateDir, "principals-cache.json") }
 func (p Paths) DefaultSocket() string { return filepath.Join(p.StateDir, "agentd.sock") }
+
+// SocketTokenFile schützt die schreibenden Socket-Endpunkte (Phase 9): nur
+// root-Helfer können das Token lesen und Events einliefern (0600).
+func (p Paths) SocketTokenFile() string { return filepath.Join(p.StateDir, "socket-token") }
+
+// SpoolFile ist der lokale, verlust-tolerante Puffer der Session-Events
+// (JSON-Lines), bis der Daemon sie an den Server flusht.
+func (p Paths) SpoolFile() string { return filepath.Join(p.StateDir, "sessions-spool.jsonl") }
 
 // HostCertPath leitet den Zertifikatspfad aus dem Public-Key-Pfad ab
 // (ssh_host_ed25519_key.pub → ssh_host_ed25519_key-cert.pub).

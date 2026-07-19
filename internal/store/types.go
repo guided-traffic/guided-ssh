@@ -117,6 +117,24 @@ type Certificate struct {
 	CreatedAt        time.Time       `db:"created_at"`
 }
 
+// HostSession ist eine auf dem Host beobachtete SSH-Session (Phase 9). Der
+// Host-Agent meldet Start und Ende; cert_serial korreliert sie mit dem
+// ausgestellten Zertifikat (und darüber user_id). ended_at NULL = aktiv.
+type HostSession struct {
+	ID         uuid.UUID  `db:"id"`
+	HostID     uuid.UUID  `db:"host_id"`
+	LocalUser  string     `db:"local_user"`
+	RemoteUser string     `db:"remote_user"`
+	RemoteAddr string     `db:"remote_addr"`
+	TTY        string     `db:"tty"`
+	CertSerial *int64     `db:"cert_serial"`
+	KeyID      string     `db:"key_id"`
+	UserID     *uuid.UUID `db:"user_id"`
+	StartedAt  time.Time  `db:"started_at"`
+	EndedAt    *time.Time `db:"ended_at"`
+	CreatedAt  time.Time  `db:"created_at"`
+}
+
 // AuditEvent ist ein Eintrag im Append-only-Audit-Log.
 type AuditEvent struct {
 	ID         int64           `db:"id"`

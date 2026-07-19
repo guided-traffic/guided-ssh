@@ -19,6 +19,7 @@ type agentAPI interface {
 	Renew(ctx context.Context, publicKey string) (string, error)
 	Principals(ctx context.Context, user string) ([]string, error)
 	Bundle(ctx context.Context) (string, error)
+	SendSessions(ctx context.Context, events []sessionEventWire) error
 }
 
 // apiClient spricht die mTLS-Agent-API mit dem beim Enrollment erhaltenen
@@ -115,6 +116,30 @@ func (c *apiClient) Bundle(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+// SendSessions liefert einen Batch Session-/sudo-Events an den Server (mTLS).
+func (c *apiClient) SendSessions(ctx context.Context, events []sessionEventWire) error {
+	body, err := json.Marshal(map[string]any{"events": events})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/v1/agent/sessions", strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("agent-api erreichen: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("agent-api: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	return nil
 }
 
 // doJSON führt den Request aus und dekodiert die JSON-Antwort.

@@ -38,8 +38,13 @@ type Daemon struct {
 	api    agentAPI
 	logger *slog.Logger
 
-	mu    sync.Mutex
-	cache map[string]cacheEntry
+	mu         sync.Mutex
+	cache      map[string]cacheEntry
+	recentAuth map[string][]authRec // guarded by mu; Serial→Session-Korrelation (Phase 9)
+
+	// token schützt die schreibenden Socket-Endpunkte; leer ⇒ Session-Audit aus.
+	token   string
+	spoolMu sync.Mutex // serialisiert Zugriffe auf die Spool-Datei
 }
 
 // NewDaemon lädt Konfiguration und mTLS-Material aus dem State-Verzeichnis.
@@ -53,7 +58,20 @@ func NewDaemon(stateDir string, logger *slog.Logger) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Daemon{cfg: cfg, paths: paths, api: client, logger: logger, cache: map[string]cacheEntry{}}, nil
+	d := &Daemon{
+		cfg: cfg, paths: paths, api: client, logger: logger,
+		cache:      map[string]cacheEntry{},
+		recentAuth: map[string][]authRec{},
+	}
+	if cfg.SessionAudit {
+		d.token = readSocketToken(stateDir)
+	}
+	return d, nil
+}
+
+// sessionAuditEnabled ist wahr, wenn Session-Audit aktiv und das Token geladen ist.
+func (d *Daemon) sessionAuditEnabled() bool {
+	return d.cfg.SessionAudit && d.token != ""
 }
 
 // Run startet Socket-Server und Pflege-Schleifen; blockiert bis ctx endet.
@@ -77,6 +95,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer renewTicker.Stop()
 	defer bundleTicker.Stop()
 
+	// Session-Flush nur bei aktivem Audit; sonst ein toter Kanal.
+	var flushC <-chan time.Time
+	if d.sessionAuditEnabled() {
+		flushTicker := time.NewTicker(sessionFlushInterval)
+		defer flushTicker.Stop()
+		flushC = flushTicker.C
+		d.flushSpool(ctx) // Rückstand aus vorherigem Lauf sofort abarbeiten
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -89,6 +116,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.renewIfNeeded(ctx)
 		case <-bundleTicker.C:
 			d.refreshBundle(ctx)
+		case <-flushC:
+			d.flushSpool(ctx)
 		}
 	}
 }
@@ -135,6 +164,10 @@ func (d *Daemon) socketHandler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	if d.sessionAuditEnabled() {
+		mux.HandleFunc("POST /auth", d.handleAuth)
+		mux.HandleFunc("POST /session-event", d.handleSessionEvent)
+	}
 	return mux
 }
 

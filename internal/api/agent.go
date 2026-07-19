@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -20,6 +21,37 @@ type AgentDeps struct {
 	CA     *ca.CA
 	Hosts  HostStore
 	Logger *slog.Logger
+	// Sessions ist optional (Phase 9): fehlt es, bleibt POST /v1/agent/sessions
+	// deaktiviert (404). *store.Store erfüllt das Interface.
+	Sessions SessionStore
+}
+
+// SessionStore sind die Store-Methoden zur Aufnahme von Host-Session- und
+// sudo-Events (*store.Store erfüllt sie; Tests nutzen einen Fake).
+type SessionStore interface {
+	OpenHostSession(ctx context.Context, e store.SessionEvent) error
+	CloseHostSession(ctx context.Context, e store.SessionEvent) error
+	RecordSudoEvent(ctx context.Context, e store.SessionEvent) error
+}
+
+// sessionEvent ist ein gemeldetes Session-/sudo-Ereignis (Wire-Format). Serial 0
+// bedeutet „kein korrelierter Serial".
+type sessionEvent struct {
+	Phase      string    `json:"phase"`   // open | close
+	Service    string    `json:"service"` // sshd | sudo
+	LocalUser  string    `json:"local_user"`
+	RemoteUser string    `json:"remote_user"`
+	RemoteAddr string    `json:"remote_addr"`
+	TTY        string    `json:"tty"`
+	Serial     int64     `json:"serial"`
+	KeyID      string    `json:"key_id"`
+	Command    string    `json:"command"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// sessionsRequest ist der Body von POST /v1/agent/sessions (Batch aus dem Spool).
+type sessionsRequest struct {
+	Events []sessionEvent `json:"events"`
 }
 
 // renewRequest ist der Body von POST /v1/agent/renew.
@@ -93,6 +125,31 @@ func NewAgent(deps AgentDeps) http.Handler {
 		_ = json.NewEncoder(w).Encode(principalsResponse{Principals: principals})
 	})
 
+	if deps.Sessions != nil {
+		mux.HandleFunc("POST /v1/agent/sessions", func(w http.ResponseWriter, r *http.Request) {
+			host, ok := agentHost(w, r, deps)
+			if !ok {
+				return
+			}
+			var req sessionsRequest
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+				http.Error(w, "request-body ungültig", http.StatusBadRequest)
+				return
+			}
+			// Fehler je Event werden geloggt, aber der Batch wird bestätigt: der
+			// Agent räumt den Spool nur bei HTTP-200. Ein fehlerhaftes Einzelevent
+			// darf den gesamten Batch nicht dauerhaft blockieren.
+			for i := range req.Events {
+				if err := ingestSessionEvent(r.Context(), deps.Sessions, host, req.Events[i]); err != nil {
+					deps.Logger.Error("agent/sessions: event verwerfen",
+						"host", host.Name, "service", req.Events[i].Service,
+						"phase", req.Events[i].Phase, "error", err)
+				}
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
+
 	mux.HandleFunc("GET /v1/agent/bundle/user", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := agentHost(w, r, deps); !ok {
 			return
@@ -108,6 +165,37 @@ func NewAgent(deps AgentDeps) http.Handler {
 	})
 
 	return mux
+}
+
+// ingestSessionEvent bildet ein gemeldetes Ereignis auf die passende
+// Store-Methode ab. Unbekannte Kombinationen (z. B. sudo-close) werden
+// stillschweigend verworfen.
+func ingestSessionEvent(ctx context.Context, sessions SessionStore, host *store.Host, ev sessionEvent) error {
+	e := store.SessionEvent{
+		HostID:     host.ID,
+		HostName:   host.Name,
+		LocalUser:  ev.LocalUser,
+		RemoteUser: ev.RemoteUser,
+		RemoteAddr: ev.RemoteAddr,
+		TTY:        ev.TTY,
+		KeyID:      ev.KeyID,
+		Command:    ev.Command,
+		OccurredAt: ev.OccurredAt,
+	}
+	if ev.Serial > 0 {
+		serial := ev.Serial
+		e.CertSerial = &serial
+	}
+	switch {
+	case ev.Service == "sudo" && ev.Phase == "open":
+		return sessions.RecordSudoEvent(ctx, e)
+	case ev.Phase == "open":
+		return sessions.OpenHostSession(ctx, e)
+	case ev.Phase == "close" && ev.Service != "sudo":
+		return sessions.CloseHostSession(ctx, e)
+	default:
+		return nil
+	}
 }
 
 // agentHost ermittelt den aufrufenden Host aus dem mTLS-Client-Zertifikat

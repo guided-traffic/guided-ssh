@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -15,7 +14,12 @@ import (
 // Daemon über den Unix-Socket und schreibt Principals zeilenweise nach
 // stdout. Jeder Fehler (Daemon down, Timeout, API+Cache leer) führt zu
 // einem Fehler — sshd wertet fehlende Ausgabe als Ablehnung (fail-closed).
-func PrintPrincipals(ctx context.Context, stateDir, user string, stdout io.Writer) error {
+//
+// serial/keyid stammen aus den sshd-Tokens %s/%i (nur bei aktivem Session-Audit
+// gesetzt): nach dem Principals-Druck werden sie best-effort an den Daemon
+// gemeldet, damit dieser eine folgende Session-Open korrelieren kann. Fehler
+// dabei sind irrelevant — das (fail-closed) Login-Ergebnis steht bereits fest.
+func PrintPrincipals(ctx context.Context, stateDir, user string, serial int64, keyid string, stdout io.Writer) error {
 	if user == "" {
 		return fmt.Errorf("aufruf: gssh-agentd principals -user <name>")
 	}
@@ -23,15 +27,7 @@ func PrintPrincipals(ctx context.Context, stateDir, user string, stdout io.Write
 	if err != nil {
 		return err
 	}
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(dialCtx context.Context, _, _ string) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(dialCtx, "unix", cfg.SocketPath)
-			},
-		},
-	}
+	client := newSocketClient(cfg.SocketPath, 10*time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"http://agentd/principals?user="+url.QueryEscape(user), nil)
 	if err != nil {
@@ -55,5 +51,25 @@ func PrintPrincipals(ctx context.Context, stateDir, user string, stdout io.Write
 	for _, principal := range payload.Principals {
 		fmt.Fprintln(stdout, principal)
 	}
+
+	recordAuthSerial(ctx, cfg.SocketPath, stateDir, user, serial, keyid)
 	return nil
+}
+
+// recordAuthSerial meldet dem Daemon best-effort den am Login gesehenen Serial.
+// Nur wenn ein Serial vorliegt und das Socket-Token existiert (Session-Audit
+// aktiv). Jeder Fehler wird verschluckt.
+func recordAuthSerial(ctx context.Context, socketPath, stateDir, user string, serial int64, keyid string) {
+	if serial <= 0 {
+		return
+	}
+	token := readSocketToken(stateDir)
+	if token == "" {
+		return
+	}
+	authCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	client := newSocketClient(socketPath, time.Second)
+	_ = postSocketJSON(authCtx, client, token, "/auth",
+		authRecord{User: user, Serial: serial, KeyID: keyid})
 }

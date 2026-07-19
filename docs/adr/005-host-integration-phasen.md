@@ -25,3 +25,5 @@ für zentrale Konten (UID/GID aus IdP).
 - Offboarding wirkt über Host-ACL (Principals) trotzdem sofort innerhalb Cache-TTL.
 - Session-/sudo-Audit auf dem Host kommt erst mit Stufe 2; bis dahin nur
   Ausstellungs-Audit (serverseitig) und sshd-Logs.
+- Stufe 2 umgesetzt (Phase 9): `pam_exec` statt C-Modul, Serial-Korrelation über
+  sshd-Tokens `%s`/`%i`, host-lokales Opt-in — Details in ADR-021. NSS bleibt offen.

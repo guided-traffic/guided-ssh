@@ -336,14 +336,24 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 9 — Session-Audit auf dem Host (Ausbaustufe)
 
-- [ ] PAM-Modul oder `pam_exec`-Hook: Session-Start/-Ende an API melden (gepuffert,
+- [x] PAM-Modul oder `pam_exec`-Hook: Session-Start/-Ende an API melden (gepuffert,
       asynchron, Verlust-tolerant mit lokalem Spool)
-- [ ] sudo-Audit: sudo-Events (Kommando, Ziel-User) erfassen und melden
-- [ ] Korrelation: Session-Events via Zertifikats-Serial mit Ausstellung verknüpfen
-      (sshd-LogLevel VERBOSE loggt Cert-Serial; Agent parst `auth.log`/journald)
+      → `pam_exec`-Hooks (ADR-005: kein C-Code) → `gssh-agentd pam-session`, fail-open;
+      Daemon-Spool (`sessions-spool.jsonl`) + Flush über mTLS `POST /v1/agent/sessions`;
+      Opt-in per `gssh-agentd enroll --session-audit` (Default aus, host-lokal)
+- [x] sudo-Audit: sudo-Events (Kommando, Ziel-User) erfassen und melden
+      → `pam_exec` im sudo-Stack → `session.sudo`-Audit-Event (Ziel-/Aufruf-User,
+      Kommando best-effort via `SUDO_COMMAND`; zuverlässig nur via sudo-Logfile/Plugin)
+- [x] Korrelation: Session-Events via Zertifikats-Serial mit Ausstellung verknüpfen
+      → statt journald-Parsing: sshd-Tokens `%s`/`%i` an den Principals-Helfer; Daemon
+      merkt sich Serial→User und reichert die Session-Open an; Server löst über
+      `certificates.serial` den Nutzer auf (`LogLevel VERBOSE` zusätzlich gesetzt)
 - [ ] Optional NSS-Modul für zentrale Konten (UID/GID aus IdP) — Entscheidung nach
       MVP-Erfahrung, bis dahin lokale Konten über bestehendes Provisioning des Betreibers
+      → offen gelassen (bewusst zurückgestellt)
 - [ ] Dashboards: aktive Sessions, Sessions pro Host/Nutzer
+      → zurückgestellt (Folge-Schritt); Backend steht: `host_sessions` +
+      `Store.ListActiveSessions`
 
 ## Phase 10 — Härtung & Schlüsselverwaltung
 

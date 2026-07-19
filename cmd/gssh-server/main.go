@@ -279,7 +279,7 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 	}
 	return &http.Server{
 		Addr:    listen,
-		Handler: api.NewAgent(api.AgentDeps{CA: certAuthority, Hosts: st, Logger: logger}),
+		Handler: api.NewAgent(api.AgentDeps{CA: certAuthority, Hosts: st, Sessions: st, Logger: logger}),
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS12,
 			Certificates: []tls.Certificate{serverCert},

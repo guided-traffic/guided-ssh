@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -69,6 +70,11 @@ type fakeAPI struct {
 	bundle        string
 	bundleCalls   atomic.Int32
 	renewCalls    atomic.Int32
+
+	sessionsMu   sync.Mutex
+	sessions     []sessionEventWire
+	sessionsErr  error
+	sessionCalls atomic.Int32
 }
 
 func (f *fakeAPI) Renew(context.Context, string) (string, error) {
@@ -86,6 +92,23 @@ func (f *fakeAPI) Principals(_ context.Context, user string) ([]string, error) {
 func (f *fakeAPI) Bundle(context.Context) (string, error) {
 	f.bundleCalls.Add(1)
 	return f.bundle, nil
+}
+
+func (f *fakeAPI) SendSessions(_ context.Context, events []sessionEventWire) error {
+	f.sessionCalls.Add(1)
+	if f.sessionsErr != nil {
+		return f.sessionsErr
+	}
+	f.sessionsMu.Lock()
+	defer f.sessionsMu.Unlock()
+	f.sessions = append(f.sessions, events...)
+	return nil
+}
+
+func (f *fakeAPI) sentSessions() []sessionEventWire {
+	f.sessionsMu.Lock()
+	defer f.sessionsMu.Unlock()
+	return append([]sessionEventWire(nil), f.sessions...)
 }
 
 // newTestDaemon baut einen Daemon mit Fake-API und Temp-Verzeichnissen.
@@ -109,8 +132,9 @@ func newTestDaemon(t *testing.T, api agentAPI) *Daemon {
 	cfg.applyDefaults(Paths{StateDir: stateDir})
 	return &Daemon{
 		cfg: cfg, paths: Paths{StateDir: stateDir}, api: api,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		cache:  map[string]cacheEntry{},
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cache:      map[string]cacheEntry{},
+		recentAuth: map[string][]authRec{},
 	}
 }
 
@@ -281,7 +305,7 @@ func TestDaemonSocketUndHelper(t *testing.T) {
 	waitForSocket(t, d.cfg.SocketPath)
 
 	var stdout bytes.Buffer
-	if err := PrintPrincipals(ctx, d.paths.StateDir, "deploy", &stdout); err != nil {
+	if err := PrintPrincipals(ctx, d.paths.StateDir, "deploy", 0, "", &stdout); err != nil {
 		t.Fatalf("PrintPrincipals: %v", err)
 	}
 	if strings.TrimSpace(stdout.String()) != "alice" {
@@ -291,7 +315,7 @@ func TestDaemonSocketUndHelper(t *testing.T) {
 	// Fail-closed über den Helper: unbekannter User, API down.
 	api.principalsErr = errors.New("api down")
 	var out2 bytes.Buffer
-	if err := PrintPrincipals(ctx, d.paths.StateDir, "root", &out2); err == nil {
+	if err := PrintPrincipals(ctx, d.paths.StateDir, "root", 0, "", &out2); err == nil {
 		t.Fatal("fail-closed erwartet")
 	}
 	if out2.Len() != 0 {
@@ -316,13 +340,13 @@ func TestPrintPrincipalsOhneDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	if err := PrintPrincipals(context.Background(), stateDir, "deploy", &stdout); err == nil {
+	if err := PrintPrincipals(context.Background(), stateDir, "deploy", 0, "", &stdout); err == nil {
 		t.Fatal("fehler erwartet (daemon läuft nicht)")
 	}
 }
 
 func TestPrintPrincipalsOhneUser(t *testing.T) {
-	if err := PrintPrincipals(context.Background(), t.TempDir(), "", io.Discard); err == nil {
+	if err := PrintPrincipals(context.Background(), t.TempDir(), "", 0, "", io.Discard); err == nil {
 		t.Fatal("fehler erwartet (user fehlt)")
 	}
 }

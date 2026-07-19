@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
@@ -32,6 +33,9 @@ func Run(stdout, stderr io.Writer, args []string) int {
 		return runDaemonCmd(ctx, rest, stdout, stderr)
 	case "principals":
 		return runPrincipalsCmd(ctx, rest, stdout, stderr)
+	case "pam-session":
+		runPAMSessionCmd(ctx, rest, stderr)
+		return 0 // fail-open: pam_exec darf niemals blockieren
 	case "version":
 		fmt.Fprintln(stdout, version.String())
 		return 0
@@ -51,13 +55,18 @@ func usage(w io.Writer) {
 
 kommandos:
   enroll --server url --agent-url url --token t [--hostname n] [--tags k=v,…]
-         [--pin b64] [--state-dir d] [--ssh-dir d] [--ssh-key pfad]
-         host registrieren: zertifikate holen, sshd-konfiguration schreiben
+         [--pin b64] [--state-dir d] [--ssh-dir d] [--ssh-key pfad] [--session-audit]
+         host registrieren: zertifikate holen, sshd-konfiguration schreiben;
+         --session-audit aktiviert zusätzlich session-/sudo-audit (pam_exec)
   run [--state-dir d]
          daemon: zertifikat erneuern (2/3 laufzeit), ca-bundle pflegen,
          principals-cache + unix-socket für sshd bedienen
-  principals -user <name> [-state-dir d]
-         AuthorizedPrincipalsCommand-helper (fail-closed)
+  principals -user <name> [-serial N] [-keyid ID] [-state-dir d]
+         AuthorizedPrincipalsCommand-helper (fail-closed); serial/keyid (sshd-
+         tokens) nur bei aktivem session-audit (korrelation session↔zertifikat)
+  pam-session [-state-dir d]
+         pam_exec-ziel (session open/close in sshd/sudo); meldet session-/sudo-
+         events an den daemon, beendet sich immer mit 0 (fail-open)
   version
          version ausgeben
 `)
@@ -76,6 +85,7 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
 	sshDir := fs.String("ssh-dir", DefaultSSHDir, "sshd-konfigurationsverzeichnis")
 	sshKey := fs.String("ssh-key", "", "ssh-host-public-key (default: <ssh-dir>/ssh_host_ed25519_key.pub)")
+	sessionAudit := fs.Bool("session-audit", false, "host-session-/sudo-audit aktivieren (pam_exec-hooks, opt-in)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -88,6 +98,7 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		ServerURL: *server, AgentURL: *agentURL, Token: *token,
 		Hostname: *hostname, Tags: tags, PinSHA256: *pin,
 		StateDir: *stateDir, SSHDir: *sshDir, SSHKeyPath: *sshKey,
+		SessionAudit: *sessionAudit,
 	}
 	if err := Enroll(ctx, opts, stdout); err != nil {
 		fmt.Fprintf(stderr, "gssh-agentd: enrollment fehlgeschlagen: %v\n", err)
@@ -123,14 +134,31 @@ func runPrincipalsCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs.SetOutput(stderr)
 	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
 	user := fs.String("user", "", "lokaler benutzername (%u aus sshd)")
+	serial := fs.Int64("serial", 0, "zertifikats-serial (%s aus sshd); 0 = keiner")
+	keyid := fs.String("keyid", "", "zertifikats-key-id (%i aus sshd)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if err := PrintPrincipals(ctx, *stateDir, *user, stdout); err != nil {
+	if err := PrintPrincipals(ctx, *stateDir, *user, *serial, *keyid, stdout); err != nil {
 		fmt.Fprintf(stderr, "gssh-agentd: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// runPAMSessionCmd behandelt gssh-agentd pam-session (pam_exec-Ziel). Ein Fehler
+// wird nach stderr geloggt; der Aufrufer beendet sich immer mit 0 (fail-open),
+// damit der Hook niemals Login oder sudo blockiert.
+func runPAMSessionCmd(ctx context.Context, args []string, stderr io.Writer) {
+	fs := flag.NewFlagSet("gssh-agentd pam-session", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
+	if err := fs.Parse(args); err != nil {
+		return
+	}
+	if err := RunPAMSession(ctx, *stateDir, os.Getenv, time.Now); err != nil {
+		fmt.Fprintf(stderr, "gssh-agentd: pam-session (ignoriert): %v\n", err)
+	}
 }
 
 // parseTags parst "k=v,k2=v2" in eine Map (identisch zu gssh-server).

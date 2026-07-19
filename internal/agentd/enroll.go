@@ -6,8 +6,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +39,12 @@ type EnrollOptions struct {
 	StateDir   string
 	SSHDir     string
 	SSHKeyPath string
+	// SessionAudit aktiviert das Host-Session-/sudo-Audit (Phase 9, Opt-in):
+	// schreibt pam_exec-Hooks + sshd-Korrelation, erzeugt das Socket-Token.
+	SessionAudit bool
+	// PAMDir ist das PAM-Konfigurationsverzeichnis (Default /etc/pam.d); fehlt
+	// es, werden die pam_exec-Hooks übersprungen (Tests/nicht-Linux).
+	PAMDir string
 }
 
 // enrollResponse spiegelt die Antwort von POST /v1/enroll (internal/api).
@@ -64,6 +72,9 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	}
 	if opts.SSHKeyPath == "" {
 		opts.SSHKeyPath = filepath.Join(opts.SSHDir, "ssh_host_ed25519_key.pub")
+	}
+	if opts.PAMDir == "" {
+		opts.PAMDir = DefaultPAMDir
 	}
 	if opts.Hostname == "" {
 		hostname, err := os.Hostname()
@@ -178,14 +189,33 @@ func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollRes
 		}
 	}
 	cfg := &Config{
-		AgentURL:   opts.AgentURL,
-		HostID:     response.HostID,
-		HostName:   opts.Hostname,
-		SSHKeyPath: opts.SSHKeyPath,
-		SSHDir:     opts.SSHDir,
+		AgentURL:     opts.AgentURL,
+		HostID:       response.HostID,
+		HostName:     opts.Hostname,
+		SSHKeyPath:   opts.SSHKeyPath,
+		SSHDir:       opts.SSHDir,
+		SessionAudit: opts.SessionAudit,
 	}
 	cfg.applyDefaults(paths)
+	if opts.SessionAudit {
+		if err := writeSocketToken(paths); err != nil {
+			return err
+		}
+	}
 	return writeConfig(paths, cfg)
+}
+
+// writeSocketToken erzeugt das Token der schreibenden Socket-Endpunkte (Phase 9),
+// sofern noch keins existiert (idempotentes Re-Enrollment). 0600 → nur root.
+func writeSocketToken(paths Paths) error {
+	if _, err := os.Stat(paths.SocketTokenFile()); err == nil {
+		return nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Errorf("socket-token erzeugen: %w", err)
+	}
+	return os.WriteFile(paths.SocketTokenFile(), []byte(hex.EncodeToString(buf)), 0o600)
 }
 
 // writeSSHDFiles schreibt Host-Zertifikat, TrustedUserCAKeys-Bundle und den
@@ -205,15 +235,71 @@ func writeSSHDFiles(opts EnrollOptions, response *enrollResponse) error {
 	if err != nil {
 		binary = "gssh-agentd"
 	}
+	// Bei aktivem Session-Audit reicht sshd dem Principals-Helfer Serial (%s) und
+	// Key-ID (%i) des Zertifikats, und LogLevel VERBOSE loggt den Serial (ADR-005
+	// Stufe 2). Ohne Audit bleibt das Snippet wie in Phase 5.
+	principalsArgs := "-user %u"
+	logLevel := ""
+	if opts.SessionAudit {
+		principalsArgs = "-user %u -serial %s -keyid %i"
+		logLevel = "LogLevel VERBOSE\n"
+	}
 	snippet := fmt.Sprintf(`# guided-ssh — generiert von gssh-agentd enroll, nicht manuell editieren.
 # Voraussetzung: die Haupt-sshd_config enthält "Include %s/sshd_config.d/*.conf".
 TrustedUserCAKeys %s
 HostCertificate %s
-AuthorizedPrincipalsCommand %s principals -state-dir %s -user %%u
+%sAuthorizedPrincipalsCommand %s principals -state-dir %s %s
 AuthorizedPrincipalsCommandUser root
-`, opts.SSHDir, UserCAPath(opts.SSHDir), certPath, binary, opts.StateDir)
+`, opts.SSHDir, UserCAPath(opts.SSHDir), certPath, logLevel, binary, opts.StateDir, principalsArgs)
 	if err := os.WriteFile(SnippetPath(opts.SSHDir), []byte(snippet), 0o644); err != nil { //nolint:gosec // sshd-Konfiguration, muss für sshd lesbar sein
 		return fmt.Errorf("sshd-snippet schreiben: %w", err)
 	}
+	if opts.SessionAudit {
+		if err := writePAMFiles(opts, binary); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// pamManagedMarker kennzeichnet die von guided-ssh verwaltete pam_exec-Zeile.
+const pamManagedMarker = "# guided-ssh session audit (managed)"
+
+// writePAMFiles hängt idempotent einen pam_exec-Hook an die PAM-Stacks von sshd
+// und sudo an (session open/close → gssh-agentd pam-session). `optional` +
+// Helfer-Exit 0 ⇒ fail-open. Fehlt das PAM-Verzeichnis (Tests/nicht-Linux), wird
+// übersprungen. Bestehende Zeilen bleiben unangetastet.
+func writePAMFiles(opts EnrollOptions, binary string) error {
+	if info, err := os.Stat(opts.PAMDir); err != nil || !info.IsDir() {
+		return nil //nolint:nilerr // kein PAM-Stack (z. B. nicht-Linux) — bewusst überspringen
+	}
+	line := fmt.Sprintf("%s\nsession optional pam_exec.so quiet %s pam-session -state-dir %s\n",
+		pamManagedMarker, binary, opts.StateDir)
+	for _, service := range []string{"sshd", "sudo"} {
+		if err := ensurePAMLine(filepath.Join(opts.PAMDir, service), line); err != nil {
+			return fmt.Errorf("pam-hook %s: %w", service, err)
+		}
+	}
+	return nil
+}
+
+// ensurePAMLine hängt den Hook an, falls die Datei existiert und den Marker noch
+// nicht enthält. Nicht vorhandene Service-Dateien werden übersprungen (nicht jeder
+// Host hat /etc/pam.d/sudo).
+func ensurePAMLine(path, line string) error {
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(existing), pamManagedMarker) {
+		return nil
+	}
+	body := existing
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		body = append(body, '\n')
+	}
+	return os.WriteFile(path, append(body, []byte(line)...), 0o644) //nolint:gosec // PAM-Konfiguration, muss lesbar sein
 }
