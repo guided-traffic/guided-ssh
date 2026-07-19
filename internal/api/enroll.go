@@ -59,7 +59,7 @@ type enrollResponse struct {
 func handleEnroll(certAuthority *ca.CA, hosts HostStore, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req enrollRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
 			http.Error(w, "request-body ungültig", http.StatusBadRequest)
 			return
 		}

@@ -26,3 +26,5 @@ nie gelöscht — überholte Entscheidungen bekommen Status „abgelöst durch A
 | [018](018-grants-additiv.md) | Grant-Modell: additiv, Identitäts-Principals, deklarativer Abgleich | akzeptiert |
 | [019](019-gitlab-ci-grants.md) | GitLab-CI: eigener Verifier, CI-Grants, Projekt-Principals | akzeptiert |
 | [020](020-web-ui-rollen-audit-export.md) | Web-UI: Rollenmodell, generierter API-Client, Audit-Export/-Streaming | akzeptiert |
+| [021](021-session-audit-host.md) | Session-Audit auf dem Host: pam_exec, Serial-Korrelation, Opt-in | akzeptiert |
+| [022](022-revocation-kurze-laufzeiten.md) | Revocation: kurze Laufzeiten primär, RevokedKeys als Notfallweg | akzeptiert |

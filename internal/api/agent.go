@@ -71,6 +71,19 @@ type principalsResponse struct {
 	Principals []string `json:"principals"`
 }
 
+// renewMTLSRequest ist der Body von POST /v1/agent/renew-mtls (Phase 10:
+// Rotation des mTLS-Client-Zertifikats über den bestehenden mTLS-Kanal).
+type renewMTLSRequest struct {
+	// CSR ist der PEM-kodierte Certificate Request; die Identität (CN)
+	// vergibt der Server aus dem verifizierten Client-Zertifikat.
+	CSR string `json:"csr"`
+}
+
+// renewMTLSResponse ist die Antwort: das neue mTLS-Client-Zertifikat (PEM).
+type renewMTLSResponse struct {
+	Certificate string `json:"certificate"`
+}
+
 // NewAgent baut den Handler der Agent-API. Er läuft ausschließlich hinter
 // dem mTLS-Listener: die Identität des Hosts kommt aus dem CommonName des
 // verifizierten Client-Zertifikats (Host-UUID, gesetzt beim Enrollment).
@@ -103,6 +116,29 @@ func NewAgent(deps AgentDeps) http.Handler {
 			Certificate: strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert))),
 			ValidBefore: record.ValidBefore,
 		})
+	})
+
+	// Rotation des mTLS-Client-Zertifikats: der Agent authentifiziert sich mit
+	// dem noch gültigen Zertifikat und reicht einen CSR für das nächste ein
+	// (Identität kommt ausschließlich aus dem verifizierten Peer-Zertifikat).
+	mux.HandleFunc("POST /v1/agent/renew-mtls", func(w http.ResponseWriter, r *http.Request) {
+		host, ok := agentHost(w, r, deps)
+		if !ok {
+			return
+		}
+		var req renewMTLSRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
+			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			return
+		}
+		certPEM, err := deps.CA.IssueAgentCert(r.Context(), host.ID, []byte(req.CSR))
+		if err != nil {
+			deps.Logger.Error("agent/renew-mtls: ausstellung fehlgeschlagen", "host", host.Name, "error", err)
+			http.Error(w, "csr ungültig", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(renewMTLSResponse{Certificate: certPEM})
 	})
 
 	mux.HandleFunc("GET /v1/agent/principals", func(w http.ResponseWriter, r *http.Request) {

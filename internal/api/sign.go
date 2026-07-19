@@ -182,11 +182,16 @@ func maxGrantValidity(grants []store.AccessGrant) time.Duration {
 	return allowed
 }
 
+// maxRequestBody begrenzt die Bodies der unauthentifizierten Endpunkte
+// (Public Key, CSR und Metadaten bleiben weit darunter) — Speicherschutz
+// gegen absichtlich große Anfragen (Phase 10).
+const maxRequestBody = 64 << 10
+
 // decodeSignRequest parst Body und Public Key eines Sign-Requests; bei
 // Fehlern ist die 400-Antwort bereits geschrieben (ok = false).
 func decodeSignRequest(w http.ResponseWriter, r *http.Request) (ssh.PublicKey, signUserRequest, bool) {
 	var req signUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
 		http.Error(w, "request-body ungültig", http.StatusBadRequest)
 		return nil, req, false
 	}

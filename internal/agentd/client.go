@@ -11,12 +11,14 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 // agentAPI abstrahiert die Agent-Endpunkte des Servers (Tests nutzen einen Fake).
 type agentAPI interface {
 	Renew(ctx context.Context, publicKey string) (string, error)
+	RenewMTLS(ctx context.Context, csrPEM string) (string, error)
 	Principals(ctx context.Context, user string) ([]string, error)
 	Bundle(ctx context.Context) (string, error)
 	SendSessions(ctx context.Context, events []sessionEventWire) error
@@ -24,10 +26,15 @@ type agentAPI interface {
 
 // apiClient spricht die mTLS-Agent-API mit dem beim Enrollment erhaltenen
 // Client-Zertifikat; das Serverzertifikat wird gegen die mitgelieferte CA
-// verifiziert.
+// verifiziert. Das Client-Zertifikat ist austauschbar (Rotation, Phase 10)
+// und wird pro TLS-Handshake über GetClientCertificate gelesen.
 type apiClient struct {
-	baseURL string
-	http    *http.Client
+	baseURL   string
+	http      *http.Client
+	transport *http.Transport
+
+	mu         sync.Mutex
+	clientCert tls.Certificate
 }
 
 // newAPIClient lädt mTLS-Material aus dem State-Verzeichnis.
@@ -44,17 +51,31 @@ func newAPIClient(cfg *Config, paths Paths) (*apiClient, error) {
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return nil, fmt.Errorf("server-ca %s: kein gültiges pem", paths.ServerCAFile())
 	}
-	return &apiClient{
-		baseURL: strings.TrimRight(cfg.AgentURL, "/"),
-		http: &http.Client{
-			Timeout: 15 * time.Second,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{
-				MinVersion:   tls.VersionTLS12,
-				RootCAs:      pool,
-				Certificates: []tls.Certificate{clientCert},
-			}},
+	c := &apiClient{
+		baseURL:    strings.TrimRight(cfg.AgentURL, "/"),
+		clientCert: clientCert,
+	}
+	c.transport = &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    pool,
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			cert := c.clientCert
+			return &cert, nil
 		},
-	}, nil
+	}}
+	c.http = &http.Client{Timeout: 15 * time.Second, Transport: c.transport}
+	return c, nil
+}
+
+// setClientCert tauscht das Client-Zertifikat nach einer Rotation aus; offene
+// Verbindungen mit dem alten Zertifikat werden geschlossen.
+func (c *apiClient) setClientCert(cert tls.Certificate) {
+	c.mu.Lock()
+	c.clientCert = cert
+	c.mu.Unlock()
+	c.transport.CloseIdleConnections()
 }
 
 // Renew tauscht den Host-Public-Key gegen ein frisches Host-Zertifikat.
@@ -77,6 +98,31 @@ func (c *apiClient) Renew(ctx context.Context, publicKey string) (string, error)
 	}
 	if resp.Certificate == "" {
 		return "", fmt.Errorf("renew-antwort ohne zertifikat")
+	}
+	return resp.Certificate, nil
+}
+
+// RenewMTLS tauscht einen CSR gegen ein frisches mTLS-Client-Zertifikat
+// (authentifiziert über das noch gültige alte Zertifikat).
+func (c *apiClient) RenewMTLS(ctx context.Context, csrPEM string) (string, error) {
+	body, err := json.Marshal(map[string]string{"csr": csrPEM})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/v1/agent/renew-mtls", strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	var resp struct {
+		Certificate string `json:"certificate"`
+	}
+	if err := c.doJSON(req, &resp); err != nil {
+		return "", err
+	}
+	if resp.Certificate == "" {
+		return "", fmt.Errorf("renew-mtls-antwort ohne zertifikat")
 	}
 	return resp.Certificate, nil
 }

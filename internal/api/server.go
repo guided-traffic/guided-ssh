@@ -30,6 +30,9 @@ type Deps struct {
 	CIVerifier CITokenVerifier
 	CIStore    CIStore
 	Logger     *slog.Logger
+	// RateLimit drosselt die unauthentifizierten Endpunkte (Sign, Enroll)
+	// pro Client-IP (Phase 10); nil ⇒ kein Rate-Limiting (Tests).
+	RateLimit *RateLimiter
 	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API voll
 	// nutzen dürfen; leer ⇒ keine Mutationen möglich (fail-closed).
 	AdminGroup string
@@ -103,12 +106,12 @@ func New(deps Deps) http.Handler {
 	})
 
 	if deps.Hosts != nil {
-		mux.HandleFunc("POST /v1/enroll", handleEnroll(deps.CA, deps.Hosts, deps.Logger))
+		mux.HandleFunc("POST /v1/enroll", deps.RateLimit.limit(handleEnroll(deps.CA, deps.Hosts, deps.Logger)))
 	}
 
 	if deps.Verifier != nil && deps.Store != nil && deps.Grants != nil {
 		mux.HandleFunc("POST /v1/sign/user",
-			handleSignUser(deps.CA, deps.Verifier, auth.NewMapper(deps.Store), deps.Grants, deps.Logger))
+			deps.RateLimit.limit(handleSignUser(deps.CA, deps.Verifier, auth.NewMapper(deps.Store), deps.Grants, deps.Logger)))
 	} else {
 		mux.HandleFunc("POST /v1/sign/user", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "oidc nicht konfiguriert", http.StatusServiceUnavailable)
@@ -117,7 +120,7 @@ func New(deps Deps) http.Handler {
 
 	if deps.CIVerifier != nil && deps.CIStore != nil {
 		mux.HandleFunc("POST /v1/sign/ci",
-			handleSignCI(deps.CA, deps.CIVerifier, deps.CIStore, deps.Logger))
+			deps.RateLimit.limit(handleSignCI(deps.CA, deps.CIVerifier, deps.CIStore, deps.Logger)))
 	} else {
 		mux.HandleFunc("POST /v1/sign/ci", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "gitlab-ci nicht konfiguriert", http.StatusServiceUnavailable)

@@ -359,12 +359,31 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 - [ ] KMS-Signer implementieren (Interface aus Phase 2): PKCS#11 zuerst (deckt HSM +
       SoftHSM-Tests ab), HashiCorp Vault integration
-- [ ] Rate-Limiting und Brute-Force-Schutz auf Sign-Endpoints
-- [ ] mTLS-Zertifikatsrotation für Host-Agenten
-- [ ] Revocation-Strategie dokumentieren: kurze Laufzeiten als primärer Mechanismus,
+      → bewusst zurückgestellt
+- [x] Rate-Limiting und Brute-Force-Schutz auf Sign-Endpoints
+      → `internal/api/ratelimit.go`: Token-Bucket pro Client-IP auf
+      `/v1/sign/user|ci` + `/v1/enroll` (Request-Budget 60/min + enges
+      Failure-Budget 10/min für 401/403 → 429); Env `GSSH_SIGN_RATE_PER_MINUTE`
+      (0 = aus), `GSSH_SIGN_FAIL_PER_MINUTE`, `GSSH_RATE_TRUST_PROXY`;
+      zusätzlich 64-KiB-Body-Limits auf den Austausch-Endpunkten
+- [x] mTLS-Zertifikatsrotation für Host-Agenten
+      → `POST /v1/agent/renew-mtls` (CSR über bestehenden mTLS-Kanal, CN kommt
+      serverseitig aus dem Peer-Zertifikat); Daemon rotiert bei 2/3 der
+      Laufzeit (frisches Schlüsselpaar, atomarer Dateitausch, Client-Zertifikat
+      wird per GetClientCertificate ohne Neustart umgeschaltet)
+- [x] Revocation-Strategie dokumentieren: kurze Laufzeiten als primärer Mechanismus,
       zusätzlich `RevokedKeys`-Verteilung über Host-Agent für Notfälle
-- [ ] Security-Review des Token-Austauschs (Replay, Audience-Confusion, Clock-Skew)
-- [ ] Fuzzing/Negativtests für Sign-Endpoints
+      → ADR-022: Laufzeiten primär, schneller Entzug über Grants/Principals
+      (fail-closed, ~10 min), KRL-Verteilung als geplante Ausbaustufe,
+      CA-Rotation als Nuklearoption
+- [x] Security-Review des Token-Austauschs (Replay, Audience-Confusion, Clock-Skew)
+      → `docs/security-review-token-austausch.md`; Fixes: fail-fast bei
+      fehlender `GSSH_OIDC_CLIENT_ID`, Startup-Check gegen Issuer/Audience-
+      Kollision von Benutzer-OIDC und GitLab-CI (`checkAudienceSeparation`)
+- [x] Fuzzing/Negativtests für Sign-Endpoints
+      → Go-Fuzzing: `FuzzDecodeSignRequest`, `FuzzBearerToken`,
+      `FuzzSignUser`, `FuzzSignCI` (nie Panic/500); Negativtests für
+      übergroße Bodies, negative Laufzeit, Rate-Limit nach Fehlversuchen
 
 ## Phase 11 — Helm-Chart & Kubernetes-Deployment
 

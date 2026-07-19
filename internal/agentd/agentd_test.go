@@ -70,6 +70,8 @@ type fakeAPI struct {
 	bundle        string
 	bundleCalls   atomic.Int32
 	renewCalls    atomic.Int32
+	mtlsCalls     atomic.Int32
+	mtlsErr       error
 
 	sessionsMu   sync.Mutex
 	sessions     []sessionEventWire

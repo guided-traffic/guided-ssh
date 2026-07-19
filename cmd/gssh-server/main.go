@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -72,6 +73,13 @@ const (
 	envAuditStream         = "GSSH_AUDIT_STREAM"          // "true" aktiviert Log-Streaming
 	envAuditWebhookURL     = "GSSH_AUDIT_WEBHOOK_URL"     // optionaler Webhook
 	envAuditStreamInterval = "GSSH_AUDIT_STREAM_INTERVAL" // Go-Duration, Default 10s
+
+	// Rate-Limiting der Sign-/Enroll-Endpunkte (Phase 10): Requests bzw.
+	// erlaubte Fehlversuche (401/403) pro Client-IP und Minute; "0" bei
+	// GSSH_SIGN_RATE_PER_MINUTE deaktiviert das Rate-Limiting komplett.
+	envRatePerMinute = "GSSH_SIGN_RATE_PER_MINUTE" // Default 60
+	envFailPerMinute = "GSSH_SIGN_FAIL_PER_MINUTE" // Default 10
+	envRateTrustXFF  = "GSSH_RATE_TRUST_PROXY"     // "true": Client-IP aus X-Forwarded-For
 )
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
@@ -203,6 +211,9 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 	if err != nil {
 		return err
 	}
+	if err := checkAudienceSeparation(); err != nil {
+		return err
+	}
 	startGroupSync(ctx, st, logger)
 
 	adminGroup := os.Getenv(envAdminGroup)
@@ -220,7 +231,8 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 		Handler: api.New(api.Deps{
 			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st, UI: st,
 			Verifier: verifier, CIVerifier: ciVerifier, CIStore: st,
-			Logger: logger, AdminGroup: adminGroup,
+			RateLimit: setupRateLimit(logger),
+			Logger:    logger, AdminGroup: adminGroup,
 			AuditorGroup:  os.Getenv(envAuditorGroup),
 			ReadOnlyGroup: os.Getenv(envReadOnlyGroup),
 			UIConfig: api.UIConfig{
@@ -291,22 +303,76 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 }
 
 // setupOIDC baut den Token-Verifier, falls OIDC konfiguriert ist; ohne
-// Issuer bleibt der Sign-Endpoint deaktiviert.
+// Issuer bleibt der Sign-Endpoint deaktiviert. Eine fehlende Client-ID ist
+// ein Konfigurationsfehler (fail-fast statt Ablehnung aller Tokens zur
+// Laufzeit — Security-Review Phase 10).
 func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, error) {
 	issuer := os.Getenv(envOIDCIssuer)
 	if issuer == "" {
 		logger.Warn("oidc nicht konfiguriert — /v1/sign/user deaktiviert", "env", envOIDCIssuer)
 		return nil, nil //nolint:nilnil // nil-Interface schaltet den Endpoint gezielt ab
 	}
+	clientID := os.Getenv(envOIDCClientID)
+	if clientID == "" {
+		return nil, fmt.Errorf("%s ist gesetzt, aber %s fehlt — ohne erwartete audience ist keine token-validierung möglich", envOIDCIssuer, envOIDCClientID)
+	}
 	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{
 		IssuerURL: issuer,
-		ClientID:  os.Getenv(envOIDCClientID),
+		ClientID:  clientID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	logger.Info("oidc konfiguriert", "issuer", issuer)
 	return verifier, nil
+}
+
+// setupRateLimit baut den Rate-Limiter der Sign-/Enroll-Endpunkte aus der
+// Umgebung; GSSH_SIGN_RATE_PER_MINUTE=0 deaktiviert ihn bewusst (Lasttests).
+func setupRateLimit(logger *slog.Logger) *api.RateLimiter {
+	cfg := api.DefaultRateLimiterConfig()
+	if raw := os.Getenv(envRatePerMinute); raw != "" {
+		parsed, err := strconv.ParseFloat(raw, 64)
+		switch {
+		case err != nil || parsed < 0:
+			logger.Warn("ungültige rate, nutze default", "env", envRatePerMinute, "value", raw)
+		case parsed == 0:
+			logger.Warn("rate-limiting der sign-/enroll-endpunkte deaktiviert", "env", envRatePerMinute)
+			return nil
+		default:
+			cfg.RequestsPerMinute = parsed
+			cfg.Burst = max(10, parsed/3)
+		}
+	}
+	if raw := os.Getenv(envFailPerMinute); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil && parsed > 0 {
+			cfg.FailuresPerMinute = parsed
+			cfg.FailureBurst = parsed
+		} else {
+			logger.Warn("ungültige fehlversuchs-rate, nutze default", "env", envFailPerMinute, "value", raw)
+		}
+	}
+	cfg.TrustProxyHeader = os.Getenv(envRateTrustXFF) == "true"
+	return api.NewRateLimiter(cfg)
+}
+
+// checkAudienceSeparation verhindert Audience-Confusion (Security-Review
+// Phase 10): laufen Benutzer-OIDC und GitLab-CI gegen denselben Issuer,
+// müssen sich die erwarteten Audiences unterscheiden — sonst wären Benutzer-
+// und CI-Tokens an beiden Endpunkten austauschbar.
+func checkAudienceSeparation() error {
+	issuer := os.Getenv(envOIDCIssuer)
+	if issuer == "" || issuer != os.Getenv(envCIIssuer) {
+		return nil
+	}
+	ciAudience := os.Getenv(envCIAudience)
+	if ciAudience == "" {
+		ciAudience = auth.DefaultCIAudience
+	}
+	if ciAudience == os.Getenv(envOIDCClientID) {
+		return fmt.Errorf("gleicher issuer und gleiche audience für benutzer-oidc und gitlab-ci (%s/%s) — tokens wären an beiden sign-endpunkten austauschbar", envOIDCClientID, envCIAudience)
+	}
+	return nil
 }
 
 // setupCIOIDC baut den Verifier für GitLab-Job-Tokens, falls konfiguriert;

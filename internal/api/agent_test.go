@@ -2,10 +2,13 @@ package api_test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,6 +36,9 @@ func newAgentHandler(t *testing.T, hosts *fakeHostStore) http.Handler {
 	}
 	if err := certAuthority.EnsureCAKeys(context.Background()); err != nil {
 		t.Fatalf("EnsureCAKeys: %v", err)
+	}
+	if err := certAuthority.EnsureMTLSCA(context.Background()); err != nil {
+		t.Fatalf("EnsureMTLSCA: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return api.NewAgent(api.AgentDeps{CA: certAuthority, Hosts: hosts, Logger: logger})
@@ -107,6 +113,68 @@ func TestAgentRenewFehlerfaelle(t *testing.T) {
 		{"host unbekannt", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", uuid.NewString()), http.StatusUnauthorized},
 		{"kaputter body", agentRequest(http.MethodPost, "/v1/agent/renew", "kein json", host.ID.String()), http.StatusBadRequest},
 		{"kaputter key", agentRequest(http.MethodPost, "/v1/agent/renew", `{"public_key":"nix"}`, host.ID.String()), http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, tc.req)
+		if rec.Code != tc.status {
+			t.Errorf("%s: status %d, erwartet %d", tc.name, rec.Code, tc.status)
+		}
+	}
+}
+
+func TestAgentRenewMTLS(t *testing.T) {
+	hosts := newFakeHostStore()
+	host := enrolledHost(hosts)
+	handler := newAgentHandler(t, hosts)
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+
+	body, _ := json.Marshal(map[string]string{"csr": csrPEM})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, agentRequest(http.MethodPost, "/v1/agent/renew-mtls", string(body), host.ID.String()))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Certificate string `json:"certificate"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("antwort: %v", err)
+	}
+	block, _ := pem.Decode([]byte(resp.Certificate))
+	if block == nil {
+		t.Fatalf("kein pem-zertifikat: %q", resp.Certificate)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("zertifikat parsen: %v", err)
+	}
+	// Identität kommt aus dem mTLS-Peer-Zertifikat, nie aus dem CSR.
+	if cert.Subject.CommonName != host.ID.String() {
+		t.Errorf("cn = %q, erwartet host-id", cert.Subject.CommonName)
+	}
+	if len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {
+		t.Errorf("extkeyusage = %v, erwartet clientauth", cert.ExtKeyUsage)
+	}
+
+	// Fehlerfälle: kaputter Body, kaputter CSR, ohne Client-Zertifikat.
+	cases := []struct {
+		name   string
+		req    *http.Request
+		status int
+	}{
+		{"kaputter body", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", "kein json", host.ID.String()), http.StatusBadRequest},
+		{"kaputter csr", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", `{"csr":"nix"}`, host.ID.String()), http.StatusBadRequest},
+		{"ohne client-zertifikat", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", string(body), ""), http.StatusUnauthorized},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

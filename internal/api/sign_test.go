@@ -381,6 +381,76 @@ func TestSignUserMappingFehler(t *testing.T) {
 	}
 }
 
+func TestSignUserNegativeLaufzeitFaelltAufDefault(t *testing.T) {
+	fs := newFakeAuthStore()
+	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
+
+	status, body := postSign(t, srv.URL, testToken, map[string]any{
+		"public_key": testPublicKey(t), "validity_seconds": -3600,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	var resp struct {
+		ValidAfter  time.Time `json:"valid_after"`
+		ValidBefore time.Time `json:"valid_before"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("antwort dekodieren: %v", err)
+	}
+	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime < 15*time.Hour || lifetime > 17*time.Hour {
+		t.Errorf("laufzeit %s, erwartet default ~16h", lifetime)
+	}
+}
+
+func TestSignUserBodyZuGross(t *testing.T) {
+	fs := newFakeAuthStore()
+	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
+
+	// > 64 KiB ⇒ MaxBytesReader bricht das Dekodieren ab ⇒ 400.
+	status, _ := postSign(t, srv.URL, testToken, map[string]any{
+		"public_key": strings.Repeat("A", 100_000),
+	})
+	if status != http.StatusBadRequest {
+		t.Errorf("übergroßer body: status %d, erwartet 400", status)
+	}
+}
+
+func TestSignUserRateLimitNachFehlversuchen(t *testing.T) {
+	fs := newFakeAuthStore()
+	masterKey := make([]byte, ca.MasterKeySize)
+	certAuthority, err := ca.New(&fs.fakeStore, masterKey, ca.NewPolicyEngine(ca.DefaultPolicies()))
+	if err != nil {
+		t.Fatalf("ca.New: %v", err)
+	}
+	if err := certAuthority.EnsureCAKeys(context.Background()); err != nil {
+		t.Fatalf("EnsureCAKeys: %v", err)
+	}
+	// Faktisch kein Refill während des Tests: Sperre nach 2 Fehlversuchen.
+	limiter := api.NewRateLimiter(api.RateLimiterConfig{
+		RequestsPerMinute: 600, Burst: 100,
+		FailuresPerMinute: 0.001, FailureBurst: 2,
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(api.New(api.Deps{
+		CA: certAuthority, Store: fs, Grants: fs,
+		Verifier:  &fakeVerifier{token: testToken, claims: testClaims()},
+		RateLimit: limiter, Logger: logger,
+	}))
+	t.Cleanup(srv.Close)
+	validKey := testPublicKey(t)
+
+	for i := range 2 {
+		if status, _ := postSign(t, srv.URL, "falsch", map[string]any{"public_key": validKey}); status != http.StatusUnauthorized {
+			t.Fatalf("fehlversuch %d: status %d, erwartet 401", i+1, status)
+		}
+	}
+	// Failure-Budget erschöpft: auch ein valider Request wird gedrosselt.
+	if status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": validKey}); status != http.StatusTooManyRequests {
+		t.Errorf("nach fehlversuchen: status %d, erwartet 429", status)
+	}
+}
+
 func TestSignUserOhneOIDCKonfiguration(t *testing.T) {
 	srv := newTestServer(t, &fakeStore{}) // ohne Verifier/Store
 	status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)})

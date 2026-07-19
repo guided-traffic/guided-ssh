@@ -2,7 +2,10 @@ package agentd
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"net"
@@ -90,6 +93,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Initiale Pflege, danach periodisch.
 	d.refreshBundle(ctx)
 	d.renewIfNeeded(ctx)
+	d.rotateMTLSIfNeeded(ctx)
 	renewTicker := time.NewTicker(time.Duration(d.cfg.RenewInterval))
 	bundleTicker := time.NewTicker(time.Duration(d.cfg.BundleInterval))
 	defer renewTicker.Stop()
@@ -114,6 +118,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return err
 		case <-renewTicker.C:
 			d.renewIfNeeded(ctx)
+			d.rotateMTLSIfNeeded(ctx)
 		case <-bundleTicker.C:
 			d.refreshBundle(ctx)
 		case <-flushC:
@@ -241,6 +246,80 @@ func needsRenewal(certPath string, now time.Time) bool {
 	validBefore := certTime(cert.ValidBefore)
 	renewAt := validAfter.Add(validBefore.Sub(validAfter) * 2 / 3)
 	return now.After(renewAt)
+}
+
+// rotateMTLSIfNeeded rotiert das mTLS-Client-Zertifikat, sobald 2/3 seiner
+// Laufzeit verstrichen sind (Phase 10): frisches Schlüsselpaar + CSR über den
+// noch gültigen mTLS-Kanal einreichen, Dateien ersetzen, Client umschalten.
+// Fehler sind unkritisch — das alte Zertifikat bleibt bis zur nächsten
+// Prüfung (RenewInterval) gültig.
+func (d *Daemon) rotateMTLSIfNeeded(ctx context.Context) {
+	if !mtlsNeedsRotation(d.paths.AgentCertFile(), time.Now()) {
+		return
+	}
+	priv, csrPEM, err := newMTLSKeyAndCSR()
+	if err != nil {
+		d.logger.Error("mtls-rotation: schlüssel erzeugen fehlgeschlagen", "error", err)
+		return
+	}
+	certPEM, err := d.api.RenewMTLS(ctx, string(csrPEM))
+	if err != nil {
+		d.logger.Error("mtls-rotation: erneuerung fehlgeschlagen", "error", err)
+		return
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		d.logger.Error("mtls-rotation: schlüssel serialisieren fehlgeschlagen", "error", err)
+		return
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	pair, err := tls.X509KeyPair([]byte(certPEM), keyPEM)
+	if err != nil {
+		d.logger.Error("mtls-rotation: server lieferte unbrauchbares zertifikat", "error", err)
+		return
+	}
+	// Schlüssel vor Zertifikat schreiben (je atomar via Rename); das winzige
+	// Fenster eines inkonsistenten Paars heilt der nächste Rotationslauf.
+	if err := writeFileAtomic(d.paths.AgentKeyFile(), keyPEM, 0o600); err != nil {
+		d.logger.Error("mtls-rotation: schlüssel schreiben fehlgeschlagen", "error", err)
+		return
+	}
+	if err := writeFileAtomic(d.paths.AgentCertFile(), []byte(certPEM), 0o644); err != nil {
+		d.logger.Error("mtls-rotation: zertifikat schreiben fehlgeschlagen", "error", err)
+		return
+	}
+	if setter, ok := d.api.(interface{ setClientCert(tls.Certificate) }); ok {
+		setter.setClientCert(pair)
+	}
+	d.logger.Info("mtls-client-zertifikat rotiert", "path", d.paths.AgentCertFile())
+}
+
+// mtlsNeedsRotation: 2/3 der Laufzeit vorbei — oder die Datei ist unlesbar,
+// dann repariert eine Rotation über das noch geladene Zertifikat den Zustand.
+func mtlsNeedsRotation(certPath string, now time.Time) bool {
+	raw, err := os.ReadFile(certPath)
+	if err != nil {
+		return true
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return true
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return true
+	}
+	rotateAt := cert.NotBefore.Add(cert.NotAfter.Sub(cert.NotBefore) * 2 / 3)
+	return now.After(rotateAt)
+}
+
+// writeFileAtomic schreibt über eine Temp-Datei + Rename im selben Verzeichnis.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // refreshBundle hält die TrustedUserCAKeys-Datei aktuell (nur bei Änderung

@@ -90,15 +90,10 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	}
 
 	// Ephemeraler mTLS-Schlüssel + CSR; die Identität (CN) vergibt der Server.
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	priv, csrPEM, err := newMTLSKeyAndCSR()
 	if err != nil {
-		return fmt.Errorf("mtls-schlüssel erzeugen: %w", err)
+		return err
 	}
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, priv)
-	if err != nil {
-		return fmt.Errorf("csr erzeugen: %w", err)
-	}
-	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
 	response, err := postEnroll(ctx, opts, strings.TrimSpace(string(sshPub)), string(csrPEM))
 	if err != nil {
@@ -115,6 +110,20 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "enrolled: %s (host-id %s)\n", opts.Hostname, response.HostID)
 	fmt.Fprintf(stdout, "sshd-snippet: %s — Include prüfen und sshd neu laden\n", SnippetPath(opts.SSHDir))
 	return nil
+}
+
+// newMTLSKeyAndCSR erzeugt ein frisches Ed25519-Schlüsselpaar und einen
+// leeren CSR dafür (Enrollment und Rotation; die Identität setzt der Server).
+func newMTLSKeyAndCSR() (ed25519.PrivateKey, []byte, error) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("mtls-schlüssel erzeugen: %w", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, priv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("csr erzeugen: %w", err)
+	}
+	return priv, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}), nil
 }
 
 // postEnroll ruft POST /v1/enroll auf (optional mit SPKI-Pinning).
