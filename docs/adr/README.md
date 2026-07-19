@@ -19,3 +19,4 @@ nie gelöscht — überholte Entscheidungen bekommen Status „abgelöst durch A
 | [011](011-versionierung-und-lizenz.md) | Versionierung (SemVer) und Lizenz (Apache-2.0) | akzeptiert |
 | [012](012-migrations-goose.md) | Schema-Migrationen mit goose (embedded) | akzeptiert |
 | [013](013-repository-layer-pgx.md) | Repository-Layer direkt mit pgx (kein sqlc) | akzeptiert |
+| [014](014-software-signer-aes-gcm.md) | Software-Signer mit AES-256-GCM-verschlüsselten CA-Keys | akzeptiert |

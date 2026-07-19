@@ -130,15 +130,24 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 2 — Zertifizierungsstelle (Core-CA)
 
-- [ ] Signer-Interface definieren (`Sign(ctx, CertRequest) (*ssh.Certificate, error)`)
-- [ ] Software-Signer: Ed25519-CA-Key, verschlüsselt at rest (age/AES-GCM, Key aus K8s-Secret)
-- [ ] Getrennte CA-Keys für Benutzer- und Host-Zertifikate
-- [ ] Zertifikatsbau: Serial, KeyID (`user:<sub>@<idp>` bzw. `ci:<project>:<pipeline>`),
+- [x] Signer-Interface definieren (`Sign(ctx, CertRequest) (*ssh.Certificate, error)`)
+      → `internal/ca/signer.go` (plus `CAKeyID()`/`PublicKey()` für Persistenz und Bundle)
+- [x] Software-Signer: Ed25519-CA-Key, verschlüsselt at rest (age/AES-GCM, Key aus K8s-Secret)
+      → AES-256-GCM statt age (ADR-014), Master-Key via `GSSH_CA_MASTER_KEY`
+- [x] Getrennte CA-Keys für Benutzer- und Host-Zertifikate
+      → `CA.EnsureCAKeys` bootstrapt je einen Key pro Zweck; Signer-Auswahl strikt pro Zweck
+- [x] Zertifikatsbau: Serial, KeyID (`user:<sub>@<idp>` bzw. `ci:<project>:<pipeline>`),
       Principals, `valid_after`/`valid_before`, Extensions (`permit-pty`, …), Critical Options
-- [ ] Policy-Engine: maximale Laufzeit, erlaubte Principals, erlaubte Extensions pro Requester-Typ
-- [ ] Jede Signatur erzeugt synchron ein `audit_event` + `certificates`-Eintrag (gleiche Transaktion)
-- [ ] Key-Rotation: mehrere aktive CA-Keys, Übergangsfenster, Endpoint für aktuelles CA-Bundle
-- [ ] Unit-Tests: Zertifikatsinhalte, Policy-Verletzungen, Ablaufzeiten
+      → `SoftwareSigner.Sign` + KeyID-Helfer in `internal/ca/keyid.go`
+- [x] Policy-Engine: maximale Laufzeit, erlaubte Principals, erlaubte Extensions pro Requester-Typ
+      → `internal/ca/policy.go`; Requester-Typen user/ci/host, Defaults 16 h / 1 h / 30 d
+- [x] Jede Signatur erzeugt synchron ein `audit_event` + `certificates`-Eintrag (gleiche Transaktion)
+      → `store.CreateCertificateWithAudit` (pgx-Transaktion, Rollback-Test integriert)
+- [x] Key-Rotation: mehrere aktive CA-Keys, Übergangsfenster, Endpoint für aktuelles CA-Bundle
+      → `CA.Rotate`/`RetireKey` (active → retiring → retired), `GET /v1/ca/bundle/{user|host}`
+      in `internal/api`; `gssh-server -listen` startet die HTTP-API
+- [x] Unit-Tests: Zertifikatsinhalte, Policy-Verletzungen, Ablaufzeiten
+      → `internal/ca/*_test.go`, `internal/api/server_test.go`; Gesamtabdeckung 82 %
 
 ## Phase 3 — Benutzer-Authentifizierung (OIDC/SSO)
 

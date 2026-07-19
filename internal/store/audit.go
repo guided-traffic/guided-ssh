@@ -14,10 +14,10 @@ type AuditFilter struct {
 	Limit     int
 }
 
-// AppendAuditEvent schreibt ein Audit-Event (append-only) und füllt ID und
-// Zeitstempel. Nil-Payload wird zu {}.
-func (s *Store) AppendAuditEvent(ctx context.Context, e *AuditEvent) error {
-	created, err := queryOne[AuditEvent](ctx, s, `
+// insertAuditEvent schreibt ein Audit-Event (append-only) über den gegebenen
+// querier (Pool oder Transaktion). Nil-Payload wird zu {}.
+func insertAuditEvent(ctx context.Context, q querier, e *AuditEvent) error {
+	created, err := queryOne[AuditEvent](ctx, q, `
 		INSERT INTO audit_events (event_type, actor, payload)
 		VALUES ($1, $2, COALESCE($3, '{}'::jsonb))
 		RETURNING *`,
@@ -29,6 +29,12 @@ func (s *Store) AppendAuditEvent(ctx context.Context, e *AuditEvent) error {
 	return nil
 }
 
+// AppendAuditEvent schreibt ein Audit-Event (append-only) und füllt ID und
+// Zeitstempel.
+func (s *Store) AppendAuditEvent(ctx context.Context, e *AuditEvent) error {
+	return insertAuditEvent(ctx, s.pool, e)
+}
+
 // ListAuditEvents liefert Audit-Events, neueste zuerst.
 func (s *Store) ListAuditEvents(ctx context.Context, f AuditFilter) ([]AuditEvent, error) {
 	var since, until *time.Time
@@ -38,7 +44,7 @@ func (s *Store) ListAuditEvents(ctx context.Context, f AuditFilter) ([]AuditEven
 	if !f.Until.IsZero() {
 		until = &f.Until
 	}
-	return queryAll[AuditEvent](ctx, s, `
+	return queryAll[AuditEvent](ctx, s.pool, `
 		SELECT * FROM audit_events
 		WHERE ($1 = '' OR event_type = $1)
 		  AND ($2 = '' OR actor = $2)

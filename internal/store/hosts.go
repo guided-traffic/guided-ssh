@@ -9,7 +9,7 @@ import (
 
 // CreateHost legt einen Host an und füllt ID und Zeitstempel.
 func (s *Store) CreateHost(ctx context.Context, h *Host) error {
-	created, err := queryOne[Host](ctx, s, `
+	created, err := queryOne[Host](ctx, s.pool, `
 		INSERT INTO hosts (name, public_key, enrolled_at, last_seen_at)
 		VALUES ($1, $2, $3, $4)
 		RETURNING *`,
@@ -23,22 +23,22 @@ func (s *Store) CreateHost(ctx context.Context, h *Host) error {
 
 // GetHost liefert einen Host per ID.
 func (s *Store) GetHost(ctx context.Context, id uuid.UUID) (*Host, error) {
-	return queryOne[Host](ctx, s, `SELECT * FROM hosts WHERE id = $1`, id)
+	return queryOne[Host](ctx, s.pool, `SELECT * FROM hosts WHERE id = $1`, id)
 }
 
 // GetHostByName liefert einen Host per Name.
 func (s *Store) GetHostByName(ctx context.Context, name string) (*Host, error) {
-	return queryOne[Host](ctx, s, `SELECT * FROM hosts WHERE name = $1`, name)
+	return queryOne[Host](ctx, s.pool, `SELECT * FROM hosts WHERE name = $1`, name)
 }
 
 // ListHosts liefert alle Hosts.
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
-	return queryAll[Host](ctx, s, `SELECT * FROM hosts ORDER BY name`)
+	return queryAll[Host](ctx, s.pool, `SELECT * FROM hosts ORDER BY name`)
 }
 
 // UpdateHost aktualisiert die veränderlichen Felder eines Hosts.
 func (s *Store) UpdateHost(ctx context.Context, h *Host) error {
-	updated, err := queryOne[Host](ctx, s, `
+	updated, err := queryOne[Host](ctx, s.pool, `
 		UPDATE hosts
 		SET public_key = $2, enrolled_at = $3, last_seen_at = $4, updated_at = now()
 		WHERE id = $1

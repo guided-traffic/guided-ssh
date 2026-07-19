@@ -5,7 +5,7 @@ Zertifikatsbasierte SSH-Zugriffsplattform: kurzlebige SSH-Zertifikate statt stat
 Zugänge für CI-Pipelines (GitLab) und vollständige Auditierbarkeit aller Zugriffe.
 Betrieb in Kubernetes via Helm, verwaltet über GitOps (FluxCD).
 
-Plan und Fortschritt: [local_PLAN.md](local_PLAN.md)
+Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 
 ## Repository-Struktur
 
@@ -18,6 +18,36 @@ Plan und Fortschritt: [local_PLAN.md](local_PLAN.md)
 | `deploy/helm/` | Helm-Chart (ab Phase 11) |
 | `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
 | `hack/` | Hilfsskripte für Build und CI |
+
+## gssh-server
+
+API-Server mit integrierter Zertifizierungsstelle (CA). Beim Start laufen die
+Datenbank-Migrationen; fehlen CA-Keys, werden sie erzeugt (je ein Ed25519-Key
+für Benutzer- und Host-Zertifikate, Private Keys AES-256-GCM-verschlüsselt in
+der Datenbank, siehe [ADR-014](docs/adr/014-software-signer-aes-gcm.md)).
+
+```sh
+gssh-server -listen :8080    # HTTP-API starten
+gssh-server -version         # Version ausgeben
+```
+
+Konfiguration über Umgebungsvariablen:
+
+| Variable | Bedeutung |
+|---|---|
+| `GSSH_DB_DSN` | PostgreSQL-DSN, z. B. `postgres://user:pass@host:5432/db` |
+| `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`) |
+
+Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
+
+| Endpoint | Bedeutung |
+|---|---|
+| `GET /healthz` | Liveness |
+| `GET /v1/ca/bundle/user` | Public Keys der Benutzer-CA (authorized_keys-Format) — Inhalt für `TrustedUserCAKeys` auf Hosts |
+| `GET /v1/ca/bundle/host` | Public Keys der Host-CA — für `@cert-authority`-Einträge in `known_hosts` |
+
+Die Bundles enthalten alle aktiven und in Ablösung befindlichen Keys
+(Übergangsfenster bei Key-Rotation).
 
 ## Entwicklung
 

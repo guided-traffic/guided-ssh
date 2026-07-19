@@ -9,7 +9,7 @@ import (
 
 // CreateUser legt einen Benutzer an und füllt ID und Zeitstempel.
 func (s *Store) CreateUser(ctx context.Context, u *User) error {
-	created, err := queryOne[User](ctx, s, `
+	created, err := queryOne[User](ctx, s.pool, `
 		INSERT INTO users (issuer, subject, username, email, uid, gid, active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING *`,
@@ -23,23 +23,23 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 
 // GetUser liefert einen Benutzer per ID.
 func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
-	return queryOne[User](ctx, s, `SELECT * FROM users WHERE id = $1`, id)
+	return queryOne[User](ctx, s.pool, `SELECT * FROM users WHERE id = $1`, id)
 }
 
 // GetUserBySubject liefert einen Benutzer per IdP-Identität (issuer, sub).
 func (s *Store) GetUserBySubject(ctx context.Context, issuer, subject string) (*User, error) {
-	return queryOne[User](ctx, s,
+	return queryOne[User](ctx, s.pool,
 		`SELECT * FROM users WHERE issuer = $1 AND subject = $2`, issuer, subject)
 }
 
 // ListUsers liefert alle Benutzer.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	return queryAll[User](ctx, s, `SELECT * FROM users ORDER BY username, id`)
+	return queryAll[User](ctx, s.pool, `SELECT * FROM users ORDER BY username, id`)
 }
 
 // UpdateUser aktualisiert die veränderlichen Felder eines Benutzers.
 func (s *Store) UpdateUser(ctx context.Context, u *User) error {
-	updated, err := queryOne[User](ctx, s, `
+	updated, err := queryOne[User](ctx, s.pool, `
 		UPDATE users
 		SET username = $2, email = $3, uid = $4, gid = $5, active = $6, updated_at = now()
 		WHERE id = $1
@@ -73,7 +73,7 @@ func (s *Store) SetUserGroups(ctx context.Context, userID uuid.UUID, groupIDs []
 
 // ListUserGroups liefert die Gruppen eines Benutzers.
 func (s *Store) ListUserGroups(ctx context.Context, userID uuid.UUID) ([]Group, error) {
-	return queryAll[Group](ctx, s, `
+	return queryAll[Group](ctx, s.pool, `
 		SELECT g.*
 		FROM groups g
 		JOIN user_groups ug ON ug.group_id = g.id

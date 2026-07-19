@@ -8,7 +8,7 @@ import (
 
 // CreateServiceAccount legt eine maschinelle Identität an und füllt ID und Zeitstempel.
 func (s *Store) CreateServiceAccount(ctx context.Context, a *ServiceAccount) error {
-	created, err := queryOne[ServiceAccount](ctx, s, `
+	created, err := queryOne[ServiceAccount](ctx, s.pool, `
 		INSERT INTO service_accounts (name, kind, issuer, claim_matcher, active)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING *`,
@@ -22,22 +22,22 @@ func (s *Store) CreateServiceAccount(ctx context.Context, a *ServiceAccount) err
 
 // GetServiceAccount liefert eine maschinelle Identität per ID.
 func (s *Store) GetServiceAccount(ctx context.Context, id uuid.UUID) (*ServiceAccount, error) {
-	return queryOne[ServiceAccount](ctx, s, `SELECT * FROM service_accounts WHERE id = $1`, id)
+	return queryOne[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts WHERE id = $1`, id)
 }
 
 // GetServiceAccountByName liefert eine maschinelle Identität per Name.
 func (s *Store) GetServiceAccountByName(ctx context.Context, name string) (*ServiceAccount, error) {
-	return queryOne[ServiceAccount](ctx, s, `SELECT * FROM service_accounts WHERE name = $1`, name)
+	return queryOne[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts WHERE name = $1`, name)
 }
 
 // ListServiceAccounts liefert alle maschinellen Identitäten.
 func (s *Store) ListServiceAccounts(ctx context.Context) ([]ServiceAccount, error) {
-	return queryAll[ServiceAccount](ctx, s, `SELECT * FROM service_accounts ORDER BY name`)
+	return queryAll[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts ORDER BY name`)
 }
 
 // UpdateServiceAccount aktualisiert die veränderlichen Felder einer maschinellen Identität.
 func (s *Store) UpdateServiceAccount(ctx context.Context, a *ServiceAccount) error {
-	updated, err := queryOne[ServiceAccount](ctx, s, `
+	updated, err := queryOne[ServiceAccount](ctx, s.pool, `
 		UPDATE service_accounts
 		SET kind = $2, issuer = $3, claim_matcher = $4, active = $5, updated_at = now()
 		WHERE id = $1

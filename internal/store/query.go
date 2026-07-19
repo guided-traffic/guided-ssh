@@ -6,10 +6,16 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// querier abstrahiert Pool und Transaktion, damit Repository-Helfer in beiden
+// Kontexten laufen (pgxpool.Pool und pgx.Tx erfüllen das Interface).
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // queryOne führt eine Query aus, die genau eine Zeile liefert, und mappt sie
 // per Spaltenname auf T. Keine Zeile ⇒ ErrNotFound.
-func queryOne[T any](ctx context.Context, s *Store, sql string, args ...any) (*T, error) {
-	rows, err := s.pool.Query(ctx, sql, args...)
+func queryOne[T any](ctx context.Context, q querier, sql string, args ...any) (*T, error) {
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -21,8 +27,8 @@ func queryOne[T any](ctx context.Context, s *Store, sql string, args ...any) (*T
 }
 
 // queryAll führt eine Query aus und mappt alle Zeilen per Spaltenname auf T.
-func queryAll[T any](ctx context.Context, s *Store, sql string, args ...any) ([]T, error) {
-	rows, err := s.pool.Query(ctx, sql, args...)
+func queryAll[T any](ctx context.Context, q querier, sql string, args ...any) ([]T, error) {
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -506,6 +506,54 @@ func TestCertificates(t *testing.T) {
 	wantNotFound(t, err)
 }
 
+func TestCreateCertificateWithAudit(t *testing.T) {
+	cleanDB(t)
+	ctx := context.Background()
+
+	ca := &store.CAKey{Purpose: store.CertTypeUser, Algorithm: "ed25519", PublicKey: "ca-pk"}
+	mustNoErr(t, testStore.CreateCAKey(ctx, ca))
+	serial, err := testStore.NextCertificateSerial(ctx)
+	mustNoErr(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	cert := &store.Certificate{
+		Serial: serial, KeyID: "user:s@idp", CertType: store.CertTypeUser,
+		PublicKey: "pk", Principals: []string{"carol"},
+		ValidAfter: now, ValidBefore: now.Add(time.Hour), CAKeyID: ca.ID,
+	}
+	event := &store.AuditEvent{EventType: "ca.cert_issued", Actor: "user:s@idp"}
+	mustNoErr(t, testStore.CreateCertificateWithAudit(ctx, cert, event))
+	if cert.ID == uuid.Nil || event.ID == 0 {
+		t.Fatalf("IDs nicht gefüllt: cert=%v event=%d", cert.ID, event.ID)
+	}
+
+	events, err := testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: "ca.cert_issued"})
+	mustNoErr(t, err)
+	if len(events) != 1 {
+		t.Fatalf("1 Audit-Event erwartet, bekommen %d", len(events))
+	}
+
+	// Rollback-Garantie: schlägt der Zertifikats-Insert fehl (Serial-Duplikat),
+	// darf auch kein Audit-Event geschrieben werden.
+	dup := &store.Certificate{
+		Serial: serial, KeyID: "x", CertType: store.CertTypeUser, PublicKey: "x",
+		Principals: []string{"x"}, ValidAfter: now, ValidBefore: now.Add(time.Hour), CAKeyID: ca.ID,
+	}
+	if err := testStore.CreateCertificateWithAudit(ctx, dup, &store.AuditEvent{EventType: "ca.cert_issued"}); err == nil {
+		t.Fatal("Unique-Verletzung erwartet")
+	}
+	events, err = testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: "ca.cert_issued"})
+	mustNoErr(t, err)
+	if len(events) != 1 {
+		t.Fatalf("Rollback verletzt: %d Audit-Events", len(events))
+	}
+	certs, err := testStore.ListCertificates(ctx, 0)
+	mustNoErr(t, err)
+	if len(certs) != 1 {
+		t.Fatalf("Rollback verletzt: %d Zertifikate", len(certs))
+	}
+}
+
 func TestAuditEvents(t *testing.T) {
 	cleanDB(t)
 	ctx := context.Background()
