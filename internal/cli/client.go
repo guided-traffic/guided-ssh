@@ -3,9 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
 // apiClient spricht die REST-API des gssh-servers.
@@ -34,31 +33,9 @@ func newAPIClient(cfg *Config) (*apiClient, error) {
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	if pin != nil {
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{
-			MinVersion:            tls.VersionTLS12,
-			InsecureSkipVerify:    true, //nolint:gosec // Pinning ersetzt die CA-Prüfung (VerifyPeerCertificate)
-			VerifyPeerCertificate: verifyPin(pin),
-		}}
+		client.Transport = pintls.Transport(pin)
 	}
 	return &apiClient{baseURL: strings.TrimRight(cfg.APIURL, "/"), http: client}, nil
-}
-
-// verifyPin akzeptiert die Verbindung, sobald ein präsentiertes Zertifikat
-// den gepinnten SPKI-Hash trägt.
-func verifyPin(pin []byte) func([][]byte, [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		for _, raw := range rawCerts {
-			cert, err := x509.ParseCertificate(raw)
-			if err != nil {
-				continue
-			}
-			sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
-			if bytes.Equal(sum[:], pin) {
-				return nil
-			}
-		}
-		return errors.New("serverzertifikat entspricht nicht dem gepinnten fingerprint (pin_sha256)")
-	}
 }
 
 // signUserRequest spiegelt den Body von POST /v1/sign/user (internal/api).

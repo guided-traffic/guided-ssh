@@ -1,0 +1,20 @@
+[Unit]
+Description=guided-ssh Host-Agent (Zertifikatserneuerung, Principals-Cache)
+Documentation=https://github.com/guided-traffic/guided-ssh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gssh-agentd run
+Restart=on-failure
+RestartSec=5s
+# Enrollment (gssh-agentd enroll --token …) muss vor dem ersten Start gelaufen sein.
+# State: /var/lib/guided-ssh (mTLS-Material, Konfiguration, Principals-Cache)
+ProtectSystem=full
+ReadWritePaths=/var/lib/guided-ssh /etc/ssh
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

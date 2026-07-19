@@ -211,19 +211,34 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 5 — Host-Enrollment & Host-Agent
 
-- [ ] Enrollment-Flow: einmaliges Enrollment-Token (oder Cloud-Identity später) →
+- [x] Enrollment-Flow: einmaliges Enrollment-Token (oder Cloud-Identity später) →
       Host registriert sich, erhält Host-Zertifikat + mTLS-Client-Zertifikat für API
-- [ ] Host-Agent (`gssh-agentd`, ein Go-Binary, systemd-Unit):
-  - [ ] Host-Zertifikat automatisch erneuern (bei 2/3 der Laufzeit)
-  - [ ] CA-Bundle aktuell halten (`TrustedUserCAKeys`-Datei schreiben)
-  - [ ] Autorisierte Principals pro lokalem User von API beziehen und cachen
-- [ ] `AuthorizedPrincipalsCommand`-Helper: sshd fragt Agent (Unix-Socket), Agent
+      → `POST /v1/enroll` + `gssh-server enroll-token` (Hash in DB, Single-Use
+      transaktional, optional Namensbindung); mTLS-Mini-PKI in `ca_keys`
+      (purpose `mtls`), Agent-API hinter `-agent-listen` (ADR-017)
+- [x] Host-Agent (`gssh-agentd`, ein Go-Binary, systemd-Unit):
+  - [x] Host-Zertifikat automatisch erneuern (bei 2/3 der Laufzeit)
+        → `internal/agentd` Daemon; optional `reload_command` nach Erneuerung
+  - [x] CA-Bundle aktuell halten (`TrustedUserCAKeys`-Datei schreiben)
+        → periodisch (`bundle_interval`, Default 1 h), Schreiben nur bei Änderung
+  - [x] Autorisierte Principals pro lokalem User von API beziehen und cachen
+        → `GET /v1/agent/principals`; Grant-Auswertung minimal (Selektor ⊆
+        Host-Tags, aktive Gruppenmitglieder → Username+E-Mail); voll in Phase 6
+- [x] `AuthorizedPrincipalsCommand`-Helper: sshd fragt Agent (Unix-Socket), Agent
       antwortet aus Cache — Fail-closed bei nicht erreichbarer API, konfigurierbare Cache-TTL
-- [ ] sshd-Konfigurations-Snippets generieren (`/etc/ssh/sshd_config.d/guided-ssh.conf`)
-- [ ] Host-Tags: bei Enrollment setzbar, via API/CLI änderbar
-- [ ] Paketierung des Host-Agents: deb/rpm (nfpm) + Install-Skript; `gssh-agentd enroll
+      → `gssh-agentd principals -user %u`; Cache persistiert, `cache_ttl` Default 5 m
+- [x] sshd-Konfigurations-Snippets generieren (`/etc/ssh/sshd_config.d/guided-ssh.conf`)
+      → idempotent beim Enrollment; nutzt vorhandenen sshd-Host-Key
+- [x] Host-Tags: bei Enrollment setzbar, via API/CLI änderbar
+      → Token-Tags + `--tags` beim Enroll (Token gewinnt); Änderung nach
+      Enrollment erst mit Admin-API/CLI in Phase 6/8 (bewusste Lücke)
+- [x] Paketierung des Host-Agents: deb/rpm (nfpm) + Install-Skript; `gssh-agentd enroll
       --token …` übernimmt sshd-Konfiguration idempotent
-- [ ] Integrationstest: Container-Host mit sshd, Enrollment, Login mit Benutzerzertifikat
+      → `deploy/packaging/` (nfpm.yaml, systemd-Unit, postinstall, install.sh), `make packages`
+- [x] Integrationstest: Container-Host mit sshd, Enrollment, Login mit Benutzerzertifikat
+      → `internal/agentd/enroll_integration_test.go`: alpine-sshd-Container,
+      Enrollment über echte API (mTLS), Login als alice (Principal) und deploy
+      (Grant), Ablehnung ohne Grant (fail-closed), Host-Cert-Verifikation
 
 ## Phase 6 — Zugriffssteuerung (Grants)
 
@@ -284,7 +299,7 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 ## Phase 10 — Härtung & Schlüsselverwaltung
 
 - [ ] KMS-Signer implementieren (Interface aus Phase 2): PKCS#11 zuerst (deckt HSM +
-      SoftHSM-Tests ab), Cloud-KMS nach Bedarf
+      SoftHSM-Tests ab), HashiCorp Vault integration
 - [ ] Rate-Limiting und Brute-Force-Schutz auf Sign-Endpoints
 - [ ] mTLS-Zertifikatsrotation für Host-Agenten
 - [ ] Revocation-Strategie dokumentieren: kurze Laufzeiten als primärer Mechanismus,
@@ -327,7 +342,7 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
       GitHub-Pipeline ausführen (Testcontainer auf self-hosted Runner)
 - [ ] E2E-Testumgebung: kind-Cluster + Keycloak + simuliertes GitLab-OIDC + zwei
       Testhosts (Container) — kompletter Durchstich Mensch + CI; läuft in der
-      GitHub-Pipeline auf self-hosted Runner (nightly + vor Release)
+      GitHub-Pipeline auf self-hosted Runner (auf merge-request und auf main)
 - [ ] E2E-Testfälle ausarbeiten und automatisieren: SSO-Login, Offboarding,
       CI-Zertifikat + Ansible-Provisioning, Grant-Änderung, Host-Rotation,
       Audit-Vollständigkeit
@@ -337,7 +352,7 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
       trägt Logins bis TTL, danach fail-closed (verifizieren)
 - [ ] Dokumentation: Betriebs-Handbuch, Enrollment-Guide, GitLab-Integrations-Guide,
       Troubleshooting, Architekturdiagramm
-- [ ] Versionierte Releases (Binaries, Container-Images, Helm-Chart)
+- [ ] Versionierte Releases (Binaries, Container-Images, Helm-Chart), version ist von git-tag abzuleiten
 - [ ] Erfolgskriterien final verifizieren (siehe unten)
 
 ---

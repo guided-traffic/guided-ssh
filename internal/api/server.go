@@ -14,10 +14,11 @@ import (
 
 // Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier und Store sind
 // optional: ohne sie antwortet der Sign-Endpoint mit 503 (OIDC nicht
-// konfiguriert).
+// konfiguriert). Ohne Hosts bleibt das Enrollment deaktiviert (Tests).
 type Deps struct {
 	CA       *ca.CA
 	Store    auth.Store
+	Hosts    HostStore
 	Verifier TokenVerifier
 	Logger   *slog.Logger
 }
@@ -29,6 +30,9 @@ type Deps struct {
 //	GET  /healthz                  – Liveness
 //	GET  /v1/ca/bundle/{purpose}   – CA-Bundle (authorized_keys-Format), purpose: user|host
 //	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
+//	POST /v1/enroll                – Host-Enrollment gegen einmaliges Token
+//
+// Die Agent-Endpunkte (/v1/agent/…) liegen im separaten mTLS-Handler, siehe NewAgent.
 func New(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
@@ -52,6 +56,10 @@ func New(deps Deps) http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(bundle))
 	})
+
+	if deps.Hosts != nil {
+		mux.HandleFunc("POST /v1/enroll", handleEnroll(deps.CA, deps.Hosts, deps.Logger))
+	}
 
 	if deps.Verifier != nil && deps.Store != nil {
 		mux.HandleFunc("POST /v1/sign/user",

@@ -13,7 +13,7 @@ Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 
 | Pfad | Inhalt |
 |---|---|
-| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI); später `gssh-admin`, `gssh-agentd` |
+| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI), `gssh-agentd` (Host-Agent); später `gssh-admin` |
 | `internal/` | Go-Pakete (nicht öffentlich importierbar) |
 | `api/` | OpenAPI-Spezifikation — Single Source of Truth der REST-API (ab Phase 8) |
 | `web/` | Angular-Frontend, eingebettet ins Go-Binary (ab Phase 8) |
@@ -29,8 +29,10 @@ für Benutzer- und Host-Zertifikate, Private Keys AES-256-GCM-verschlüsselt in
 der Datenbank, siehe [ADR-014](docs/adr/014-software-signer-aes-gcm.md)).
 
 ```sh
-gssh-server -listen :8080    # HTTP-API starten
-gssh-server -version         # Version ausgeben
+gssh-server -listen :8080                      # HTTP-API starten
+gssh-server -listen :8080 -agent-listen :8443  # zusätzlich Agent-API (mTLS)
+gssh-server enroll-token -tags env=prod -ttl 24h  # einmaliges Enrollment-Token
+gssh-server -version                           # Version ausgeben
 ```
 
 Konfiguration über Umgebungsvariablen:
@@ -39,6 +41,7 @@ Konfiguration über Umgebungsvariablen:
 |---|---|
 | `GSSH_DB_DSN` | PostgreSQL-DSN, z. B. `postgres://user:pass@host:5432/db` |
 | `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`) |
+| `GSSH_AGENT_TLS_NAMES` | SANs des mTLS-Server-Zertifikats der Agent-API (Komma-getrennt; Default `localhost,127.0.0.1`) |
 
 Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
 
@@ -92,14 +95,42 @@ Transparente Integration in natives `ssh` (`gssh integrate >> ~/.ssh/config`):
 Match host "*.example.com" exec "gssh login --if-needed"
 ```
 
+## gssh-agentd (Host-Agent)
+
+Registriert einen Host bei der CA und hält ihn aktuell
+([ADR-017](docs/adr/017-host-enrollment-mtls.md)): Host-Zertifikat
+(automatische Erneuerung bei 2/3 der Laufzeit), `TrustedUserCAKeys`-Bundle
+und der `AuthorizedPrincipalsCommand`-Helper mit Fail-closed-Cache — bei
+nicht erreichbarer API tragen gecachte Principals bis zur `cache_ttl`,
+danach wird der Login verweigert.
+
+```sh
+# 1. Token auf dem Server erzeugen
+gssh-server enroll-token -tags env=prod,role=web -ttl 24h
+
+# 2. Auf dem Host registrieren (schreibt sshd_config.d/guided-ssh.conf,
+#    Host-Zertifikat und CA-Bundle; nutzt den vorhandenen sshd-Host-Key)
+gssh-agentd enroll --server https://gssh.example.com \
+  --agent-url https://gssh.example.com:8443 --token gssh-et-…
+
+# 3. Dienst starten (systemd-Unit im Paket enthalten)
+systemctl enable --now gssh-agentd
+```
+
+State liegt unter `/var/lib/guided-ssh/` (mTLS-Client-Zertifikat,
+Konfiguration, Principals-Cache). Pakete (deb/rpm via nfpm) und
+Install-Skript: [deploy/packaging/](deploy/packaging/), Build mit
+`make cross packages`.
+
 ## Entwicklung
 
 Voraussetzungen: Go ≥ 1.26, golangci-lint ≥ 2.x, Docker (Image-Builds, später Testcontainer).
 
 ```sh
-make build   # Binaries nach bin/ (statisch, versioniert)
-make cross   # gssh für linux/amd64, linux/arm64, darwin/arm64
-make test    # Unit-Tests mit Race-Detector
+make build     # Binaries nach bin/ (statisch, versioniert)
+make cross     # gssh (linux/amd64, linux/arm64, darwin/arm64) + gssh-agentd (linux)
+make packages  # deb/rpm für gssh-agentd (braucht nfpm)
+make test      # Unit-Tests mit Race-Detector
 make cover   # Tests + Coverage-Gate (>= 80 %)
 make lint    # golangci-lint
 make fmt     # Formatierung (gofumpt/goimports)

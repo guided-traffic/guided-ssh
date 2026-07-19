@@ -70,6 +70,9 @@ const (
 const (
 	CertTypeUser = "user"
 	CertTypeHost = "host"
+	// CAPurposeMTLS ist die X.509-CA für mTLS-Client-Zertifikate der
+	// Host-Agenten (Phase 5); kein SSH-Zertifikatstyp.
+	CAPurposeMTLS = "mtls"
 )
 
 // CAKey ist ein Signierschlüssel der CA.

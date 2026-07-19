@@ -5,8 +5,6 @@
 package cli
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
 // envConfig übersteuert den Pfad der Konfigurationsdatei (nützlich für
@@ -111,12 +111,9 @@ func (c *Config) pin() ([]byte, error) {
 	if c.PinSHA256 == "" {
 		return nil, nil
 	}
-	pin, err := base64.StdEncoding.DecodeString(c.PinSHA256)
+	pin, err := pintls.DecodePin(c.PinSHA256)
 	if err != nil {
-		return nil, fmt.Errorf("pin_sha256 ist kein gültiges base64: %w", err)
-	}
-	if len(pin) != sha256.Size {
-		return nil, fmt.Errorf("pin_sha256 muss %d bytes lang sein (sha-256), ist %d", sha256.Size, len(pin))
+		return nil, fmt.Errorf("pin_sha256: %w", err)
 	}
 	return pin, nil
 }

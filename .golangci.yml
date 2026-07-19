@@ -14,6 +14,8 @@ linters:
       # Deutsche Kommentare/Ausgaben: kein Tippfehler von "configuration"
       ignore-rules:
         - konfiguration
+        - periodisch
+        - verifikation
   exclusions:
     generated: lax
     presets:
