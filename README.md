@@ -1,5 +1,7 @@
 # guided-ssh
 
+![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fguided-traffic%2Fguided-ssh%2Fmain%2F.github%2Fbadges%2Fcoverage.json)
+
 Zertifikatsbasierte SSH-Zugriffsplattform: kurzlebige SSH-Zertifikate statt statischer
 `authorized_keys`, Single Sign-On über den bestehenden Identity Provider, maschinelle
 Zugänge für CI-Pipelines (GitLab) und vollständige Auditierbarkeit aller Zugriffe.

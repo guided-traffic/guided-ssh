@@ -33,6 +33,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
           version: v2.9.0
 
   test:
@@ -53,6 +54,30 @@ jobs:
           name: coverage
           path: coverage.out
           retention-days: 7
+      # Badge wird nicht hier committet, sondern als Artefakt an den
+      # semantic-release-Job gereicht, der es via @semantic-release/git
+      # zusammen mit dem Release-Commit eincheckt.
+      - name: Coverage-Badge erzeugen
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
+          COLOR=$(awk -v c="$COVERAGE" 'BEGIN { print (c >= 90 ? "brightgreen" : c >= 80 ? "green" : c >= 70 ? "yellow" : c >= 60 ? "orange" : "red") }')
+          mkdir -p .github/badges
+          cat > .github/badges/coverage.json << EOF
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${COVERAGE}%",
+            "color": "${COLOR}"
+          }
+          EOF
+          echo "Coverage-Badge: ${COVERAGE}% (${COLOR})"
+      - name: Coverage-Badge als Artefakt
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-badge
+          path: .github/badges/coverage.json
 
   build:
     name: Build
@@ -85,6 +110,12 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.BOT_PAT }}
+      - name: Coverage-Badge herunterladen
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-badge
+          path: .github/badges/
+        continue-on-error: true
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:

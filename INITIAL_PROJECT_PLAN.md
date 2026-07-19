@@ -107,6 +107,15 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
       `.github/workflows/build.yml` (Docker-Build auf Release),
       `.releaserc` + `package.json` (semantic-release, Preset conventionalcommits);
       Secrets: `DOCKERHUB_PAT`, `BOT_PAT`
+- [x] Coverage-Badge: Test-Job erzeugt auf `main` `.github/badges/coverage.json`
+      (shields.io-Endpoint-Format) und reicht es als Artefakt an semantic-release,
+      das es via `@semantic-release/git` mit dem Release-Commit eincheckt
+      (`[skip ci]`); README bindet das Badge über raw.githubusercontent.com ein
+- [x] Renovate (self-hosted, via `BOT_PAT`): täglich 2 Uhr UTC + nach Push auf `main`;
+      Automerge für Minor/Patch (gomod, Dockerfile, GitHub Actions, gepinnte
+      Workflow-Tools), Major nur mit Review; Go-Version-Updates gruppiert über
+      Dockerfile/go.mod (Custom-Regex-Manager)
+      → `.github/workflows/renovate.yml`, `renovate.json`
 - [x] Coverage-Gate in Pipeline: ≥ 80 % Testabdeckung für allen Go-Code (Backend, CLI,
       Host-Agent) — Frontend ausgenommen; Build bricht bei Unterschreitung
       → `make cover` + `hack/coverage.sh`, lokal und in CI identisch
