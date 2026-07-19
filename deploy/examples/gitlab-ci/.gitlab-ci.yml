@@ -1,0 +1,41 @@
+# Referenz-Pipeline: Server-Provisioning via Ansible mit kurzlebigem
+# SSH-Zertifikat von guided-ssh — keine statischen Keys in CI-Variablen.
+# Doku: docs/gitlab-ci.md
+#
+# Voraussetzungen:
+# - guided-ssh-Server mit GSSH_CI_ISSUER=<diese GitLab-Instanz>
+# - CI-Grant für dieses Projekt (gssh-admin ci-grant create --project … )
+# - gssh-Binary im Image oder als Download verfügbar
+
+stages: [provision]
+
+provision:
+  stage: provision
+  image: alpine:3.22
+  # Nur auf dem geschützten main-Branch (passend zum CI-Grant protected_only).
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"
+  # GitLab stellt pro Job ein OIDC-Token mit dieser Audience aus; guided-ssh
+  # akzeptiert nur aud: guided-ssh (Server-Default, GSSH_CI_AUDIENCE).
+  id_tokens:
+    GSSH_CI_TOKEN:
+      aud: guided-ssh
+  variables:
+    GSSH_API_URL: https://gssh.example.com
+    # Selbstsignierter Server? SPKI-Pin statt CA-Vertrauen:
+    # GSSH_PIN_SHA256: "<base64-kodierter sha-256 des server-spki>"
+  before_script:
+    - apk add --no-cache openssh-client ansible curl
+    # gssh-CLI beziehen (alternativ ins Runner-Image einbauen).
+    - curl -fsSLo /usr/local/bin/gssh https://releases.example.com/gssh-linux-amd64
+    - chmod +x /usr/local/bin/gssh
+    # ssh-agent des Jobs starten; Zertifikat lebt nur dort.
+    - eval $(ssh-agent -s)
+    # Job-Token gegen Zertifikat tauschen (KeyID ci:<projekt>:<pipeline>:<job>).
+    - gssh ci-login
+    # Host-Zertifikaten der Zielhosts vertrauen (statt known_hosts pflegen).
+    - mkdir -p ~/.ssh
+    - echo "@cert-authority * $(curl -fsSL $GSSH_API_URL/v1/ca/bundle/host)" > ~/.ssh/known_hosts
+  script:
+    # Ansible nutzt den ssh-agent automatisch — kein Key-Material im Job.
+    - ansible-playbook -i inventory.yml site.yml

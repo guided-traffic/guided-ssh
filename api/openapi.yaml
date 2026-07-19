@@ -1,0 +1,720 @@
+openapi: 3.0.3
+info:
+  title: guided-ssh API
+  description: |
+    REST-API des guided-ssh-Servers: Zertifikatsausstellung (Mensch + CI),
+    Host-Enrollment, Grant-Verwaltung und die Read-/Audit-Endpunkte der
+    Web-UI. Diese Spezifikation ist die Single Source of Truth; der
+    Angular-API-Client wird daraus generiert (`make web-api`).
+
+    Authentifizierung: OIDC-ID-Token als Bearer-Token. Rollen der Admin-API
+    (Phase 8): `admin` (alles), `auditor` (Audit lesen/exportieren + Read),
+    `readonly` (Ressourcen lesen); Rollen sind IdP-Gruppen zugeordnet und
+    schließen einander ein (admin ⊃ auditor ⊃ readonly).
+  version: "1.0"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: /
+tags:
+  - name: system
+  - name: ca
+  - name: sign
+  - name: enrollment
+  - name: grants
+  - name: ci-grants
+  - name: directory
+    description: Read-Ansichten der Web-UI (Hosts, Benutzer, Gruppen, Service-Accounts, Zertifikate)
+  - name: audit
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      tags: [system]
+      summary: Liveness-Check
+      security: []
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server lebt
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /v1/ui/config:
+    get:
+      tags: [system]
+      summary: Bootstrap-Konfiguration der Web-UI (öffentlich)
+      security: []
+      operationId: getUiConfig
+      responses:
+        "200":
+          description: OIDC- und Rollen-Konfiguration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UiConfig" }
+
+  /v1/ca/bundle/{purpose}:
+    get:
+      tags: [ca]
+      summary: CA-Bundle im authorized_keys-Format
+      security: []
+      operationId: getCaBundle
+      parameters:
+        - name: purpose
+          in: path
+          required: true
+          schema: { type: string, enum: [user, host] }
+      responses:
+        "200":
+          description: CA-Bundle
+          content:
+            text/plain:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/sign/user:
+    post:
+      tags: [sign]
+      summary: ID-Token gegen SSH-Benutzerzertifikat tauschen
+      operationId: signUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignRequest" }
+      responses:
+        "200":
+          description: Signiertes Zertifikat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/sign/ci:
+    post:
+      tags: [sign]
+      summary: GitLab-Job-Token gegen CI-Zertifikat tauschen
+      operationId: signCi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignRequest" }
+      responses:
+        "200":
+          description: Signiertes Zertifikat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/enroll:
+    post:
+      tags: [enrollment]
+      summary: Host-Enrollment gegen einmaliges Token
+      security: []
+      operationId: enrollHost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrollRequest" }
+      responses:
+        "200":
+          description: Host-Zertifikat und mTLS-Material
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrollResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/admin/grants:
+    get:
+      tags: [grants]
+      summary: Zugriffsregeln auflisten (Rolle readonly)
+      operationId: listGrants
+      responses:
+        "200":
+          description: Alle Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Grant" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [grants]
+      summary: Zugriffsregel anlegen (Rolle admin)
+      operationId: createGrant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GrantRequest" }
+      responses:
+        "201":
+          description: Angelegter Grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Grant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/admin/grants/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [grants]
+      summary: Zugriffsregel lesen (Rolle readonly)
+      operationId: getGrant
+      responses:
+        "200":
+          description: Grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Grant" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [grants]
+      summary: Zugriffsregel aktualisieren (Rolle admin)
+      operationId: updateGrant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GrantRequest" }
+      responses:
+        "200":
+          description: Aktualisierter Grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Grant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [grants]
+      summary: Zugriffsregel löschen (Rolle admin)
+      operationId: deleteGrant
+      responses:
+        "204": { description: Gelöscht }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/admin/grants/apply:
+    post:
+      tags: [grants]
+      summary: Deklarativer Vollabgleich der Grants (Rolle admin)
+      operationId: applyGrants
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grants:
+                  type: array
+                  items: { $ref: "#/components/schemas/GrantRequest" }
+      responses:
+        "200":
+          description: Abgleich-Ergebnis
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplyResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/admin/ci-grants:
+    get:
+      tags: [ci-grants]
+      summary: CI-Zugriffsregeln auflisten (Rolle readonly)
+      operationId: listCiGrants
+      responses:
+        "200":
+          description: Alle CI-Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CiGrant" }
+    post:
+      tags: [ci-grants]
+      summary: CI-Zugriffsregel anlegen (Rolle admin)
+      operationId: createCiGrant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CiGrantRequest" }
+      responses:
+        "201":
+          description: Angelegter CI-Grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CiGrant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/admin/ci-grants/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [ci-grants]
+      summary: CI-Zugriffsregel lesen (Rolle readonly)
+      operationId: getCiGrant
+      responses:
+        "200":
+          description: CI-Grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CiGrant" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [ci-grants]
+      summary: CI-Zugriffsregel aktualisieren (Rolle admin)
+      operationId: updateCiGrant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CiGrantRequest" }
+      responses:
+        "200":
+          description: Aktualisierter CI-Grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CiGrant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [ci-grants]
+      summary: CI-Zugriffsregel löschen (Rolle admin)
+      operationId: deleteCiGrant
+      responses:
+        "204": { description: Gelöscht }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/admin/ci-grants/apply:
+    post:
+      tags: [ci-grants]
+      summary: Deklarativer Vollabgleich der CI-Grants (Rolle admin)
+      operationId: applyCiGrants
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ci_grants:
+                  type: array
+                  items: { $ref: "#/components/schemas/CiGrantRequest" }
+      responses:
+        "200":
+          description: Abgleich-Ergebnis
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplyResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/admin/hosts:
+    get:
+      tags: [directory]
+      summary: Hosts mit Tags und Zertifikatsablauf (Rolle readonly)
+      operationId: listHosts
+      responses:
+        "200":
+          description: Alle Hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Host" }
+
+  /v1/admin/users:
+    get:
+      tags: [directory]
+      summary: Benutzer mit Gruppen (Rolle readonly)
+      operationId: listUsers
+      responses:
+        "200":
+          description: Alle Benutzer
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+
+  /v1/admin/groups:
+    get:
+      tags: [directory]
+      summary: IdP-Gruppen (Rolle readonly)
+      operationId: listGroups
+      responses:
+        "200":
+          description: Alle Gruppen
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Group" }
+
+  /v1/admin/service-accounts:
+    get:
+      tags: [directory]
+      summary: Service-Accounts / CI-Identitäten (Rolle readonly)
+      operationId: listServiceAccounts
+      responses:
+        "200":
+          description: Alle Service-Accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ServiceAccount" }
+
+  /v1/admin/service-accounts/{id}:
+    patch:
+      tags: [directory]
+      summary: Service-Account aktivieren/deaktivieren — Not-Aus (Rolle admin)
+      operationId: updateServiceAccount
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active]
+              properties:
+                active: { type: boolean }
+      responses:
+        "200":
+          description: Aktualisierter Service-Account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccount" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/admin/certificates:
+    get:
+      tags: [directory]
+      summary: Zuletzt ausgestellte Zertifikate (Rolle readonly)
+      operationId: listCertificates
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+      responses:
+        "200":
+          description: Zertifikats-Metadaten, neueste zuerst
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Certificate" }
+
+  /v1/admin/audit:
+    get:
+      tags: [audit]
+      summary: Audit-Events filtern (Rolle auditor)
+      description: |
+        Filterbar nach Ereignistyp, Actor, Zeitraum und Volltext (`q` matcht
+        Actor und Payload — deckt Host- und Pipeline-Filter ab).
+      operationId: listAudit
+      parameters:
+        - { name: event_type, in: query, schema: { type: string } }
+        - { name: actor, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: Teilstring über Actor und Payload }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Gefilterte Events mit Gesamtzahl
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/admin/audit/export:
+    get:
+      tags: [audit]
+      summary: Audit-Export als CSV- oder JSON-Download (Rolle auditor)
+      operationId: exportAudit
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
+        - { name: event_type, in: query, schema: { type: string } }
+        - { name: actor, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Download (max. 100000 Zeilen)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditEvent" }
+            text/csv:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: OIDC-ID-Token
+
+  responses:
+    BadRequest:
+      description: Ungültige Anfrage
+      content:
+        text/plain: { schema: { type: string } }
+    Unauthorized:
+      description: Token fehlt oder ist ungültig
+      content:
+        text/plain: { schema: { type: string } }
+    Forbidden:
+      description: Keine ausreichende Rolle/Berechtigung
+      content:
+        text/plain: { schema: { type: string } }
+    NotFound:
+      description: Nicht gefunden
+      content:
+        text/plain: { schema: { type: string } }
+
+  schemas:
+    UiConfig:
+      type: object
+      required: [oidc_issuer, oidc_client_id, admin_group, auditor_group, readonly_group]
+      properties:
+        oidc_issuer: { type: string }
+        oidc_client_id: { type: string }
+        admin_group: { type: string }
+        auditor_group: { type: string }
+        readonly_group: { type: string }
+
+    SignRequest:
+      type: object
+      required: [public_key]
+      properties:
+        public_key:
+          type: string
+          description: SSH-Public-Key im authorized_keys-Format
+        validity_seconds:
+          type: integer
+          format: int64
+          description: Gewünschte Laufzeit; wird durch Policy und Grants gedeckelt
+
+    SignResponse:
+      type: object
+      required: [certificate, serial, key_id, principals, valid_after, valid_before]
+      properties:
+        certificate: { type: string }
+        serial: { type: integer, format: int64 }
+        key_id: { type: string }
+        principals: { type: array, items: { type: string } }
+        valid_after: { type: string, format: date-time }
+        valid_before: { type: string, format: date-time }
+
+    EnrollRequest:
+      type: object
+      required: [token, hostname, ssh_public_key, mtls_csr]
+      properties:
+        token: { type: string }
+        hostname: { type: string }
+        ssh_public_key: { type: string }
+        mtls_csr: { type: string, description: PEM-kodierter CSR für das mTLS-Client-Zertifikat }
+        tags:
+          type: object
+          additionalProperties: { type: string }
+
+    EnrollResponse:
+      type: object
+      required: [host_id, host_certificate, valid_before, user_ca_bundle, mtls_certificate, mtls_ca]
+      properties:
+        host_id: { type: string, format: uuid }
+        host_certificate: { type: string }
+        valid_before: { type: string, format: date-time }
+        user_ca_bundle: { type: string }
+        mtls_certificate: { type: string }
+        mtls_ca: { type: string }
+
+    Grant:
+      type: object
+      required: [id, group, issuer, tag_selector, principals, sudo, max_validity_seconds, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        group: { type: string, description: Gruppenname im IdP }
+        issuer: { type: string }
+        tag_selector:
+          type: object
+          additionalProperties: { type: string }
+        principals: { type: array, items: { type: string } }
+        sudo: { type: boolean }
+        max_validity_seconds: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    GrantRequest:
+      type: object
+      required: [principals, max_validity_seconds]
+      properties:
+        group: { type: string, description: Pflicht bei POST }
+        issuer: { type: string, description: leer ⇒ Issuer des Admin-Tokens }
+        tag_selector:
+          type: object
+          additionalProperties: { type: string }
+        principals: { type: array, items: { type: string } }
+        sudo: { type: boolean }
+        max_validity_seconds: { type: integer, format: int64 }
+
+    ApplyResult:
+      type: object
+      required: [created, updated, deleted, unchanged]
+      properties:
+        created: { type: integer }
+        updated: { type: integer }
+        deleted: { type: integer }
+        unchanged: { type: integer }
+
+    CiGrant:
+      type: object
+      required: [id, project, protected_only, tag_selector, principals, max_validity_seconds, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        project: { type: string, description: GitLab-Projekt- oder Namespace-Pfad }
+        ref_pattern: { type: string }
+        protected_only: { type: boolean }
+        environment_pattern: { type: string }
+        tag_selector:
+          type: object
+          additionalProperties: { type: string }
+        principals: { type: array, items: { type: string } }
+        max_validity_seconds: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CiGrantRequest:
+      type: object
+      required: [principals, max_validity_seconds]
+      properties:
+        project: { type: string, description: Pflicht bei POST }
+        ref_pattern: { type: string }
+        protected_only: { type: boolean }
+        environment_pattern: { type: string }
+        tag_selector:
+          type: object
+          additionalProperties: { type: string }
+        principals: { type: array, items: { type: string } }
+        max_validity_seconds: { type: integer, format: int64 }
+
+    Host:
+      type: object
+      required: [id, name, tags, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        tags:
+          type: object
+          additionalProperties: { type: string }
+        enrolled_at: { type: string, format: date-time, nullable: true }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        cert_valid_before:
+          type: string
+          format: date-time
+          nullable: true
+          description: Spätestes valid_before der Host-Zertifikate
+        created_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      required: [id, issuer, subject, username, email, active, groups, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        issuer: { type: string }
+        subject: { type: string }
+        username: { type: string }
+        email: { type: string }
+        active: { type: boolean }
+        groups: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Group:
+      type: object
+      required: [id, issuer, name, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        issuer: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+
+    ServiceAccount:
+      type: object
+      required: [id, name, kind, issuer, claim_matcher, active, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string }
+        issuer: { type: string }
+        claim_matcher:
+          type: object
+          additionalProperties: { type: string }
+        active: { type: boolean, description: false wirkt als Not-Aus pro Projekt }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Certificate:
+      type: object
+      required: [id, serial, key_id, cert_type, principals, valid_after, valid_before, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        serial: { type: integer, format: int64 }
+        key_id: { type: string }
+        cert_type: { type: string, enum: [user, host] }
+        principals: { type: array, items: { type: string } }
+        valid_after: { type: string, format: date-time }
+        valid_before: { type: string, format: date-time }
+        issuer_context:
+          type: object
+          description: Kontext der Ausstellung (SSO-Session, CI-Pipeline-Claims)
+        created_at: { type: string, format: date-time }
+
+    AuditEvent:
+      type: object
+      required: [id, occurred_at, event_type, actor, payload]
+      properties:
+        id: { type: integer, format: int64 }
+        occurred_at: { type: string, format: date-time }
+        event_type:
+          type: string
+          description: z. B. cert.issued, grant.created/updated/deleted, host.enrolled, user.deactivated, service_account.updated
+        actor: { type: string }
+        payload:
+          type: object
+          description: Ereignis-Details als JSON
+
+    AuditList:
+      type: object
+      required: [events, total]
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEvent" }
+        total:
+          type: integer
+          format: int64
+          description: Gesamtzahl zum Filter (für Pagination)

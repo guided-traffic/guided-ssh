@@ -1,0 +1,44 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: guided-ssh
+  namespace: guided-ssh
+spec:
+  chart:
+    spec:
+      # Production pinnt exakt: Upgrade = diese Zeile per Merge-Request
+      # bumpen; Flux führt das helm upgrade aus, die Migrationen laufen
+      # automatisch (Init-Container mit Advisory-Lock).
+      version: "0.1.0"
+  values:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    config:
+      oidc:
+        issuer: https://idp.example.com/realms/example
+        clientID: gssh-cli
+      ci:
+        issuer: https://gitlab.example.com
+      groups:
+        admin: gssh-admins
+        auditor: gssh-auditors
+    agent:
+      # Externer DNS-Name der Agent-API (mTLS, TLS-Passthrough — deshalb
+      # LoadBalancer statt Ingress).
+      tlsNames: gssh-agent.example.com
+      service:
+        type: LoadBalancer
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: gssh.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: guided-ssh-tls
+          hosts:
+            - gssh.example.com

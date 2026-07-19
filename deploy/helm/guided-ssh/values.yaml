@@ -1,0 +1,225 @@
+# Default-Werte für das guided-ssh-Chart.
+# Secrets werden NIE im Chart erzeugt — ausschließlich existingSecret-Referenzen
+# (kompatibel mit external-secrets und SOPS), siehe README.
+
+replicaCount: 1
+
+image:
+  repository: docker.io/guidedtraffic/guided-ssh
+  # Default: Chart-appVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Secrets (Pflicht): existierendes Secret mit DSN und CA-Master-Key.
+# Beispiel:
+#   kubectl create secret generic guided-ssh \
+#     --from-literal=dsn='postgres://gssh:...@db:5432/gssh' \
+#     --from-literal=ca-master-key="$(openssl rand -base64 32)"
+secrets:
+  # Name des Secrets mit den Pflicht-Schlüsseln (dsn, ca-master-key).
+  existingSecret: ""
+  keys:
+    # GSSH_DB_DSN — PostgreSQL-DSN
+    dsn: dsn
+    # GSSH_CA_MASTER_KEY — Base64, 32 Bytes (AES-256)
+    caMasterKey: ca-master-key
+
+# Laufzeit-Konfiguration (landet als Env im Deployment; 1:1-Mapping auf die
+# GSSH_*-Variablen des Servers).
+config:
+  # Benutzer-OIDC (IdP). Ohne Issuer bleibt /v1/sign/user deaktiviert.
+  oidc:
+    # GSSH_OIDC_ISSUER
+    issuer: ""
+    # GSSH_OIDC_CLIENT_ID
+    clientID: ""
+    # GSSH_UI_OIDC_CLIENT_ID (leer = clientID)
+    uiClientID: ""
+  # GitLab-CI-Issuer. Ohne Issuer bleibt /v1/sign/ci deaktiviert.
+  ci:
+    # GSSH_CI_ISSUER (GitLab-Basis-URL)
+    issuer: ""
+    # GSSH_CI_AUDIENCE (leer = Default guided-ssh)
+    audience: ""
+  # Rollen-Gruppen des IdP.
+  groups:
+    # GSSH_ADMIN_GROUP (leer ⇒ Admin-API deaktiviert)
+    admin: ""
+    # GSSH_AUDITOR_GROUP
+    auditor: ""
+    # GSSH_READONLY_GROUP
+    readOnly: ""
+  # Gruppen-Sync via Keycloak-Admin-API (optional).
+  keycloak:
+    # GSSH_KC_BASE_URL
+    baseURL: ""
+    # GSSH_KC_REALM
+    realm: ""
+    # GSSH_KC_CLIENT_ID (leer ⇒ Sync deaktiviert)
+    clientID: ""
+    # GSSH_KC_CLIENT_SECRET aus einem Secret (leer ⇒ nicht gesetzt)
+    existingSecret: ""
+    existingSecretKey: kc-client-secret
+    # GSSH_KC_SYNC_INTERVAL (Go-Duration, leer = 5m)
+    syncInterval: ""
+  # Audit-Streaming (SIEM).
+  auditStream:
+    # GSSH_AUDIT_STREAM ("true" aktiviert JSON-Log-Streaming)
+    logs: false
+    # GSSH_AUDIT_WEBHOOK_URL
+    webhookURL: ""
+    # GSSH_AUDIT_STREAM_INTERVAL (Go-Duration, leer = 10s)
+    interval: ""
+  # Rate-Limiting der Sign-/Enroll-Endpunkte.
+  rateLimit:
+    # GSSH_SIGN_RATE_PER_MINUTE (leer = 60; "0" deaktiviert)
+    perMinute: ""
+    # GSSH_SIGN_FAIL_PER_MINUTE (leer = 10)
+    failPerMinute: ""
+    # GSSH_RATE_TRUST_PROXY — hinter Ingress i. d. R. true (Client-IP aus X-Forwarded-For)
+    trustProxy: true
+  # Zusätzliche Env-Einträge (Liste von EnvVar-Objekten).
+  extraEnv: []
+
+# Agent-API (mTLS) auf eigenem Port.
+agent:
+  enabled: true
+  port: 8443
+  # GSSH_AGENT_TLS_NAMES: SANs des mTLS-Server-Zertifikats. Leer ⇒ Default
+  # "<fullname>-agent.<namespace>.svc" + externer Zugriff braucht den
+  # öffentlichen DNS-Namen, z. B. "gssh-agent.example.com".
+  tlsNames: ""
+  # Separater Service für die Agent-API; für Agents außerhalb des Clusters
+  # type auf LoadBalancer stellen — mTLS erfordert TLS-Passthrough, kein
+  # normaler Ingress.
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8443
+    annotations: {}
+
+# Prometheus-Metriken auf eigenem, nicht ingress-exponiertem Port.
+metrics:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    # Benötigt die Prometheus-Operator-CRDs.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # Zusätzliche Labels, z. B. { release: kube-prometheus-stack }
+    labels: {}
+
+# DB-Migrationen als Init-Container (goose, Postgres-Advisory-Lock —
+# parallele Replikas/Rollouts sind serialisiert).
+migrations:
+  enabled: true
+  resources: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: gssh.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Der Server braucht keine Kubernetes-API.
+automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 2
+  periodSeconds: 5
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+networkPolicy:
+  enabled: false
+  # Ingress-Quellen für den HTTP-Port (leer = alle); Liste von
+  # NetworkPolicyPeer-Objekten, z. B. namespaceSelector des Ingress-Controllers.
+  httpFrom: []
+  # Quellen für den Metrics-Port (leer = alle), z. B. Monitoring-Namespace.
+  metricsFrom: []
+  # Quellen für den Agent-mTLS-Port (leer = alle; Agents stehen meist
+  # außerhalb des Clusters und kommen über den LoadBalancer).
+  agentFrom: []
+  # Egress offen lassen (DB, IdP, GitLab und Webhook liegen i. d. R.
+  # außerhalb; false ⇒ nur DNS + egressRules).
+  egressAllowAll: true
+  # Eigene Egress-Regeln, falls egressAllowAll=false.
+  egressRules: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# Dev-only PostgreSQL-Subchart (bitnami/postgresql). Produktiv: extern oder
+# CloudNativePG, siehe README.
+postgresql:
+  enabled: false
+  auth:
+    username: gssh
+    database: gssh
+    # Passwort für Entwicklung explizit setzen oder existingSecret nutzen.

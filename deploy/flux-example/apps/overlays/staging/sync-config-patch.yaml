@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guided-ssh-sync-config
+  namespace: guided-ssh
+data:
+  config.yaml: |
+    api_url: http://guided-ssh
+    issuer: https://idp.staging.example.com/realms/example
+    client_id: gssh-cli

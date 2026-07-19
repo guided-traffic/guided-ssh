@@ -1,0 +1,77 @@
+@if (session.checking()) {
+  <div class="splash">
+    <mat-spinner diameter="36" />
+    <span class="dim">Anmeldung wird geprüft …</span>
+  </div>
+} @else if (!session.authenticated()) {
+  <div class="login-stage">
+    <div class="login-card glass-panel">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">guided-ssh</span>
+      </div>
+      <p class="login-claim">
+        Zertifikatsbasierte SSH-Zugriffe — Hosts, Zugriffsregeln und Audit an einem Ort.
+      </p>
+      <button mat-flat-button class="login-button" (click)="session.login()">
+        Mit SSO anmelden
+      </button>
+    </div>
+  </div>
+} @else if (!session.hasAnyRole()) {
+  <div class="login-stage">
+    <div class="login-card glass-panel">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">guided-ssh</span>
+      </div>
+      <p class="login-claim">
+        Angemeldet als <strong>{{ session.username() }}</strong> — aber keiner
+        UI-Rolle zugeordnet. Bitte Admin-, Auditor- oder Read-only-Gruppe anfragen.
+      </p>
+      <button mat-stroked-button (click)="session.logout()">Abmelden</button>
+    </div>
+  </div>
+} @else {
+  <div class="shell">
+    <aside class="sidenav glass-panel">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">guided-ssh</span>
+      </div>
+      <nav>
+        <a routerLink="/hosts" routerLinkActive="active">
+          <mat-icon svgIcon="hosts" />Hosts
+        </a>
+        <a routerLink="/grants" routerLinkActive="active">
+          <mat-icon svgIcon="key" />Zugriffsregeln
+        </a>
+        <a routerLink="/ci" routerLinkActive="active">
+          <mat-icon svgIcon="ci" />CI &amp; Service-Accounts
+        </a>
+        <a routerLink="/users" routerLinkActive="active">
+          <mat-icon svgIcon="users" />Benutzer &amp; Gruppen
+        </a>
+        @if (session.isAuditor()) {
+          <a routerLink="/audit" routerLinkActive="active">
+            <mat-icon svgIcon="audit" />Audit
+          </a>
+        }
+      </nav>
+      <div class="sidenav-footer">
+        <div class="user">
+          <span class="user-name">{{ session.username() }}</span>
+          <span class="user-role dim">
+            @if (session.isAdmin()) { Admin } @else if (session.isAuditor()) { Auditor } @else { Read-only }
+          </span>
+        </div>
+        <button mat-icon-button aria-label="Abmelden" title="Abmelden" (click)="session.logout()">
+          <mat-icon svgIcon="logout" />
+        </button>
+      </div>
+    </aside>
+    <main class="content">
+      <router-outlet />
+    </main>
+  </div>
+}

@@ -1,0 +1,23 @@
+{{- if and .Values.agent.enabled .Values.agent.service.enabled }}
+# Separater Service für die Agent-API (mTLS): Agents außerhalb des Clusters
+# brauchen TLS-Passthrough — daher kein Ingress, sondern i. d. R. LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "guided-ssh.fullname" . }}-agent
+  labels:
+    {{- include "guided-ssh.labels" . | nindent 4 }}
+  {{- with .Values.agent.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.agent.service.type }}
+  ports:
+    - name: agent
+      port: {{ .Values.agent.service.port }}
+      targetPort: agent
+      protocol: TCP
+  selector:
+    {{- include "guided-ssh.selectorLabels" . | nindent 4 }}
+{{- end }}

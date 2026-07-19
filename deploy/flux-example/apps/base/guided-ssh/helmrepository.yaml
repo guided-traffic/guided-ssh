@@ -1,0 +1,10 @@
+# Helm-Repository des Projekts: GitHub Pages, gefüllt vom
+# chart-release-Workflow (siehe deploy/helm/guided-ssh/README.md).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: guided-ssh
+  namespace: guided-ssh
+spec:
+  interval: 1h
+  url: https://guided-traffic.github.io/guided-ssh

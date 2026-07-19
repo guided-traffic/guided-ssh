@@ -1,0 +1,598 @@
+name: Test and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: write # Coverage-Kommentar am PR
+  issues: write        # sticky-pull-request-comment nutzt die Issues-API
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Job-Untergliederung wie valkey-operator (parallel auf self-hosted Runnern):
+# linter, gosec, govulncheck, cyclomatic-complexity, malware-scan, unit-tests,
+# integration-tests, e2e-tests (kind-Cluster, Phase 13), web-build,
+# coverage-report, container-malware-scan, semantic-release.
+jobs:
+  linter:
+    name: Code Linting
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.9.0
+
+  gosec:
+    name: GoSec Security Scan
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      # gosec läuft über golangci-lint (wie `make gosec`), damit die im Code
+      # begründeten nolint:gosec-Ausnahmen gelten — standalone gosec kennt sie nicht.
+      - name: Run GoSec security scan
+        uses: golangci/golangci-lint-action@v8
+        with:
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.9.0
+          args: --enable-only gosec
+
+  govulncheck:
+    name: Vulnerability Check
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Run vulnerability check
+        run: make vuln
+
+  cyclomatic-complexity:
+    name: Cyclomatic Complexity
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Run cyclomatic complexity check
+        run: make cyclo
+      - name: Generate complexity report
+        if: always()
+        run: |
+          echo "## 📊 Cyclomatic Complexity Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Top 20 most complex functions:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go run github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0 -ignore "_test.go" -top 20 . >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Threshold: 15 (functions above this are flagged)" >> $GITHUB_STEP_SUMMARY
+
+  malware-scan:
+    name: Malware Scan (Source Code)
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install ClamAV
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav clamav-daemon
+
+      - name: Update ClamAV database
+        run: |
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+
+      - name: Run ClamAV scan on source code
+        run: |
+          echo "🔍 Scanning source code for malware..."
+          clamscan --recursive --infected --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=vendor . | tee clamav-report.txt
+
+          # Check if any infected files were found
+          if grep -q "Infected files: 0" clamav-report.txt; then
+            echo "✅ No malware detected in source code"
+          else
+            echo "❌ MALWARE DETECTED! Blocking release."
+            cat clamav-report.txt
+            exit 1
+          fi
+
+      - name: Upload ClamAV report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: clamav-report
+          path: clamav-report.txt
+          retention-days: 30
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Run unit tests with coverage
+        run: make test-unit-coverage
+      - name: Upload unit coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-coverage
+          path: coverage/unit.out
+          retention-days: 7
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Run integration tests with coverage
+        run: make test-integration-coverage
+      - name: Upload integration coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-coverage
+          path: coverage/integration.out
+          retention-days: 7
+
+  e2e-tests:
+    name: E2E Tests (kind)
+    runs-on: self-hosted
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential ansible
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: Install kind und kubectl
+        run: |
+          # renovate: datasource=github-releases depName=kubernetes-sigs/kind
+          KIND_VERSION=v0.29.0
+          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+          curl -fsSLo kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
+      - name: E2E-Suite (kind-Cluster, kompletter Durchstich Mensch + CI)
+        run: make e2e
+      - name: Cleanup kind-Cluster
+        if: always()
+        run: kind delete cluster --name gssh-e2e || true
+
+  # Lasttest des Sign-Endpoints (Ziel ≥ 50 Zert/s, docs/teststrategie.md).
+  # Nur auf main und nicht release-blockierend — der geteilte Runner macht
+  # Durchsatzmessungen auf PRs zu flaky für ein hartes Gate.
+  load-test:
+    name: Load Test Sign-Endpoint
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Lasttest (Testcontainer-Postgres, ohne Rate-Limit)
+        run: make loadtest
+
+  build:
+    name: Build
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe braucht Tags für die Versionsinfo
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Binaries bauen
+        run: make build
+      - name: Cross-Platform-Builds gssh (linux/amd64, linux/arm64, darwin/arm64)
+        run: make cross
+
+  web-build:
+    name: Web-UI Build & Tests
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "lts/*"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+      - name: Frontend-Unit-Tests (vitest)
+        run: npx ng test --watch=false
+        working-directory: web
+      - name: Angular-Build (Produktion)
+        run: npx ng build
+        working-directory: web
+
+  helm-lint:
+    name: Helm Chart Lint
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # ct vergleicht die Chart-Version gegen main
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2
+      - name: Chart-Lint (ct)
+        run: ct lint --config .github/ct.yaml
+
+  coverage-report:
+    name: Combined Coverage Report
+    runs-on: self-hosted
+    needs: [unit-tests, integration-tests]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Download unit test coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: unit-coverage
+
+      - name: Download integration test coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: integration-coverage
+
+      - name: Merge coverage reports
+        id: merge-coverage
+        run: |
+          echo "Merging coverage reports..."
+          mkdir -p coverage
+          echo "mode: atomic" > coverage/merged.out
+          grep -h -v "^mode:" unit.out integration.out >> coverage/merged.out
+
+          go tool cover -func=coverage/merged.out > coverage/coverage.txt
+          go tool cover -html=coverage/merged.out -o coverage/coverage.html
+
+          TOTAL_COVERAGE=$(awk '/^total:/ { sub(/%/, "", $3); print $3 }' coverage/coverage.txt)
+          echo "percentage=$TOTAL_COVERAGE" >> $GITHUB_OUTPUT
+          echo ""
+          echo "========================================"
+          echo "📊 Combined Coverage: ${TOTAL_COVERAGE}%"
+          echo "========================================"
+
+          # Coverage je Paket für den PR-Kommentar
+          echo "## Coverage by Package" > coverage/summary.txt
+          grep -v "total:" coverage/coverage.txt | awk '{printf "- **%s**: %s\n", $1, $3}' >> coverage/summary.txt || true
+
+          {
+            echo "coverage_text<<EOF"
+            cat coverage/coverage.txt
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          echo "## Combined Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat coverage/coverage.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Coverage-Gate (>= 80 %)
+        run: hack/coverage.sh coverage/merged.out 80
+
+      - name: Upload combined coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-combined
+          path: coverage/
+
+      # Badge wird nicht hier committet, sondern als Artefakt an den
+      # semantic-release-Job gereicht, der es via @semantic-release/git
+      # zusammen mit dem Release-Commit eincheckt.
+      - name: Create coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          COVERAGE="${{ steps.merge-coverage.outputs.percentage }}"
+          COLOR=$(awk -v c="$COVERAGE" 'BEGIN { print (c >= 90 ? "brightgreen" : c >= 80 ? "green" : c >= 70 ? "yellow" : c >= 60 ? "orange" : "red") }')
+          mkdir -p .github/badges
+          cat > .github/badges/coverage.json << EOF
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${COVERAGE}%",
+            "color": "${COLOR}"
+          }
+          EOF
+          echo "Coverage-Badge: ${COVERAGE}% (${COLOR})"
+
+      - name: Upload coverage badge as artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-badge
+          path: .github/badges/coverage.json
+
+      - name: Get main branch coverage
+        if: github.event_name == 'pull_request'
+        id: main-coverage
+        continue-on-error: true
+        run: |
+          MAIN_COVERAGE="N/A"
+          MAIN_BADGE_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/.github/badges/coverage.json"
+          echo "Fetching main branch coverage from: $MAIN_BADGE_URL"
+          if curl -f -s "$MAIN_BADGE_URL" -o main-coverage.json; then
+            MAIN_COVERAGE=$(jq -r '.message' main-coverage.json | sed 's/%//')
+            echo "Main branch coverage: ${MAIN_COVERAGE}%"
+          else
+            echo "Could not fetch main branch coverage badge"
+          fi
+          echo "percentage=$MAIN_COVERAGE" >> $GITHUB_OUTPUT
+
+      - name: Calculate coverage difference
+        if: github.event_name == 'pull_request'
+        id: coverage-diff
+        run: |
+          CURRENT="${{ steps.merge-coverage.outputs.percentage }}"
+          MAIN="${{ steps.main-coverage.outputs.percentage }}"
+
+          if [ "$MAIN" = "N/A" ] || [ -z "$MAIN" ]; then
+            echo "diff=N/A" >> $GITHUB_OUTPUT
+            echo "emoji=ℹ️" >> $GITHUB_OUTPUT
+            echo "trend=baseline" >> $GITHUB_OUTPUT
+            echo "Cannot compare - main branch coverage not available"
+          else
+            DIFF=$(awk -v c="$CURRENT" -v m="$MAIN" 'BEGIN { printf "%.2f", c - m }')
+            echo "diff=$DIFF" >> $GITHUB_OUTPUT
+            TREND=$(awk -v d="$DIFF" 'BEGIN { print (d > 0 ? "improved" : d < 0 ? "decreased" : "unchanged") }')
+            EMOJI=$(awk -v d="$DIFF" 'BEGIN { print (d > 0 ? "📈" : d < 0 ? "📉" : "➡️") }')
+            echo "trend=$TREND" >> $GITHUB_OUTPUT
+            echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
+            echo "Coverage ${TREND} (${DIFF}%)"
+          fi
+
+      - name: Generate coverage summary for PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "COVERAGE_SUMMARY<<EOF" >> $GITHUB_ENV
+          cat coverage/summary.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Comment PR with combined coverage
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: coverage
+          message: |
+            ## 📊 Combined Test Coverage Report
+
+            **Current Coverage:** `${{ steps.merge-coverage.outputs.percentage }}%`
+            **Main Branch Coverage:** `${{ steps.main-coverage.outputs.percentage }}%`
+            **Difference:** ${{ steps.coverage-diff.outputs.emoji }} `${{ steps.coverage-diff.outputs.diff }}%`
+
+            <details>
+            <summary>📁 Coverage by Package</summary>
+
+            ${{ env.COVERAGE_SUMMARY }}
+
+            </details>
+
+            <details>
+            <summary>📄 Full Coverage Report</summary>
+
+            ```
+            ${{ steps.merge-coverage.outputs.coverage_text }}
+            ```
+
+            </details>
+
+            > Coverage is calculated from unit tests + integration tests combined.
+
+  container-malware-scan:
+    name: Container Malware Scan
+    runs-on: self-hosted
+    needs: [malware-scan] # Erst nach sauberem Quellcode-Scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: guidedtraffic
+          password: ${{ secrets.DOCKERHUB_PAT }}
+
+      - name: Get build time
+        id: time
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      - name: Build container for scanning
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-args: |
+            VERSION=scan-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.time.outputs.date }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: guided-ssh:scan-${{ github.sha }}
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: guided-ssh:scan-${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          scanners: 'vuln,secret,misconfig'
+
+      - name: Run Trivy scan (SARIF output)
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: guided-ssh:scan-${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          scanners: 'vuln,secret,misconfig'
+
+      - name: Upload Trivy scan results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-container-report
+          path: trivy-results.sarif
+          retention-days: 30
+
+      - name: Cleanup scan image
+        if: always()
+        run: docker rmi guided-ssh:scan-${{ github.sha }} || true
+
+  semantic-release:
+    name: Semantic Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      [
+        linter,
+        gosec,
+        govulncheck,
+        cyclomatic-complexity,
+        malware-scan,
+        container-malware-scan,
+        unit-tests,
+        integration-tests,
+        e2e-tests,
+        coverage-report,
+        build,
+        web-build,
+        helm-lint,
+      ]
+    runs-on: self-hosted
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT }}
+      - name: Coverage-Badge herunterladen
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-badge
+          path: .github/badges/
+        continue-on-error: true
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "lts/*"
+      - name: Install dependencies
+        run: npm install
+      - name: Verify the integrity of provenance attestations and registry signatures for installed dependencies
+        run: npm audit signatures
+      # BOT_PAT statt GITHUB_TOKEN: nur so triggert das erzeugte
+      # GitHub-Release den Build-Workflow (build.yml).
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.BOT_PAT }}
+        run: npx semantic-release

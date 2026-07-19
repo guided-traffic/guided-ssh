@@ -1,0 +1,35 @@
+# HelmRelease für guided-ssh. Die Chart-Version steht hier pinnt (production)
+# bzw. als Range (staging-Overlay) — ein Upgrade ist damit ein Git-Commit:
+# Version bumpen, reviewen, mergen; Flux führt das helm upgrade aus und die
+# DB-Migrationen laufen automatisch als Init-Container (Advisory-Lock).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: guided-ssh
+  namespace: guided-ssh
+spec:
+  interval: 30m
+  timeout: 5m
+  chart:
+    spec:
+      chart: guided-ssh
+      version: "0.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: guided-ssh
+      # Wie oft Flux das Helm-Repo auf neue Versionen prüft (relevant für
+      # Version-Ranges wie im staging-Overlay).
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  # Umgebungsspezifisches (Issuer, Ingress, Replikas, …) patchen die Overlays.
+  values:
+    image:
+      repository: docker.io/guidedtraffic/guided-ssh
+    secrets:
+      # SOPS-verschlüsseltes Secret aus dem Overlay (dsn, ca-master-key).
+      existingSecret: guided-ssh

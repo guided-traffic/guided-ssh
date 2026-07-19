@@ -1,0 +1,170 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+// ----------------------------------------------------------- Splash und Login
+
+.splash {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.login-stage {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  max-width: 420px;
+  width: 100%;
+  padding: 40px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  text-align: center;
+  align-items: center;
+}
+
+.login-claim {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.login-button {
+  min-width: 220px;
+}
+
+// -------------------------------------------------------------------- Branding
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #6cb2ff, #40c9c6);
+  box-shadow: 0 0 14px rgba(108, 178, 255, 0.65);
+}
+
+.brand-name {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: 0.4px;
+}
+
+// ---------------------------------------------------------------------- Shell
+
+.shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 20px;
+  height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.sidenav {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 14px 14px;
+  position: sticky;
+  top: 20px;
+  height: calc(100vh - 40px);
+  box-sizing: border-box;
+
+  .brand {
+    padding: 0 10px 18px;
+  }
+
+  nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    a {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border-radius: 10px;
+      color: var(--text-dim);
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: background 0.15s ease, color 0.15s ease;
+
+      mat-icon {
+        width: 18px;
+        height: 18px;
+        font-size: 18px;
+      }
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: #e8eef8;
+      }
+
+      &.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+        box-shadow: inset 0 0 0 1px rgba(108, 178, 255, 0.25);
+      }
+    }
+  }
+}
+
+.sidenav-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 10px 4px;
+  border-top: 1px solid var(--glass-border);
+
+  .user {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .user-name {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-role {
+    font-size: 11.5px;
+  }
+}
+
+.content {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidenav {
+    position: static;
+    height: auto;
+  }
+}

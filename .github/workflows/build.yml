@@ -1,0 +1,115 @@
+name: Release Docker Image
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Versionierte Binaries + deb/rpm-Pakete als Release-Assets (Phase 13);
+  # die Version kommt über git describe aus dem Release-Tag (Makefile).
+  binaries:
+    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
+    name: Release-Binaries anhängen
+    runs-on: self-hosted
+    permissions:
+      contents: write # Assets an das GitHub-Release hängen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe braucht Tags für die Versionsinfo
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Cross-Platform-Binaries bauen (Version aus git-Tag)
+        run: make cross
+
+      - name: nfpm installieren und Pakete bauen (deb/rpm)
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          make packages
+
+      - name: Checksummen erzeugen
+        run: |
+          cd bin && sha256sum gssh-* > ../dist/SHA256SUMS
+          cd ../dist && sha256sum *.deb *.rpm >> SHA256SUMS
+
+      - name: Assets an das Release hängen
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bin/gssh-*
+            dist/*.deb
+            dist/*.rpm
+            dist/SHA256SUMS
+
+  build:
+    # Helm-Chart-Releases (Tags guided-ssh-*) vom chart-releaser bauen kein
+    # Docker-Image — nur die App-Releases (vX.Y.Z) von semantic-release.
+    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
+    name: Build & Push Docker Image
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: guidedtraffic
+          password: ${{ secrets.DOCKERHUB_PAT }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: guidedtraffic/guided-ssh
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+          labels: |
+            org.opencontainers.image.title=guided-ssh
+            org.opencontainers.image.description=SSH certificate authority with IdP-backed access control
+            org.opencontainers.image.vendor=Guided Traffic
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.source=https://github.com/guided-traffic/guided-ssh
+
+      - name: Build-Datum ermitteln
+        id: buildinfo
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.buildinfo.outputs.date }}
+          provenance: true
+          sbom: true
