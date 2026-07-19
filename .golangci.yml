@@ -28,6 +28,11 @@ linters:
         text: "avoid package names that conflict with Go standard library"
         linters:
           - revive
+      # internal/metrics ist idiomatisch; Kollision mit stdlib runtime/metrics ist hier irrelevant.
+      - path: internal/metrics/
+        text: "avoid package names that conflict with Go standard library"
+        linters:
+          - revive
       # internal/api ist im Projektlayout (ADR-001) als HTTP-API-Paket gesetzt.
       - path: internal/api/
         text: "avoid meaningless package names"

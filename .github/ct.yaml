@@ -1,0 +1,7 @@
+# Konfiguration für chart-testing (ct) — Helm-Chart-Lint in der CI.
+chart-dirs:
+  - deploy/helm
+target-branch: main
+# Maintainer sind eine Org, keine GitHub-User — Validierung würde fehlschlagen.
+validate-maintainers: false
+check-version-increment: true

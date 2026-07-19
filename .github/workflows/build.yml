@@ -12,6 +12,9 @@ env:
 
 jobs:
   build:
+    # Helm-Chart-Releases (Tags guided-ssh-*) vom chart-releaser bauen kein
+    # Docker-Image — nur die App-Releases (vX.Y.Z) von semantic-release.
+    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
     name: Build & Push Docker Image
     runs-on: self-hosted
     steps:

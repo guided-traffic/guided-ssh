@@ -1,0 +1,159 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "guided-ssh.fullname" . }}
+  labels:
+    {{- include "guided-ssh.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "guided-ssh.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "guided-ssh.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "guided-ssh.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.migrations.enabled }}
+      initContainers:
+        # Migrationen laufen vor dem Server; ein Postgres-Advisory-Lock
+        # serialisiert parallele Init-Container mehrerer Replikas.
+        - name: migrate
+          image: {{ include "guided-ssh.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          env:
+            - name: GSSH_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret ist Pflicht (Secret mit DSN und CA-Master-Key, siehe README)" .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.keys.dsn }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.migrations.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- end }}
+      containers:
+        - name: gssh-server
+          image: {{ include "guided-ssh.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -listen=:8080
+            {{- if .Values.agent.enabled }}
+            - -agent-listen=:{{ .Values.agent.port }}
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - -metrics-listen=:{{ .Values.metrics.port }}
+            {{- end }}
+          env:
+            - name: GSSH_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret ist Pflicht (Secret mit DSN und CA-Master-Key, siehe README)" .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.keys.dsn }}
+            - name: GSSH_CA_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.keys.caMasterKey }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_ISSUER" "value" .Values.config.oidc.issuer) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_CLIENT_ID" "value" .Values.config.oidc.clientID) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_UI_OIDC_CLIENT_ID" "value" .Values.config.oidc.uiClientID) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_CI_ISSUER" "value" .Values.config.ci.issuer) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_CI_AUDIENCE" "value" .Values.config.ci.audience) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_ADMIN_GROUP" "value" .Values.config.groups.admin) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_AUDITOR_GROUP" "value" .Values.config.groups.auditor) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_READONLY_GROUP" "value" .Values.config.groups.readOnly) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_KC_BASE_URL" "value" .Values.config.keycloak.baseURL) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_KC_REALM" "value" .Values.config.keycloak.realm) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_KC_CLIENT_ID" "value" .Values.config.keycloak.clientID) | nindent 12 }}
+            {{- if .Values.config.keycloak.existingSecret }}
+            - name: GSSH_KC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.keycloak.existingSecret }}
+                  key: {{ .Values.config.keycloak.existingSecretKey }}
+            {{- end }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_KC_SYNC_INTERVAL" "value" .Values.config.keycloak.syncInterval) | nindent 12 }}
+            {{- if .Values.agent.enabled }}
+            - name: GSSH_AGENT_TLS_NAMES
+              value: {{ include "guided-ssh.agentTLSNames" . | quote }}
+            {{- end }}
+            {{- if .Values.config.auditStream.logs }}
+            - name: GSSH_AUDIT_STREAM
+              value: "true"
+            {{- end }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_AUDIT_WEBHOOK_URL" "value" .Values.config.auditStream.webhookURL) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_AUDIT_STREAM_INTERVAL" "value" .Values.config.auditStream.interval) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_SIGN_RATE_PER_MINUTE" "value" .Values.config.rateLimit.perMinute) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_SIGN_FAIL_PER_MINUTE" "value" .Values.config.rateLimit.failPerMinute) | nindent 12 }}
+            {{- if .Values.config.rateLimit.trustProxy }}
+            - name: GSSH_RATE_TRUST_PROXY
+              value: "true"
+            {{- end }}
+            {{- with .Values.config.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            {{- if .Values.agent.enabled }}
+            - name: agent
+              containerPort: {{ .Values.agent.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

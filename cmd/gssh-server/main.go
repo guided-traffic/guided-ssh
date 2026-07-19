@@ -28,6 +28,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/auditstream"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
+	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
@@ -95,12 +96,16 @@ func run(stdout, stderr io.Writer, args []string) int {
 	if len(args) > 0 && args[0] == "enroll-token" {
 		return runEnrollToken(stdout, stderr, args[1:])
 	}
+	if len(args) > 0 && args[0] == "migrate" {
+		return runMigrate(stdout, stderr)
+	}
 
 	fs := flag.NewFlagSet("gssh-server", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "Version ausgeben und beenden")
 	listen := fs.String("listen", "", "Listen-Adresse der HTTP-API (z. B. :8080); leer = nicht starten")
 	agentListen := fs.String("agent-listen", "", "Listen-Adresse der Agent-API mit mTLS (z. B. :8443); leer = deaktiviert")
+	metricsListen := fs.String("metrics-listen", "", "Listen-Adresse des Prometheus-Endpoints /metrics (z. B. :9090); leer = deaktiviert")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -116,10 +121,27 @@ func run(stdout, stderr io.Writer, args []string) int {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(stdout, nil))
-	if err := serve(logger, *listen, *agentListen); err != nil {
+	if err := serve(logger, *listen, *agentListen, *metricsListen); err != nil {
 		logger.Error("serverstart fehlgeschlagen", "error", err)
 		return 1
 	}
+	return 0
+}
+
+// runMigrate wendet die Datenbank-Migrationen an und beendet sich (Subkommando
+// `gssh-server migrate`, für den Init-Container im Kubernetes-Deployment,
+// Plan Phase 11). Konkurrierende Läufe serialisiert ein Advisory-Lock.
+func runMigrate(stdout, stderr io.Writer) int {
+	dsn := os.Getenv(envDSN)
+	if dsn == "" {
+		fmt.Fprintf(stderr, "gssh-server: %s nicht gesetzt\n", envDSN)
+		return 2
+	}
+	if err := store.Migrate(context.Background(), dsn); err != nil {
+		fmt.Fprintf(stderr, "gssh-server: migrationen: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "migrationen angewendet")
 	return 0
 }
 
@@ -191,9 +213,9 @@ func parseTags(raw string) (map[string]string, error) {
 	return tags, nil
 }
 
-// serve startet die HTTP-API, optional die Agent-API (mTLS) und ggf. den
-// Gruppen-Sync; blockiert bis SIGINT/SIGTERM.
-func serve(logger *slog.Logger, listen, agentListen string) error {
+// serve startet die HTTP-API, optional die Agent-API (mTLS), den
+// Metrics-Endpoint und ggf. den Gruppen-Sync; blockiert bis SIGINT/SIGTERM.
+func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -243,7 +265,7 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- server.ListenAndServe() }()
 	logger.Info("gssh-server gestartet", "listen", listen, "version", version.String())
 
@@ -257,6 +279,17 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 		logger.Info("agent-api gestartet (mtls)", "listen", agentListen)
 	}
 
+	// Metrics auf eigenem Listener: wird nicht über den Ingress exponiert,
+	// sondern nur vom Prometheus-Scraper erreicht (Phase 11).
+	var metricsServer *http.Server
+	if metricsListen != "" {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("GET /metrics", metrics.Handler())
+		metricsServer = &http.Server{Addr: metricsListen, Handler: metricsMux, ReadHeaderTimeout: 10 * time.Second}
+		go func() { errCh <- metricsServer.ListenAndServe() }()
+		logger.Info("metrics-endpoint gestartet", "listen", metricsListen)
+	}
+
 	select {
 	case err := <-errCh:
 		return err
@@ -265,6 +298,9 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 		defer cancel()
 		if agentServer != nil {
 			_ = agentServer.Shutdown(shutdownCtx)
+		}
+		if metricsServer != nil {
+			_ = metricsServer.Shutdown(shutdownCtx)
 		}
 		return server.Shutdown(shutdownCtx)
 	}

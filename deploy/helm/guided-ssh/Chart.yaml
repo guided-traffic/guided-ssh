@@ -1,0 +1,30 @@
+apiVersion: v2
+name: guided-ssh
+description: >-
+  SSH certificate authority with IdP-backed access control: short-lived user
+  certificates via OIDC, host enrollment with mTLS agents, GitLab CI
+  certificates, audit log and web UI.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/guided-traffic/guided-ssh
+sources:
+  - https://github.com/guided-traffic/guided-ssh
+maintainers:
+  - name: Guided Traffic
+    url: https://github.com/guided-traffic
+keywords:
+  - ssh
+  - certificate-authority
+  - oidc
+  - security
+dependencies:
+  # Nur für Entwicklung/Tests (postgresql.enabled=true); produktiv wird eine
+  # externe PostgreSQL bzw. CloudNativePG angebunden — siehe README.
+  - name: postgresql
+    version: "18.8.0"
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled
+annotations:
+  artifacthub.io/license: Apache-2.0

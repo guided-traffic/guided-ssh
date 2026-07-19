@@ -10,6 +10,7 @@ import (
 
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
+	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 	"github.com/guided-traffic/guided-ssh/web"
 )
@@ -136,5 +137,6 @@ func New(deps Deps) http.Handler {
 		mux.Handle("/", NewUIHandler(dist))
 	}
 
-	return mux
+	// Antwort-Zähler nach Status-Code für die Fehlerraten-Metrik (Phase 11).
+	return metrics.Middleware(mux)
 }

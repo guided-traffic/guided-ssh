@@ -45,6 +45,17 @@ func TestRunListenOhneDSN(t *testing.T) {
 	}
 }
 
+func TestRunMigrateOhneDSN(t *testing.T) {
+	t.Setenv("GSSH_DB_DSN", "")
+	var stdout, stderr bytes.Buffer
+	if got := run(&stdout, &stderr, []string{"migrate"}); got != 2 {
+		t.Fatalf("migrate ohne DSN = %d, erwartet 2 (Konfigurationsfehler)", got)
+	}
+	if !strings.Contains(stderr.String(), "GSSH_DB_DSN") {
+		t.Errorf("stderr %q ohne DSN-Hinweis", stderr.String())
+	}
+}
+
 func TestRunEnrollTokenOhneDSN(t *testing.T) {
 	t.Setenv("GSSH_DB_DSN", "")
 	var stdout, stderr bytes.Buffer

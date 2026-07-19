@@ -10,6 +10,9 @@ web/dist/*
 !web/dist/.gitkeep
 web/.angular/
 
+# Helm: heruntergeladene Subchart-Archive (Chart.lock bleibt versioniert)
+deploy/helm/guided-ssh/charts/
+
 # Tooling-Ausgaben
 graphify-out/cost.json
 graphify-out/.graphify_python

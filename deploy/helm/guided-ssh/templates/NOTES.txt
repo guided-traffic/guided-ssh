@@ -1,0 +1,25 @@
+guided-ssh {{ .Chart.AppVersion }} installiert als Release {{ .Release.Name }}.
+
+API/UI:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "guided-ssh.fullname" . }} 8080:{{ .Values.service.port }}
+  → http://localhost:8080
+{{- end }}
+
+{{- if .Values.agent.enabled }}
+
+Agent-API (mTLS): Service {{ include "guided-ssh.fullname" . }}-agent, Port {{ .Values.agent.service.port }}
+  SANs des Server-Zertifikats: {{ include "guided-ssh.agentTLSNames" . }}
+  Für Agents außerhalb des Clusters: agent.service.type=LoadBalancer und
+  agent.tlsNames auf den öffentlichen DNS-Namen setzen.
+{{- end }}
+
+Erstes Enrollment-Token erzeugen:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "guided-ssh.fullname" . }} -- \
+    /usr/local/bin/gssh-server enroll-token -ttl 24h
+
+Smoke-Test: helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

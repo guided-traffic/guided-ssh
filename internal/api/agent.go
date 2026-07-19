@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/guided-traffic/guided-ssh/internal/ca"
+	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
@@ -200,7 +201,8 @@ func NewAgent(deps AgentDeps) http.Handler {
 		_, _ = w.Write([]byte(bundle))
 	})
 
-	return mux
+	// Antwort-Zähler nach Status-Code für die Fehlerraten-Metrik (Phase 11).
+	return metrics.Middleware(mux)
 }
 
 // ingestSessionEvent bildet ein gemeldetes Ereignis auf die passende
@@ -259,6 +261,8 @@ func agentHost(w http.ResponseWriter, r *http.Request, deps AgentDeps) (*store.H
 	}
 	if err := deps.Hosts.TouchHostLastSeen(r.Context(), host.ID); err != nil {
 		deps.Logger.Warn("agent: last_seen aktualisieren fehlgeschlagen", "host", host.Name, "error", err)
+	} else {
+		metrics.AgentHeartbeats.Inc()
 	}
 	return host, true
 }

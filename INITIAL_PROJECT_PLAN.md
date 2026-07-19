@@ -387,21 +387,42 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 11 — Helm-Chart & Kubernetes-Deployment
 
-- [ ] Helm-Chart `deploy/helm/guided-ssh`: Deployment (API+UI), Service, Ingress,
+- [x] Helm-Chart `deploy/helm/guided-ssh`: Deployment (API+UI), Service, Ingress,
       ServiceMonitor, NetworkPolicies, PodSecurityContext (non-root, read-only FS)
-- [ ] Konfiguration vollständig über `values.yaml`: IdP, GitLab-Issuer, DB-DSN,
+      → dazu separater Agent-Service (mTLS braucht TLS-Passthrough, kein Ingress)
+- [x] Konfiguration vollständig über `values.yaml`: IdP, GitLab-Issuer, DB-DSN,
       Signer-Backend, Laufzeit-Defaults
-- [ ] Secrets-Handhabung: `existingSecret`-Referenzen (kompatibel mit external-secrets
+      → 1:1-Mapping `config.*` → `GSSH_*`-Env; DSN/Master-Key via Secret-Refs;
+      Signer-Backend ist der Software-Signer (DB, AES-256) — kein weiteres Backend
+- [x] Secrets-Handhabung: `existingSecret`-Referenzen (kompatibel mit external-secrets
       und SOPS — keine Secrets im Chart)
-- [ ] PostgreSQL: Anbindung an extern/CloudNativePG dokumentieren; optionale
+      → `secrets.existingSecret` (Pflicht, fail-fast via `required`),
+      `config.keycloak.existingSecret` (optional)
+- [x] PostgreSQL: Anbindung an extern/CloudNativePG dokumentieren; optionale
       Subchart-Dependency nur für Entwicklung
-- [ ] DB-Migrationen als Init-Container/Job mit Lock
-- [ ] Health-/Readiness-Probes, PodDisruptionBudget, HPA-Optionen
-- [ ] Prometheus-Metriken (ausgestellte Zertifikate, Fehlerraten, Agent-Heartbeats)
-- [ ] Chart-Tests (`helm test`, chart-testing in CI)
-- [ ] Chart-Release über GitHub Pages als Helm-Repository (chart-releaser:
+      → Chart-README (CNPG-`Cluster` + Secret `…-app`/`uri`); bitnami/postgresql
+      als Dependency mit `condition: postgresql.enabled` (Default aus)
+- [x] DB-Migrationen als Init-Container/Job mit Lock
+      → Subkommando `gssh-server migrate` als Init-Container; goose mit
+      Postgres-Advisory-Session-Lock (serialisiert parallele Replikas)
+- [x] Health-/Readiness-Probes, PodDisruptionBudget, HPA-Optionen
+      → Probes auf `/healthz`; PDB (`minAvailable`) und HPA (autoscaling/v2)
+      per Values zuschaltbar
+- [x] Prometheus-Metriken (ausgestellte Zertifikate, Fehlerraten, Agent-Heartbeats)
+      → `internal/metrics` (client_golang), eigener Listener `-metrics-listen`;
+      `gssh_certificates_issued_total{requester,cert_type}`,
+      `gssh_http_responses_total{code}`, `gssh_agent_heartbeats_total`;
+      ServiceMonitor optional im Chart
+- [x] Chart-Tests (`helm test`, chart-testing in CI)
+      → `templates/tests/test-connection.yaml` (healthz-Check);
+      `helm-lint`-Job (ct lint, `.github/ct.yaml`) in der Test-Pipeline
+- [x] Chart-Release über GitHub Pages als Helm-Repository (chart-releaser:
       `gh-pages`-Branch mit `index.yaml`, Release-Workflow bei Chart-Version-Bump)
-- [ ] Image-Referenzen im Chart default auf `docker.io/guidedtraffic/*`
+      → `.github/workflows/chart-release.yml`; Docker-Release-Workflow ignoriert
+      Chart-Tags (`guided-ssh-*`); einmalige gh-pages-Einrichtung im Chart-README
+- [x] Image-Referenzen im Chart default auf `docker.io/guidedtraffic/*`
+      → `image.repository: docker.io/guidedtraffic/guided-ssh`, Tag default
+      Chart-`appVersion`
 
 ## Phase 12 — GitOps (FluxCD)
 

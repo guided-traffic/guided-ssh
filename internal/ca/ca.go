@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
@@ -145,6 +146,7 @@ func (ca *CA) Issue(ctx context.Context, requesterType string, req CertRequest, 
 	if err := ca.store.CreateCertificateWithAudit(ctx, record, event); err != nil {
 		return nil, nil, err
 	}
+	metrics.CertificatesIssued.WithLabelValues(requesterType, req.CertType).Inc()
 	return cert, record, nil
 }
 
