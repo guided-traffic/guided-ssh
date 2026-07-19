@@ -192,13 +192,22 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 4 — CLI für Benutzer (`gssh`)
 
-- [ ] `gssh login`: SSO-Flow, Schlüsselpaar ephemeral erzeugen, Zertifikat holen,
+- [x] `gssh login`: SSO-Flow, Schlüsselpaar ephemeral erzeugen, Zertifikat holen,
       beides nur in `ssh-agent` laden (keine Persistenz auf Platte)
-- [ ] `gssh ssh <host>` bzw. ProxyCommand/Match-exec-Integration in `~/.ssh/config`,
+      → `internal/cli` + `cmd/gssh` (ADR-016); PKCE-Browser-Flow, `--device` als
+      Fallback; Agent-Eintrag mit LifetimeSecs = Zertifikatslaufzeit
+- [x] `gssh ssh <host>` bzw. ProxyCommand/Match-exec-Integration in `~/.ssh/config`,
       damit natives `ssh` transparent funktioniert (Auto-Login bei fehlendem Zertifikat)
-- [ ] `gssh status`, `gssh logout` (Agent-Einträge entfernen)
-- [ ] Konfigurationsdatei (`~/.config/guided-ssh/config.yaml`): API-URL, IdP, Fingerprint-Pinning
-- [ ] Cross-Platform-Builds (linux/amd64, linux/arm64, darwin/arm64) in CI
+      → `gssh ssh` (Auto-Login + exec ssh) und `gssh integrate`
+      (Match-exec-Schnipsel mit `gssh login --if-needed`, Erneuerung < 5 m Restlaufzeit)
+- [x] `gssh status`, `gssh logout` (Agent-Einträge entfernen)
+      → Comment-Präfix `guided-ssh` identifiziert eigene Einträge; status mit
+      Exit-Code 1 ohne gültiges Zertifikat
+- [x] Konfigurationsdatei (`~/.config/guided-ssh/config.yaml`): API-URL, IdP, Fingerprint-Pinning
+      → yaml.v3, XDG-Pfad, Override via `--config`/`GSSH_CONFIG`; Pinning als
+      SPKI-SHA-256 (ersetzt CA-Prüfung, für selbstsignierte Deployments)
+- [x] Cross-Platform-Builds (linux/amd64, linux/arm64, darwin/arm64) in CI
+      → `make cross`, läuft im Build-Job von `.github/workflows/release.yml`
 
 ## Phase 5 — Host-Enrollment & Host-Agent
 

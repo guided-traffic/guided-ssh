@@ -9,6 +9,11 @@ linters:
     - revive
     - unconvert
     - unparam
+  settings:
+    misspell:
+      # Deutsche Kommentare/Ausgaben: kein Tippfehler von "configuration"
+      ignore-rules:
+        - konfiguration
   exclusions:
     generated: lax
     presets:

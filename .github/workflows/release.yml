@@ -93,6 +93,8 @@ jobs:
           go-version-file: go.mod
       - name: Binaries bauen
         run: make build
+      - name: Cross-Platform-Builds gssh (linux/amd64, linux/arm64, darwin/arm64)
+        run: make cross
 
   semantic-release:
     name: Semantic Release

@@ -10,13 +10,25 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.commit=$(COMMIT) \
 	-X $(MODULE)/internal/version.date=$(DATE)
 
-.PHONY: all build test cover lint fmt image clean
+.PHONY: all build cross test cover lint fmt image clean
+
+# Zielplattformen des Benutzer-CLI gssh (Plan Phase 4)
+CROSS_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
 
 all: lint cover build
 
 ## build: alle Binaries nach bin/ bauen (statisch, versioniert)
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/ ./cmd/...
+
+## cross: gssh für alle Zielplattformen bauen (linux/amd64, linux/arm64, darwin/arm64)
+cross:
+	@for platform in $(CROSS_PLATFORMS); do \
+		echo "gssh für $$platform"; \
+		GOOS=$${platform%/*} GOARCH=$${platform#*/} CGO_ENABLED=0 \
+		go build -trimpath -ldflags '$(LDFLAGS)' \
+			-o bin/gssh-$${platform%/*}-$${platform#*/} ./cmd/gssh || exit 1; \
+	done
 
 ## test: Unit-Tests mit Race-Detector
 test:

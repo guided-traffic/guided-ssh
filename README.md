@@ -13,7 +13,7 @@ Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 
 | Pfad | Inhalt |
 |---|---|
-| `cmd/` | Binaries — `gssh-server` (API/CA); später `gssh`, `gssh-admin`, `gssh-agentd` |
+| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI); später `gssh-admin`, `gssh-agentd` |
 | `internal/` | Go-Pakete (nicht öffentlich importierbar) |
 | `api/` | OpenAPI-Spezifikation — Single Source of Truth der REST-API (ab Phase 8) |
 | `web/` | Angular-Frontend, eingebettet ins Go-Binary (ab Phase 8) |
@@ -51,12 +51,54 @@ Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
 Die Bundles enthalten alle aktiven und in Ablösung befindlichen Keys
 (Übergangsfenster bei Key-Rotation).
 
+## gssh (Benutzer-CLI)
+
+SSO-Login gegen den IdP, kurzlebiges SSH-Zertifikat vom Server — Schlüsselpaar
+und Zertifikat leben ausschließlich im `ssh-agent`, nichts wird auf Platte
+persistiert ([ADR-016](docs/adr/016-cli-gssh-agent-only.md)).
+
+```sh
+gssh login               # SSO im Browser, Zertifikat in den ssh-agent
+gssh login --device      # Device-Flow (headless, ohne Browser)
+gssh ssh <host> …        # wie ssh, mit Auto-Login bei fehlendem Zertifikat
+gssh status              # Zertifikatsstatus; Exit-Code 1 ohne gültiges Zertifikat
+gssh logout              # guided-ssh-Einträge aus dem Agenten entfernen
+gssh integrate           # ssh_config-Schnipsel für transparentes natives ssh
+```
+
+Konfiguration in `~/.config/guided-ssh/config.yaml` (Override: `--config`
+bzw. `GSSH_CONFIG`):
+
+```yaml
+api_url: https://gssh.example.com
+issuer: https://idp.example.com/realms/example
+client_id: gssh-cli
+# optional:
+# pin_sha256: <Base64-SHA-256 des Server-SPKI — ersetzt die CA-Prüfung>
+# validity: 8h        # gewünschte Laufzeit (Policy-Maximum des Servers greift)
+```
+
+Pin ermitteln:
+
+```sh
+openssl s_client -connect gssh.example.com:443 </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary | base64
+```
+
+Transparente Integration in natives `ssh` (`gssh integrate >> ~/.ssh/config`):
+
+```
+Match host "*.example.com" exec "gssh login --if-needed"
+```
+
 ## Entwicklung
 
 Voraussetzungen: Go ≥ 1.26, golangci-lint ≥ 2.x, Docker (Image-Builds, später Testcontainer).
 
 ```sh
 make build   # Binaries nach bin/ (statisch, versioniert)
+make cross   # gssh für linux/amd64, linux/arm64, darwin/arm64
 make test    # Unit-Tests mit Race-Detector
 make cover   # Tests + Coverage-Gate (>= 80 %)
 make lint    # golangci-lint
