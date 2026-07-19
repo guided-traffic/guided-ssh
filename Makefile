@@ -22,9 +22,9 @@ build:
 test:
 	go test -race ./...
 
-## cover: Tests mit Coverage über alle Pakete + Gate (>= $(COVERAGE_MIN) %)
+## cover: Unit- + Integrationstests (Docker nötig) mit Coverage über alle Pakete + Gate (>= $(COVERAGE_MIN) %)
 cover:
-	go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+	go test -race -tags integration -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 	hack/coverage.sh coverage.out $(COVERAGE_MIN)
 
 ## lint: golangci-lint (Linter + Formatierungsprüfung)

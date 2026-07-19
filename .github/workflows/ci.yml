@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Unit-Tests mit Coverage-Gate (>= 80 %)
+      - name: Unit- + Integrationstests (Testcontainer) mit Coverage-Gate (>= 80 %)
         run: make cover
       - name: Coverage-Profil als Artefakt
         uses: actions/upload-artifact@v4

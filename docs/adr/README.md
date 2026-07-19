@@ -17,3 +17,5 @@ nie gelöscht — überholte Entscheidungen bekommen Status „abgelöst durch A
 | [009](009-build-tooling-make-golangci.md) | Build-Tooling: Makefile + golangci-lint | akzeptiert |
 | [010](010-container-image-dockerfile.md) | Container-Image via Dockerfile (statt ko) | akzeptiert |
 | [011](011-versionierung-und-lizenz.md) | Versionierung (SemVer) und Lizenz (Apache-2.0) | akzeptiert |
+| [012](012-migrations-goose.md) | Schema-Migrationen mit goose (embedded) | akzeptiert |
+| [013](013-repository-layer-pgx.md) | Repository-Layer direkt mit pgx (kein sqlc) | akzeptiert |

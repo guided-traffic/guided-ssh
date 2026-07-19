@@ -11,3 +11,4 @@ Abhängigkeiten schnell zu erfassen.
 
 - Plan und Fortschritt: `INITIAL_PROJECT_PLAN.md` (Phasen mit abhakbaren Steps — dort abhaken, was erledigt ist)
 - Wenn du einen Task abgeschlossen hast, gib zusätzlich eine kurzen conventional commit message aus
+- Dokumentiere das User-Interface in der README.md 

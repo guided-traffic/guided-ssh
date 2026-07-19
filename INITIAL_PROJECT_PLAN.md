@@ -111,14 +111,22 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 1 — Datenmodell & Persistenz
 
-- [ ] PostgreSQL-Schema entwerfen: `users`, `groups`, `hosts`, `host_tags`, `access_grants`
+- [x] PostgreSQL-Schema entwerfen: `users`, `groups`, `hosts`, `host_tags`, `access_grants`
       (Gruppe × Tag-Selektor × Principals × sudo-Flag × max. Laufzeit), `certificates`
       (ausgestellte Zertifikate inkl. Serial, KeyID, Principals, Gültigkeit, Issuer-Kontext),
       `audit_events` (append-only), `ca_keys`, `service_accounts` (CI-Identitäten)
-- [ ] Migrations-Tooling einrichten (goose oder golang-migrate)
-- [ ] Repository-Layer in Go (sqlc oder pgx direkt) mit Tests gegen Testcontainer-Postgres
-- [ ] Append-only-Garantie für `audit_events` (kein UPDATE/DELETE-Grant, Trigger als Schutz)
-- [ ] Retention-Konzept für Audit-Daten dokumentieren (Partitionierung nach Monat)
+      → `internal/store/migrations/0001_initial_schema.sql` (zusätzlich `user_groups`,
+      Serial-Sequence; `audit_events` von Anfang an nach Monat partitionierbar)
+- [x] Migrations-Tooling einrichten (goose oder golang-migrate)
+      → goose v3, embedded SQL, `store.Migrate` (ADR-012)
+- [x] Repository-Layer in Go (sqlc oder pgx direkt) mit Tests gegen Testcontainer-Postgres
+      → pgx v5 direkt (ADR-013), `internal/store`; Integrationstests (Build-Tag
+      `integration`) laufen in `make cover` mit — Gesamtabdeckung 86,7 %
+- [x] Append-only-Garantie für `audit_events` (kein UPDATE/DELETE-Grant, Trigger als Schutz)
+      → Trigger in Migration 0001 (getestet); Grant-Schema für App-Rolle dokumentiert
+      in `docs/audit-retention.md`
+- [x] Retention-Konzept für Audit-Daten dokumentieren (Partitionierung nach Monat)
+      → `docs/audit-retention.md` (Monatspartitionen, Detach/Drop, Archivierung)
 
 ## Phase 2 — Zertifizierungsstelle (Core-CA)
 
