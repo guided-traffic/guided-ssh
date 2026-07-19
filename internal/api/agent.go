@@ -94,7 +94,21 @@ type renewMTLSResponse struct {
 func NewAgent(deps AgentDeps) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /v1/agent/renew", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/agent/renew", agentRenew(deps))
+	mux.HandleFunc("POST /v1/agent/renew-mtls", agentRenewMTLS(deps))
+	mux.HandleFunc("GET /v1/agent/principals", agentPrincipals(deps))
+	if deps.Sessions != nil {
+		mux.HandleFunc("POST /v1/agent/sessions", agentSessions(deps))
+	}
+	mux.HandleFunc("GET /v1/agent/bundle/user", agentBundleUser(deps))
+
+	// Antwort-Zähler nach Status-Code für die Fehlerraten-Metrik (Phase 11).
+	return metrics.Middleware(mux)
+}
+
+// agentRenew erneuert das SSH-Host-Zertifikat für den eingereichten Host-Key.
+func agentRenew(deps AgentDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
 		if !ok {
 			return
@@ -120,12 +134,14 @@ func NewAgent(deps AgentDeps) http.Handler {
 			Certificate: strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert))),
 			ValidBefore: record.ValidBefore,
 		})
-	})
+	}
+}
 
-	// Rotation des mTLS-Client-Zertifikats: der Agent authentifiziert sich mit
-	// dem noch gültigen Zertifikat und reicht einen CSR für das nächste ein
-	// (Identität kommt ausschließlich aus dem verifizierten Peer-Zertifikat).
-	mux.HandleFunc("POST /v1/agent/renew-mtls", func(w http.ResponseWriter, r *http.Request) {
+// agentRenewMTLS rotiert das mTLS-Client-Zertifikat: der Agent authentifiziert
+// sich mit dem noch gültigen Zertifikat und reicht einen CSR für das nächste
+// ein (Identität kommt ausschließlich aus dem verifizierten Peer-Zertifikat).
+func agentRenewMTLS(deps AgentDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
 		if !ok {
 			return
@@ -143,9 +159,12 @@ func NewAgent(deps AgentDeps) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(renewMTLSResponse{Certificate: certPEM})
-	})
+	}
+}
 
-	mux.HandleFunc("GET /v1/agent/principals", func(w http.ResponseWriter, r *http.Request) {
+// agentPrincipals liefert die autorisierten Principals für einen lokalen User.
+func agentPrincipals(deps AgentDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
 		if !ok {
 			return
@@ -163,34 +182,38 @@ func NewAgent(deps AgentDeps) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(principalsResponse{Principals: principals})
-	})
-
-	if deps.Sessions != nil {
-		mux.HandleFunc("POST /v1/agent/sessions", func(w http.ResponseWriter, r *http.Request) {
-			host, ok := agentHost(w, r, deps)
-			if !ok {
-				return
-			}
-			var req sessionsRequest
-			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-				http.Error(w, "request-body ungültig", http.StatusBadRequest)
-				return
-			}
-			// Fehler je Event werden geloggt, aber der Batch wird bestätigt: der
-			// Agent räumt den Spool nur bei HTTP-200. Ein fehlerhaftes Einzelevent
-			// darf den gesamten Batch nicht dauerhaft blockieren.
-			for i := range req.Events {
-				if err := ingestSessionEvent(r.Context(), deps.Sessions, host, req.Events[i]); err != nil {
-					deps.Logger.Error("agent/sessions: event verwerfen",
-						"host", host.Name, "service", req.Events[i].Service,
-						"phase", req.Events[i].Phase, "error", err)
-				}
-			}
-			w.WriteHeader(http.StatusNoContent)
-		})
 	}
+}
 
-	mux.HandleFunc("GET /v1/agent/bundle/user", func(w http.ResponseWriter, r *http.Request) {
+// agentSessions nimmt einen Batch Session-/sudo-Events aus dem Agent-Spool an.
+func agentSessions(deps AgentDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, ok := agentHost(w, r, deps)
+		if !ok {
+			return
+		}
+		var req sessionsRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			return
+		}
+		// Fehler je Event werden geloggt, aber der Batch wird bestätigt: der
+		// Agent räumt den Spool nur bei HTTP-200. Ein fehlerhaftes Einzelevent
+		// darf den gesamten Batch nicht dauerhaft blockieren.
+		for i := range req.Events {
+			if err := ingestSessionEvent(r.Context(), deps.Sessions, host, req.Events[i]); err != nil {
+				deps.Logger.Error("agent/sessions: event verwerfen",
+					"host", host.Name, "service", req.Events[i].Service,
+					"phase", req.Events[i].Phase, "error", err)
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// agentBundleUser liefert das User-CA-Bundle für die sshd-Konfiguration.
+func agentBundleUser(deps AgentDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := agentHost(w, r, deps); !ok {
 			return
 		}
@@ -202,10 +225,7 @@ func NewAgent(deps AgentDeps) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(bundle))
-	})
-
-	// Antwort-Zähler nach Status-Code für die Fehlerraten-Metrik (Phase 11).
-	return metrics.Middleware(mux)
+	}
 }
 
 // ingestSessionEvent bildet ein gemeldetes Ereignis auf die passende
