@@ -1,19 +1,20 @@
 name: Release Helm Chart
 
 # Veröffentlicht das Chart als Helm-Repository über GitHub Pages
-# (gh-pages-Branch mit index.yaml). chart-releaser erzeugt nur dann ein
-# Release, wenn die Chart-Version in Chart.yaml noch nicht veröffentlicht ist
-# (Version-Bump ⇒ Release; sonst No-op).
+# (gh-pages-Branch mit index.yaml). Läuft nur auf v*-Tags, die semantic-release
+# nach erfolgreichem Test-Durchlauf auf main erzeugt — nie direkt beim Merge.
+# chart-releaser erzeugt nur dann ein Release, wenn die Chart-Version in
+# Chart.yaml noch nicht veröffentlicht ist (Version-Bump ⇒ Release; sonst
+# No-op). Die von chart-releaser selbst erzeugten guided-ssh-*-Tags matchen
+# v* nicht — keine Trigger-Schleife.
 #
 # Einmalige Voraussetzung: leerer gh-pages-Branch + GitHub Pages auf diesen
 # Branch zeigen lassen — siehe deploy/helm/guided-ssh/README.md.
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - "deploy/helm/**"
+    tags:
+      - "v*"
 
 permissions:
   contents: write
