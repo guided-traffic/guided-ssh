@@ -51,7 +51,7 @@ jobs:
           cd ../dist && sha256sum *.deb *.rpm >> SHA256SUMS
 
       - name: Assets an das Release hängen
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             bin/gssh-*
