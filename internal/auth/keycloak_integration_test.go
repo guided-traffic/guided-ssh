@@ -73,6 +73,12 @@ func startKeycloak(t *testing.T, ctx context.Context) *keycloakEnv {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(ctr) })
 	}
 	if err != nil {
+		if ctr != nil {
+			if logs, logErr := ctr.Logs(context.Background()); logErr == nil {
+				raw, _ := io.ReadAll(logs)
+				t.Logf("keycloak-logs:\n%s", raw)
+			}
+		}
 		t.Fatalf("keycloak-container: %v", err)
 	}
 	endpoint, err := ctr.PortEndpoint(ctx, "8080/tcp", "http")
@@ -245,7 +251,7 @@ func TestKeycloakIntegration(t *testing.T) {
 	if err := certAuthority.EnsureCAKeys(ctx); err != nil {
 		t.Fatalf("EnsureCAKeys: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 	srv := httptest.NewServer(api.New(api.Deps{
 		CA: certAuthority, Store: st, Grants: st, Verifier: verifier, Logger: logger,
 	}))

@@ -70,7 +70,7 @@ test-unit-coverage:
 ## test-integration-coverage: Testsuite inkl. Integrationstests (Docker nötig) mit Coverage-Profil für den CI-Merge
 test-integration-coverage:
 	@mkdir -p $(COVERAGE_DIR)
-	go test -race -tags integration -count=1 -covermode=atomic -coverpkg=./... -coverprofile=$(COVERAGE_DIR)/integration.out ./...
+	go test -race -tags integration -count=1 -p 2 -covermode=atomic -coverpkg=./... -coverprofile=$(COVERAGE_DIR)/integration.out ./...
 
 ## e2e: End-to-End-Suite im kind-Cluster (Docker, kind, kubectl, helm nötig;
 ## ansible optional). Schalter: E2E_KEEP=1, E2E_SKIP_BUILD=1, E2E_CLUSTER=name

@@ -166,7 +166,7 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 	if err := certAuthority.EnsureMTLSCA(ctx); err != nil {
 		t.Fatal(err)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 
 	// ── Simuliertes GitLab + echter CI-Verifier ──────────────────────────
 	gitlab := newFakeGitLab(t)
