@@ -1,6 +1,7 @@
 # Build-Artefakte
 /bin/
 coverage.out
+/coverage/
 
 # Tooling-Ausgaben
 graphify-out/

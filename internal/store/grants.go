@@ -231,15 +231,9 @@ func (s *Store) ApplyGrants(ctx context.Context, actor, defaultIssuer string, sp
 		if err != nil {
 			return err
 		}
-		// Bestand nach Schlüssel gruppieren; mehrere Grants pro Schlüssel sind
-		// Duplikate — der älteste wird Update-Kandidat, der Rest gelöscht.
-		byKey := map[string][]GrantWithGroup{}
-		for _, grant := range existing {
-			key, err := grantKey(grant.GroupIssuer, grant.GroupName, grant.TagSelector)
-			if err != nil {
-				return err
-			}
-			byKey[key] = append(byKey[key], grant)
+		byKey, err := grantsByKey(existing)
+		if err != nil {
+			return err
 		}
 
 		seen := map[string]bool{}
@@ -261,47 +255,10 @@ func (s *Store) ApplyGrants(ctx context.Context, actor, defaultIssuer string, sp
 			}
 			seen[key] = true
 
-			if candidates, ok := byKey[key]; ok {
-				delete(byKey, key)
-				current := candidates[0]
-				for _, dup := range candidates[1:] {
-					if err := deleteGrantTx(ctx, tx, actor, dup.ID); err != nil {
-						return err
-					}
-					result.Deleted++
-				}
-				if slices.Equal(current.Principals, spec.Principals) &&
-					current.Sudo == spec.Sudo &&
-					current.MaxValiditySeconds == spec.MaxValiditySeconds {
-					result.Unchanged++
-					continue
-				}
-				grant := current.AccessGrant
-				grant.Principals = spec.Principals
-				grant.Sudo = spec.Sudo
-				grant.MaxValiditySeconds = spec.MaxValiditySeconds
-				if err := updateGrantTx(ctx, tx, actor, &grant); err != nil {
-					return err
-				}
-				result.Updated++
-				continue
-			}
-
-			group, err := ensureGroupTx(ctx, tx, issuer, spec.Group)
-			if err != nil {
+			if err := applySpecTx(ctx, tx, actor, issuer, spec, byKey[key], result); err != nil {
 				return err
 			}
-			grant := &AccessGrant{
-				GroupID:            group.ID,
-				TagSelector:        spec.TagSelector,
-				Principals:         spec.Principals,
-				Sudo:               spec.Sudo,
-				MaxValiditySeconds: spec.MaxValiditySeconds,
-			}
-			if err := createGrantTx(ctx, tx, actor, grant); err != nil {
-				return err
-			}
-			result.Created++
+			delete(byKey, key)
 		}
 
 		for _, grants := range byKey {
@@ -318,6 +275,67 @@ func (s *Store) ApplyGrants(ctx context.Context, actor, defaultIssuer string, sp
 		return nil, err
 	}
 	return result, nil
+}
+
+// grantsByKey gruppiert den Grant-Bestand nach Abgleich-Schlüssel; mehrere
+// Grants pro Schlüssel sind Duplikate — der älteste wird Update-Kandidat,
+// der Rest wird beim Abgleich gelöscht.
+func grantsByKey(existing []GrantWithGroup) (map[string][]GrantWithGroup, error) {
+	byKey := map[string][]GrantWithGroup{}
+	for _, grant := range existing {
+		key, err := grantKey(grant.GroupIssuer, grant.GroupName, grant.TagSelector)
+		if err != nil {
+			return nil, err
+		}
+		byKey[key] = append(byKey[key], grant)
+	}
+	return byKey, nil
+}
+
+// applySpecTx wendet eine einzelne Spec gegen den Bestand an: vorhandener
+// Grant wird aktualisiert (Duplikate gelöscht), fehlender samt Gruppe angelegt.
+func applySpecTx(ctx context.Context, tx pgx.Tx, actor, issuer string, spec GrantSpec, candidates []GrantWithGroup, result *ApplyResult) error {
+	if len(candidates) == 0 {
+		group, err := ensureGroupTx(ctx, tx, issuer, spec.Group)
+		if err != nil {
+			return err
+		}
+		grant := &AccessGrant{
+			GroupID:            group.ID,
+			TagSelector:        spec.TagSelector,
+			Principals:         spec.Principals,
+			Sudo:               spec.Sudo,
+			MaxValiditySeconds: spec.MaxValiditySeconds,
+		}
+		if err := createGrantTx(ctx, tx, actor, grant); err != nil {
+			return err
+		}
+		result.Created++
+		return nil
+	}
+
+	current := candidates[0]
+	for _, dup := range candidates[1:] {
+		if err := deleteGrantTx(ctx, tx, actor, dup.ID); err != nil {
+			return err
+		}
+		result.Deleted++
+	}
+	if slices.Equal(current.Principals, spec.Principals) &&
+		current.Sudo == spec.Sudo &&
+		current.MaxValiditySeconds == spec.MaxValiditySeconds {
+		result.Unchanged++
+		return nil
+	}
+	grant := current.AccessGrant
+	grant.Principals = spec.Principals
+	grant.Sudo = spec.Sudo
+	grant.MaxValiditySeconds = spec.MaxValiditySeconds
+	if err := updateGrantTx(ctx, tx, actor, &grant); err != nil {
+		return err
+	}
+	result.Updated++
+	return nil
 }
 
 // validateGrantSpec prüft Pflichtfelder einer deklarativen Zugriffsregel;

@@ -10,6 +10,8 @@ Runnern (`runs-on: self-hosted`). Anforderungen an die Runner-Maschine:
 | Docker Engine (rootful) oder Podman mit Docker-kompatiblem Socket | Testcontainer (Postgres, Keycloak, sshd-Host), Container-Image-Builds (buildx) | sofort |
 | gcc/build-essential | `go test -race` benötigt CGO | sofort |
 | git ≥ 2.30 | Checkout, `git describe` | sofort |
+| ClamAV (`clamscan`, `freshclam`) | Malware-Scan des Quellcodes (Job `malware-scan`); Workflow installiert via `sudo apt-get`, alternativ vorinstallieren | sofort |
+| Trivy | Container-Image-Scan (Job `container-malware-scan`); wird von `aquasecurity/trivy-action` installiert, Netzugriff reicht | sofort |
 | kind + kubectl + helm | E2E-Tests im Wegwerf-Cluster | Phase 13 (nightly/Release) |
 | Node.js LTS | Angular-Build (wird via `actions/setup-node` installiert, Netzugriff reicht) | Phase 8 |
 
@@ -20,7 +22,8 @@ keine feste Go-Installation auf dem Runner nötig.
 
 - ≥ 4 CPU-Kerne, ≥ 8 GB RAM (Testcontainer + kind parallel)
 - ≥ 40 GB freier Plattenplatz (Container-Images, Build-Caches)
-- Netzzugriff: github.com, registry-1.docker.io (Pull + Push), gcr.io (distroless), proxy.golang.org
+- Netzzugriff: github.com, registry-1.docker.io (Pull + Push), gcr.io (distroless), proxy.golang.org,
+  ghcr.io (Trivy-DB), database.clamav.net (freshclam)
 
 ## Secrets (GitHub Repository-Secrets)
 
@@ -34,9 +37,12 @@ keine feste Go-Installation auf dem Runner nötig.
 - **Keine Fork-PRs auf self-hosted Runnern ausführen.** Repo privat halten oder in den
   GitHub-Einstellungen „Require approval for all outside collaborators" erzwingen —
   PR-Workflows führen fremden Code auf dem Runner aus.
-- Runner-Benutzer ohne sudo-Rechte; Docker-Gruppenmitgliedschaft genügt (bewusst:
-  Docker-Zugriff ≈ root auf der Runner-Maschine — Runner daher nicht auf
-  Produktionssystemen betreiben).
+- Runner-Benutzer möglichst ohne breite sudo-Rechte; Docker-Gruppenmitgliedschaft genügt
+  für Tests und Builds (bewusst: Docker-Zugriff ≈ root auf der Runner-Maschine — Runner
+  daher nicht auf Produktionssystemen betreiben). Ausnahme: der Job `malware-scan`
+  braucht `sudo apt-get`/`sudo freshclam`/`sudo systemctl` für ClamAV (wie auf den
+  valkey-operator-Runnern erprobt); wer sudo komplett verbieten will, muss ClamAV samt
+  aktueller Signatur-DB vorinstallieren und die sudo-Schritte im Workflow entfernen.
 - Ephemere Runner (ein Job pro Runner-Instanz) empfohlen, mindestens aber regelmäßige
   Neuinstallation/Updates der Runner-Software.
 
