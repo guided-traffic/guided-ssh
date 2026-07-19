@@ -81,10 +81,29 @@ const (
 	envRatePerMinute = "GSSH_SIGN_RATE_PER_MINUTE" // Default 60
 	envFailPerMinute = "GSSH_SIGN_FAIL_PER_MINUTE" // Default 10
 	envRateTrustXFF  = "GSSH_RATE_TRUST_PROXY"     // "true": Client-IP aus X-Forwarded-For
+
+	// Laufzeit ausgestellter Host-Zertifikate (Enrollment + Renew); Go-Duration,
+	// leer = 30 Tage. Kurze Werte machen die Rotation testbar (E2E, Phase 13).
+	envHostCertValidity = "GSSH_HOST_CERT_VALIDITY"
 )
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
 const defaultSyncInterval = 5 * time.Minute
+
+// hostCertValidityFromEnv parst GSSH_HOST_CERT_VALIDITY; leer ⇒ 0 (Default
+// 30 Tage in internal/api). Ungültige Werte sind ein Konfigurationsfehler
+// (fail-fast statt still 30-Tage-Zertifikate auszustellen).
+func hostCertValidityFromEnv() (time.Duration, error) {
+	raw := os.Getenv(envHostCertValidity)
+	if raw == "" {
+		return 0, nil
+	}
+	validity, err := time.ParseDuration(raw)
+	if err != nil || validity <= 0 {
+		return 0, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envHostCertValidity, raw)
+	}
+	return validity, nil
+}
 
 func main() {
 	os.Exit(run(os.Stdout, os.Stderr, os.Args[1:]))
@@ -225,6 +244,11 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	}
 	defer st.Close()
 
+	hostCertValidity, err := hostCertValidityFromEnv()
+	if err != nil {
+		return err
+	}
+
 	verifier, err := setupOIDC(ctx, logger)
 	if err != nil {
 		return err
@@ -253,8 +277,9 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 		Handler: api.New(api.Deps{
 			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st, UI: st,
 			Verifier: verifier, CIVerifier: ciVerifier, CIStore: st,
-			RateLimit: setupRateLimit(logger),
-			Logger:    logger, AdminGroup: adminGroup,
+			RateLimit:        setupRateLimit(logger),
+			HostCertValidity: hostCertValidity,
+			Logger:           logger, AdminGroup: adminGroup,
 			AuditorGroup:  os.Getenv(envAuditorGroup),
 			ReadOnlyGroup: os.Getenv(envReadOnlyGroup),
 			UIConfig: api.UIConfig{
@@ -271,7 +296,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 
 	var agentServer *http.Server
 	if agentListen != "" {
-		agentServer, err = newAgentServer(ctx, certAuthority, st, logger, agentListen)
+		agentServer, err = newAgentServer(ctx, certAuthority, st, logger, agentListen, hostCertValidity)
 		if err != nil {
 			return err
 		}
@@ -309,7 +334,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 // newAgentServer baut den mTLS-Server der Agent-API: Server-Zertifikat aus
 // der eigenen mTLS-CA, Client-Zertifikate werden gegen dieselbe CA verlangt
 // und verifiziert.
-func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, logger *slog.Logger, listen string) (*http.Server, error) {
+func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, logger *slog.Logger, listen string, hostCertValidity time.Duration) (*http.Server, error) {
 	if err := certAuthority.EnsureMTLSCA(ctx); err != nil {
 		return nil, fmt.Errorf("mtls-ca bootstrappen: %w", err)
 	}
@@ -327,7 +352,7 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 	}
 	return &http.Server{
 		Addr:    listen,
-		Handler: api.NewAgent(api.AgentDeps{CA: certAuthority, Hosts: st, Sessions: st, Logger: logger}),
+		Handler: api.NewAgent(api.AgentDeps{CA: certAuthority, Hosts: st, Sessions: st, Logger: logger, HostCertValidity: hostCertValidity}),
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS12,
 			Certificates: []tls.Certificate{serverCert},

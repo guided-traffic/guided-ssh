@@ -87,8 +87,9 @@ func (f *fakeHostStore) ListAuthorizedPrincipals(_ context.Context, _ uuid.UUID,
 	return f.principals[localUser], nil
 }
 
-// newEnrollServer baut CA + Server mit Enrollment und liefert beide.
-func newEnrollServer(t *testing.T, hosts *fakeHostStore) (*httptest.Server, *ca.CA) {
+// newEnrollServer baut CA + Server mit Enrollment und liefert beide; ein
+// optionales hostValidity übersteuert die Laufzeit der Host-Zertifikate.
+func newEnrollServer(t *testing.T, hosts *fakeHostStore, hostValidity ...time.Duration) (*httptest.Server, *ca.CA) {
 	t.Helper()
 	fs := &fakeStore{}
 	masterKey := make([]byte, ca.MasterKeySize)
@@ -104,7 +105,11 @@ func newEnrollServer(t *testing.T, hosts *fakeHostStore) (*httptest.Server, *ca.
 		t.Fatalf("EnsureMTLSCA: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(api.New(api.Deps{CA: certAuthority, Hosts: hosts, Logger: logger}))
+	deps := api.Deps{CA: certAuthority, Hosts: hosts, Logger: logger}
+	if len(hostValidity) > 0 {
+		deps.HostCertValidity = hostValidity[0]
+	}
+	srv := httptest.NewServer(api.New(deps))
 	t.Cleanup(srv.Close)
 	return srv, certAuthority
 }
@@ -206,6 +211,31 @@ func TestEnrollErfolg(t *testing.T) {
 	}
 	if !strings.Contains(resp.MTLSCA, "BEGIN CERTIFICATE") {
 		t.Errorf("mtls_ca fehlt: %q", resp.MTLSCA)
+	}
+}
+
+func TestEnrollHostCertValidityOverride(t *testing.T) {
+	hosts := newFakeHostStore()
+	hosts.addToken("tok-1", nil, time.Now().Add(time.Hour))
+	srv, _ := newEnrollServer(t, hosts, time.Hour)
+
+	status, body := postEnroll(t, srv.URL, enrollBody(t, "tok-1", "web1.example.com"))
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	var resp struct {
+		HostCertificate string `json:"host_certificate"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("antwort: %v", err)
+	}
+	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.HostCertificate))
+	if err != nil {
+		t.Fatalf("host-zertifikat parsen: %v", err)
+	}
+	cert := parsed.(*ssh.Certificate)
+	if lifetime := time.Duration(cert.ValidBefore-cert.ValidAfter) * time.Second; lifetime != time.Hour {
+		t.Errorf("laufzeit = %s, erwartet %s", lifetime, time.Hour)
 	}
 }
 

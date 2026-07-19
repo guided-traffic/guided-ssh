@@ -462,8 +462,11 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 - [ ] Lasttest Sign-Endpoint (Ziel definieren, z. B. 50 Zertifikate/s)
 - [ ] Chaos-Fälle: API down → bestehende SSH-Sessions unbeeinträchtigt, Agent-Cache
       trägt Logins bis TTL, danach fail-closed (verifizieren)
-- [ ] Dokumentation: Betriebs-Handbuch, Enrollment-Guide, GitLab-Integrations-Guide,
+- [x] Dokumentation: Betriebs-Handbuch, Enrollment-Guide, GitLab-Integrations-Guide,
       Troubleshooting, Architekturdiagramm
+      → `docs/betriebshandbuch.md`, `docs/enrollment-guide.md`,
+      `docs/troubleshooting.md`, `docs/architektur.md` (Mermaid-Diagramme);
+      GitLab-Integrations-Guide war mit `docs/gitlab-ci.md` bereits vollständig
 - [ ] Versionierte Releases (Binaries, Container-Images, Helm-Chart), version ist von git-tag abzuleiten
 - [ ] Erfolgskriterien final verifizieren (siehe unten)
 

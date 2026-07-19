@@ -22,6 +22,9 @@ type AgentDeps struct {
 	CA     *ca.CA
 	Hosts  HostStore
 	Logger *slog.Logger
+	// HostCertValidity ist die Laufzeit erneuerter Host-Zertifikate;
+	// 0 ⇒ Default (30 Tage). Das Policy-Maximum greift immer.
+	HostCertValidity time.Duration
 	// Sessions ist optional (Phase 9): fehlt es, bleibt POST /v1/agent/sessions
 	// deaktiviert (404). *store.Store erfüllt das Interface.
 	Sessions SessionStore
@@ -106,7 +109,7 @@ func NewAgent(deps AgentDeps) http.Handler {
 			http.Error(w, "public_key ungültig (authorized_keys-format erwartet)", http.StatusBadRequest)
 			return
 		}
-		cert, record, err := issueHostCert(r.Context(), deps.CA, host, publicKey)
+		cert, record, err := issueHostCert(r.Context(), deps.CA, host, publicKey, deps.HostCertValidity)
 		if err != nil {
 			deps.Logger.Error("agent/renew: ausstellung fehlgeschlagen", "host", host.Name, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)

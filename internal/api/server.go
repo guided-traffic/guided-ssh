@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
@@ -34,6 +35,9 @@ type Deps struct {
 	// RateLimit drosselt die unauthentifizierten Endpunkte (Sign, Enroll)
 	// pro Client-IP (Phase 10); nil ⇒ kein Rate-Limiting (Tests).
 	RateLimit *RateLimiter
+	// HostCertValidity ist die Laufzeit ausgestellter Host-Zertifikate;
+	// 0 ⇒ Default (30 Tage). Das Policy-Maximum greift immer.
+	HostCertValidity time.Duration
 	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API voll
 	// nutzen dürfen; leer ⇒ keine Mutationen möglich (fail-closed).
 	AdminGroup string
@@ -107,7 +111,7 @@ func New(deps Deps) http.Handler {
 	})
 
 	if deps.Hosts != nil {
-		mux.HandleFunc("POST /v1/enroll", deps.RateLimit.limit(handleEnroll(deps.CA, deps.Hosts, deps.Logger)))
+		mux.HandleFunc("POST /v1/enroll", deps.RateLimit.limit(handleEnroll(deps.CA, deps.Hosts, deps.HostCertValidity, deps.Logger)))
 	}
 
 	if deps.Verifier != nil && deps.Store != nil && deps.Grants != nil {

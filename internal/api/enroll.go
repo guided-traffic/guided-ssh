@@ -56,7 +56,8 @@ type enrollResponse struct {
 
 // handleEnroll registriert einen Host: Token einmalig verbrauchen, Host-
 // SSH-Zertifikat und mTLS-Client-Zertifikat ausstellen, CA-Bundles mitgeben.
-func handleEnroll(certAuthority *ca.CA, hosts HostStore, logger *slog.Logger) http.HandlerFunc {
+// hostValidity ≤ 0 fällt auf defaultHostValidity zurück.
+func handleEnroll(certAuthority *ca.CA, hosts HostStore, hostValidity time.Duration, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req enrollRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
@@ -94,7 +95,7 @@ func handleEnroll(certAuthority *ca.CA, hosts HostStore, logger *slog.Logger) ht
 			return
 		}
 
-		cert, record, err := issueHostCert(r.Context(), certAuthority, host, publicKey)
+		cert, record, err := issueHostCert(r.Context(), certAuthority, host, publicKey, hostValidity)
 		if err != nil {
 			logger.Error("enroll: host-zertifikat fehlgeschlagen", "hostname", host.Name, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -134,7 +135,12 @@ func handleEnroll(certAuthority *ca.CA, hosts HostStore, logger *slog.Logger) ht
 
 // issueHostCert stellt das SSH-Host-Zertifikat aus (Principals: voller Name
 // plus Kurzname, damit Clients beide Varianten verifizieren können).
-func issueHostCert(ctx context.Context, certAuthority *ca.CA, host *store.Host, publicKey ssh.PublicKey) (*ssh.Certificate, *store.Certificate, error) {
+// validity ≤ 0 fällt auf defaultHostValidity zurück; das Policy-Maximum
+// (30 Tage) greift immer.
+func issueHostCert(ctx context.Context, certAuthority *ca.CA, host *store.Host, publicKey ssh.PublicKey, validity time.Duration) (*ssh.Certificate, *store.Certificate, error) {
+	if validity <= 0 {
+		validity = defaultHostValidity
+	}
 	principals := []string{host.Name}
 	if short, _, found := strings.Cut(host.Name, "."); found && short != "" {
 		principals = append(principals, short)
@@ -146,7 +152,7 @@ func issueHostCert(ctx context.Context, certAuthority *ca.CA, host *store.Host, 
 		KeyID:       ca.HostKeyID(host.Name),
 		Principals:  principals,
 		ValidAfter:  validAfter,
-		ValidBefore: validAfter.Add(defaultHostValidity),
+		ValidBefore: validAfter.Add(validity),
 	}
 	ref := ca.IssueRef{Actor: "host:" + host.Name, HostID: &host.ID}
 	return certAuthority.Issue(ctx, ca.RequesterHost, req, ref)
