@@ -8,7 +8,7 @@ Runnern (`runs-on: self-hosted`). Anforderungen an die Runner-Maschine:
 | Komponente | Zweck | Ab wann |
 |---|---|---|
 | Docker Engine (rootful) oder Podman mit Docker-kompatiblem Socket | Testcontainer (Postgres, Keycloak, sshd-Host), Container-Image-Builds (buildx) | sofort |
-| gcc/build-essential | `go test -race` benötigt CGO | sofort |
+| build-essential (make, gcc) | `make`-Targets, `go test -race` benötigt CGO; Workflow installiert je Job via `sudo apt-get` (valkey-Muster), Vorinstallation beschleunigt nur | sofort |
 | git ≥ 2.30 | Checkout, `git describe` | sofort |
 | ClamAV (`clamscan`, `freshclam`) | Malware-Scan des Quellcodes (Job `malware-scan`); Workflow installiert via `sudo apt-get`, alternativ vorinstallieren | sofort |
 | Trivy | Container-Image-Scan (Job `container-malware-scan`); wird von `aquasecurity/trivy-action` installiert, Netzugriff reicht | sofort |

@@ -36,6 +36,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -53,6 +57,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       # gosec läuft über golangci-lint (wie `make gosec`), damit die im Code
       # begründeten nolint:gosec-Ausnahmen gelten — standalone gosec kennt sie nicht.
       - name: Run GoSec security scan
@@ -72,6 +80,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Run vulnerability check
         run: make vuln
 
@@ -85,6 +97,8 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Run cyclomatic complexity check
         run: make cyclo
       - name: Generate complexity report
@@ -148,6 +162,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Run unit tests with coverage
         run: make test-unit-coverage
       - name: Upload unit coverage artifact
@@ -167,6 +185,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Run integration tests with coverage
         run: make test-integration-coverage
       - name: Upload integration coverage artifact
@@ -188,6 +210,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install dependencies
+        run: go mod download
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Binaries bauen
         run: make build
       - name: Cross-Platform-Builds gssh (linux/amd64, linux/arm64, darwin/arm64)
