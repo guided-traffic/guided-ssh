@@ -15,10 +15,10 @@ Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 |---|---|
 | `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI), `gssh-agentd` (Host-Agent), `gssh-admin` (Admin-CLI) |
 | `internal/` | Go-Pakete (nicht öffentlich importierbar) |
-| `api/` | OpenAPI-Spezifikation — Single Source of Truth der REST-API (ab Phase 8) |
-| `web/` | Angular-Frontend, eingebettet ins Go-Binary (ab Phase 8) |
+| `api/` | [OpenAPI-Spezifikation](api/openapi.yaml) — Single Source of Truth der REST-API |
+| `web/` | Angular-Frontend, eingebettet ins Go-Binary ([docs/web-ui.md](docs/web-ui.md)) |
 | `deploy/helm/` | Helm-Chart (ab Phase 11) |
-| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [GitLab-CI](docs/gitlab-ci.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
+| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [GitLab-CI](docs/gitlab-ci.md), [Web-UI](docs/web-ui.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
 | `hack/` | Hilfsskripte für Build und CI |
 
 ## gssh-server

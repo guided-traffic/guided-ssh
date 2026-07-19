@@ -1,3 +1,13 @@
+# Web-UI-Stage: Angular-Build (Phase 8), wird via go:embed ins Binary eingebettet
+FROM node:24-bookworm-slim AS webbuild
+WORKDIR /web
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ .
+RUN npx ng build
+
 # Build-Stage
 FROM golang:1.26 AS build
 WORKDIR /src
@@ -7,6 +17,7 @@ COPY go.* ./
 RUN go mod download
 
 COPY . .
+COPY --from=webbuild /web/dist ./web/dist
 
 ARG VERSION=dev
 ARG COMMIT=none

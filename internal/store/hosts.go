@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -67,6 +68,28 @@ func (s *Store) SetHostTags(ctx context.Context, hostID uuid.UUID, tags map[stri
 			SELECT $1, e.key, e.value FROM jsonb_each_text($2) AS e`, hostID, tags)
 		return err
 	})
+}
+
+// HostDetailed ist ein Host inklusive Tags und Ablauf des zuletzt
+// ausgestellten Host-Zertifikats (für die Web-UI, Phase 8).
+type HostDetailed struct {
+	Host
+	Tags            map[string]string `db:"tags"`
+	CertValidBefore *time.Time        `db:"cert_valid_before"`
+}
+
+// ListHostsDetailed liefert alle Hosts inklusive Tags und dem spätesten
+// valid_before ihrer Host-Zertifikate (NULL, wenn noch keines ausgestellt wurde).
+func (s *Store) ListHostsDetailed(ctx context.Context) ([]HostDetailed, error) {
+	return queryAll[HostDetailed](ctx, s.pool, `
+		SELECT h.*,
+			COALESCE((SELECT jsonb_object_agg(t.key, t.value)
+				FROM host_tags t WHERE t.host_id = h.id), '{}'::jsonb) AS tags,
+			(SELECT max(c.valid_before)
+				FROM certificates c
+				WHERE c.host_id = h.id AND c.cert_type = 'host') AS cert_valid_before
+		FROM hosts h
+		ORDER BY h.name`)
 }
 
 // GetHostTags liefert die Tags eines Hosts.

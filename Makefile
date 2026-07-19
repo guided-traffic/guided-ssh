@@ -16,7 +16,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.date=$(DATE)
 
 .PHONY: all build cross packages test cover test-unit-coverage test-integration-coverage \
-	lint fmt gosec vuln cyclo image clean
+	lint fmt gosec vuln cyclo image clean web web-api web-test
 
 # Zielplattformen des Benutzer-CLI gssh (Plan Phase 4)
 CROSS_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
@@ -91,6 +91,19 @@ vuln:
 ## cyclo: zyklomatische Komplexität, Gate bei > $(CYCLO_THRESHOLD) (Tests ausgenommen)
 cyclo:
 	go run github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION) -over $(CYCLO_THRESHOLD) -ignore "_test.go" .
+
+## web: Angular-UI bauen (Ausgabe web/dist, wird via go:embed eingebettet);
+## der Build leert dist — .gitkeep danach wiederherstellen (go:embed-Platzhalter)
+web:
+	cd web && npm ci && npx ng build && touch dist/.gitkeep
+
+## web-api: Angular-API-Client aus api/openapi.yaml neu generieren
+web-api:
+	cd web && npx ng-openapi-gen --input ../api/openapi.yaml --output src/app/api
+
+## web-test: Frontend-Unit-Tests (vitest, headless)
+web-test:
+	cd web && npx ng test --watch=false
 
 ## image: Container-Image lokal bauen
 image:

@@ -2,9 +2,15 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
+
+// EventServiceAccountUpdated ist das Audit-Event einer Service-Account-Änderung
+// über die Admin-API (Phase 8): der Not-Aus-Schalter ist nachvollziehbar.
+const EventServiceAccountUpdated = "service_account.updated"
 
 // CreateServiceAccount legt eine maschinelle Identität an und füllt ID und Zeitstempel.
 func (s *Store) CreateServiceAccount(ctx context.Context, a *ServiceAccount) error {
@@ -65,6 +71,39 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, a *ServiceAccount) err
 	}
 	*a = *updated
 	return nil
+}
+
+// SetServiceAccountActive setzt den active-Status (Not-Aus pro Projekt) und
+// schreibt transaktional ein Audit-Event mit dem Actor.
+func (s *Store) SetServiceAccountActive(ctx context.Context, actor string, id uuid.UUID, active bool) (*ServiceAccount, error) {
+	var updated *ServiceAccount
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		u, err := queryOne[ServiceAccount](ctx, tx, `
+			UPDATE service_accounts
+			SET active = $2, updated_at = now()
+			WHERE id = $1
+			RETURNING *`, id, active)
+		if err != nil {
+			return err
+		}
+		updated = u
+		payload, err := json.Marshal(map[string]any{
+			"service_account_id": u.ID,
+			"name":               u.Name,
+			"kind":               u.Kind,
+			"active":             u.Active,
+		})
+		if err != nil {
+			return err
+		}
+		return insertAuditEvent(ctx, tx, &AuditEvent{
+			EventType: EventServiceAccountUpdated, Actor: actor, Payload: payload,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 // DeleteServiceAccount entfernt eine maschinelle Identität.

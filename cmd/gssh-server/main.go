@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/guided-traffic/guided-ssh/internal/api"
+	"github.com/guided-traffic/guided-ssh/internal/auditstream"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/store"
@@ -56,6 +57,21 @@ const (
 
 	// Admin-API (Phase 6): IdP-Gruppe der Admins; leer ⇒ Admin-API deaktiviert.
 	envAdminGroup = "GSSH_ADMIN_GROUP"
+
+	// Web-UI-Rollen (Phase 8): Auditor darf Audit-Log lesen/exportieren,
+	// Read-only die Ressourcen-Ansichten; Admin schließt beides ein.
+	envAuditorGroup  = "GSSH_AUDITOR_GROUP"
+	envReadOnlyGroup = "GSSH_READONLY_GROUP"
+
+	// OIDC-Client der Web-UI (Public Client, Authorization Code + PKCE);
+	// Default ist die Client-ID aus GSSH_OIDC_CLIENT_ID.
+	envUIOIDCClientID = "GSSH_UI_OIDC_CLIENT_ID"
+
+	// Audit-Streaming (Phase 8): committete Audit-Events als strukturierte
+	// JSON-Logs (SIEM) und optional an einen Webhook.
+	envAuditStream         = "GSSH_AUDIT_STREAM"          // "true" aktiviert Log-Streaming
+	envAuditWebhookURL     = "GSSH_AUDIT_WEBHOOK_URL"     // optionaler Webhook
+	envAuditStreamInterval = "GSSH_AUDIT_STREAM_INTERVAL" // Go-Duration, Default 10s
 )
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
@@ -193,12 +209,24 @@ func serve(logger *slog.Logger, listen, agentListen string) error {
 	if adminGroup == "" {
 		logger.Warn("admin-api nicht konfiguriert — grant-verwaltung deaktiviert", "env", envAdminGroup)
 	}
+	uiClientID := os.Getenv(envUIOIDCClientID)
+	if uiClientID == "" {
+		uiClientID = os.Getenv(envOIDCClientID)
+	}
+	startAuditStream(ctx, st, logger)
+
 	server := &http.Server{
 		Addr: listen,
 		Handler: api.New(api.Deps{
-			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st,
+			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st, UI: st,
 			Verifier: verifier, CIVerifier: ciVerifier, CIStore: st,
 			Logger: logger, AdminGroup: adminGroup,
+			AuditorGroup:  os.Getenv(envAuditorGroup),
+			ReadOnlyGroup: os.Getenv(envReadOnlyGroup),
+			UIConfig: api.UIConfig{
+				OIDCIssuer:   os.Getenv(envOIDCIssuer),
+				OIDCClientID: uiClientID,
+			},
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -298,6 +326,27 @@ func setupCIOIDC(ctx context.Context, logger *slog.Logger) (api.CITokenVerifier,
 	}
 	logger.Info("gitlab-ci konfiguriert", "issuer", issuer)
 	return verifier, nil
+}
+
+// startAuditStream startet das Audit-Streaming (strukturierte JSON-Logs auf
+// stdout und/oder Webhook), falls konfiguriert.
+func startAuditStream(ctx context.Context, st *store.Store, logger *slog.Logger) {
+	streamLogs := os.Getenv(envAuditStream) == "true"
+	webhookURL := os.Getenv(envAuditWebhookURL)
+	if !streamLogs && webhookURL == "" {
+		return
+	}
+	cfg := auditstream.Config{Logger: logger, LogEvents: streamLogs, WebhookURL: webhookURL}
+	if raw := os.Getenv(envAuditStreamInterval); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			cfg.Interval = parsed
+		} else {
+			logger.Warn("ungültiges audit-stream-intervall, nutze default", "value", raw)
+		}
+	}
+	streamer := auditstream.New(st, cfg)
+	go streamer.Run(ctx)
+	logger.Info("audit-streaming gestartet", "logs", streamLogs, "webhook", webhookURL != "")
 }
 
 // startGroupSync startet den periodischen Gruppen-Sync via

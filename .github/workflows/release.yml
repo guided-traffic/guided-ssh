@@ -23,7 +23,8 @@ env:
 
 # Job-Untergliederung wie valkey-operator (parallel auf self-hosted Runnern):
 # linter, gosec, govulncheck, cyclomatic-complexity, malware-scan, unit-tests,
-# integration-tests, coverage-report, container-malware-scan, semantic-release.
+# integration-tests, web-build, coverage-report, container-malware-scan,
+# semantic-release.
 # e2e-tests (kind-Cluster) folgen mit Phase 13, sobald es eine E2E-Suite gibt.
 jobs:
   linter:
@@ -176,7 +177,7 @@ jobs:
           retention-days: 7
 
   integration-tests:
-    name: Integration Tests (Testcontainer)
+    name: Integration Tests
     runs-on: self-hosted
     steps:
       - name: Checkout
@@ -218,6 +219,28 @@ jobs:
         run: make build
       - name: Cross-Platform-Builds gssh (linux/amd64, linux/arm64, darwin/arm64)
         run: make cross
+
+  web-build:
+    name: Web-UI Build & Tests
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "lts/*"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+      - name: Frontend-Unit-Tests (vitest)
+        run: npx ng test --watch=false
+        working-directory: web
+      - name: Angular-Build (Produktion)
+        run: npx ng build
+        working-directory: web
 
   coverage-report:
     name: Combined Coverage Report
@@ -466,6 +489,7 @@ jobs:
         integration-tests,
         coverage-report,
         build,
+        web-build,
       ]
     runs-on: self-hosted
     permissions:

@@ -25,3 +25,4 @@ nie gelöscht — überholte Entscheidungen bekommen Status „abgelöst durch A
 | [017](017-host-enrollment-mtls.md) | Host-Enrollment: Einmal-Token, mTLS-Mini-PKI, Fail-closed-Principals | akzeptiert |
 | [018](018-grants-additiv.md) | Grant-Modell: additiv, Identitäts-Principals, deklarativer Abgleich | akzeptiert |
 | [019](019-gitlab-ci-grants.md) | GitLab-CI: eigener Verifier, CI-Grants, Projekt-Principals | akzeptiert |
+| [020](020-web-ui-rollen-audit-export.md) | Web-UI: Rollenmodell, generierter API-Client, Audit-Export/-Streaming | akzeptiert |

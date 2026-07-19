@@ -1,0 +1,228 @@
+// guided-ssh Web-UI — dunkles, professionelles Theme mit Glass-Optik.
+// Material M3 (dark) liefert die Komponenten-Tokens; die Glass-Flächen
+// (transluzente Panels, Blur, feine Border) liegen als eigene Klassen darüber.
+@use '@angular/material' as mat;
+
+:root {
+  color-scheme: dark;
+
+  @include mat.theme((
+    color: (
+      primary: mat.$azure-palette,
+      tertiary: mat.$cyan-palette,
+    ),
+    typography: (
+      plain-family: (ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
+      brand-family: (ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
+    ),
+    density: 0,
+  ));
+
+  // Glass-Design-Tokens
+  --glass-bg: rgba(255, 255, 255, 0.045);
+  --glass-bg-strong: rgba(17, 24, 36, 0.86);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-highlight: rgba(255, 255, 255, 0.16);
+  --glass-blur: 18px;
+  --glass-radius: 16px;
+  --accent: #6cb2ff;
+  --accent-soft: rgba(108, 178, 255, 0.16);
+  --ok: #62d99b;
+  --warn: #f2c14e;
+  --danger: #ef7a70;
+  --text-dim: rgba(232, 238, 248, 0.62);
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  color: #e8eef8;
+  font-size: 14px;
+  // Tiefer Slate-Verlauf mit zwei farbigen Glows — die Bühne für die Glasflächen.
+  background:
+    radial-gradient(1100px 700px at 85% -10%, rgba(56, 116, 230, 0.16), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(64, 201, 198, 0.10), transparent 55%),
+    linear-gradient(160deg, #0d1220 0%, #0a0e18 55%, #090c14 100%);
+  background-attachment: fixed;
+}
+
+// ---------------------------------------------------------------- Glass-Panels
+
+.glass-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.page {
+  padding: 24px 28px 40px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 8px 0 20px;
+
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    margin: 0;
+  }
+
+  .page-sub {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+}
+
+// ------------------------------------------------------------------- Tabellen
+
+.glass-panel .mat-mdc-table {
+  background: transparent;
+}
+
+.glass-panel .mat-mdc-header-row {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.glass-panel .mat-mdc-header-cell {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  border-bottom-color: var(--glass-border);
+}
+
+.glass-panel .mat-mdc-cell {
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+}
+
+.glass-panel .mat-mdc-row:hover .mat-mdc-cell {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.glass-panel .mat-mdc-paginator {
+  background: transparent;
+  border-top: 1px solid var(--glass-border);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border-radius: var(--glass-radius);
+}
+
+// ------------------------------------------------------------ Status & Badges
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+}
+
+.pill.ok      { color: var(--ok);     border-color: rgba(98, 217, 155, 0.35); background: rgba(98, 217, 155, 0.08); }
+.pill.warn    { color: var(--warn);   border-color: rgba(242, 193, 78, 0.35); background: rgba(242, 193, 78, 0.08); }
+.pill.danger  { color: var(--danger); border-color: rgba(239, 122, 112, 0.4); background: rgba(239, 122, 112, 0.09); }
+.pill.accent  { color: var(--accent); border-color: rgba(108, 178, 255, 0.4); background: var(--accent-soft); }
+.pill.muted   { color: var(--text-dim); }
+
+.tag-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 1px 4px 1px 0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  background: rgba(108, 178, 255, 0.10);
+  border: 1px solid rgba(108, 178, 255, 0.22);
+  color: #a8cdff;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.dim { color: var(--text-dim); }
+
+// ------------------------------------------------------------------- Dialoge
+
+.mat-mdc-dialog-surface {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius) !important;
+}
+
+.cdk-overlay-dark-backdrop {
+  background: rgba(5, 8, 14, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+// Menüs/Selects/Datepicker im Overlay ebenfalls glasig.
+div.mat-mdc-select-panel,
+div.mat-mdc-menu-panel,
+.mat-datepicker-content {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+}
+
+// --------------------------------------------------------------------- Layout
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+pre.payload {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  color: #c9d7ee;
+}
+
+.spacer { flex: 1 1 auto; }
+
+.empty-state {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+// Feine Scrollbars, passend zum dunklen Thema.
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}

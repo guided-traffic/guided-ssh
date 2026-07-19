@@ -4,12 +4,14 @@
 package api
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
 
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/store"
+	"github.com/guided-traffic/guided-ssh/web"
 )
 
 // Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier, Store und Grants
@@ -23,13 +25,33 @@ type Deps struct {
 	Hosts      HostStore
 	Grants     GrantSource
 	Admin      AdminStore
+	UI         UIStore
 	Verifier   TokenVerifier
 	CIVerifier CITokenVerifier
 	CIStore    CIStore
 	Logger     *slog.Logger
-	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API nutzen
-	// dürfen; leer ⇒ Admin-API deaktiviert (fail-closed).
+	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API voll
+	// nutzen dürfen; leer ⇒ keine Mutationen möglich (fail-closed).
 	AdminGroup string
+	// AuditorGroup darf zusätzlich zu den Read-only-Ansichten das Audit-Log
+	// lesen und exportieren; AdminGroup schließt die Rolle ein.
+	AuditorGroup string
+	// ReadOnlyGroup darf die Ressourcen-Ansichten (Hosts, Grants, Benutzer,
+	// Service-Accounts) lesen; Auditor und Admin schließen die Rolle ein.
+	// Sind alle drei Gruppen leer, bleibt die gesamte Admin-API deaktiviert.
+	ReadOnlyGroup string
+	// UIConfig wird unauthentifiziert unter /v1/ui/config ausgeliefert und
+	// bootstrapt die Web-UI (OIDC-Discovery + Rollen-Mapping im Frontend).
+	UIConfig UIConfig
+}
+
+// UIConfig ist die öffentliche Bootstrap-Konfiguration der Web-UI.
+type UIConfig struct {
+	OIDCIssuer    string `json:"oidc_issuer"`
+	OIDCClientID  string `json:"oidc_client_id"`
+	AdminGroup    string `json:"admin_group"`
+	AuditorGroup  string `json:"auditor_group"`
+	ReadOnlyGroup string `json:"readonly_group"`
 }
 
 // New baut den HTTP-Handler.
@@ -52,6 +74,16 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	// Bootstrap-Konfiguration der Web-UI: bewusst unauthentifiziert, enthält
+	// nur öffentliche Werte (Issuer, Client-ID, Rollen-Gruppennamen).
+	mux.HandleFunc("GET /v1/ui/config", func(w http.ResponseWriter, _ *http.Request) {
+		cfg := deps.UIConfig
+		cfg.AdminGroup = deps.AdminGroup
+		cfg.AuditorGroup = deps.AuditorGroup
+		cfg.ReadOnlyGroup = deps.ReadOnlyGroup
+		writeJSON(w, http.StatusOK, cfg)
 	})
 
 	mux.HandleFunc("GET /v1/ca/bundle/{purpose}", func(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +125,13 @@ func New(deps Deps) http.Handler {
 	}
 
 	registerAdminRoutes(mux, deps)
+
+	// Web-UI (Phase 8): eingebetteter Angular-Build als SPA unter /.
+	// Bewusst ohne Methoden-Pattern (Konflikt mit "/v1/admin/"); der Handler
+	// beschränkt sich selbst auf GET/HEAD.
+	if dist, err := fs.Sub(web.Dist, "dist"); err == nil {
+		mux.Handle("/", NewUIHandler(dist))
+	}
 
 	return mux
 }

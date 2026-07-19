@@ -82,55 +82,91 @@ func toGrantJSON(g *store.GrantWithGroup) grantJSON {
 	}
 }
 
+// Rollen der Admin-API (Phase 8): admin schließt auditor ein, auditor
+// schließt readonly ein. Jede Rolle ist an eine IdP-Gruppe gebunden.
+const (
+	roleAdmin    = "admin"
+	roleAuditor  = "auditor"
+	roleReadOnly = "readonly"
+)
+
 // adminContext bündelt die Abhängigkeiten der Admin-Handler.
 type adminContext struct {
-	store      AdminStore
-	groups     auth.Store
-	verifier   TokenVerifier
-	mapper     *auth.Mapper
-	adminGroup string
-	logger     *slog.Logger
+	store         AdminStore
+	ui            UIStore
+	groups        auth.Store
+	verifier      TokenVerifier
+	mapper        *auth.Mapper
+	adminGroup    string
+	auditorGroup  string
+	readonlyGroup string
+	logger        *slog.Logger
 }
 
-// registerAdminRoutes hängt die Admin-API an den Mux. Ohne konfigurierte
-// Admin-Gruppe oder ohne OIDC antwortet der gesamte Admin-Pfad mit 503
-// (fail-closed, aber diagnostizierbar).
+// registerAdminRoutes hängt die Admin-API an den Mux. Ohne OIDC oder ohne
+// eine einzige konfigurierte Rollen-Gruppe antwortet der gesamte Admin-Pfad
+// mit 503 (fail-closed, aber diagnostizierbar).
 func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
-	if deps.Admin == nil || deps.Verifier == nil || deps.Store == nil || deps.AdminGroup == "" {
+	anyRole := deps.AdminGroup != "" || deps.AuditorGroup != "" || deps.ReadOnlyGroup != ""
+	if deps.Admin == nil || deps.Verifier == nil || deps.Store == nil || !anyRole {
 		mux.HandleFunc("/v1/admin/", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "admin-api nicht konfiguriert (oidc und admin-gruppe erforderlich)", http.StatusServiceUnavailable)
+			http.Error(w, "admin-api nicht konfiguriert (oidc und rollen-gruppe erforderlich)", http.StatusServiceUnavailable)
 		})
 		return
 	}
 	admin := &adminContext{
-		store:      deps.Admin,
-		groups:     deps.Store,
-		verifier:   deps.Verifier,
-		mapper:     auth.NewMapper(deps.Store),
-		adminGroup: deps.AdminGroup,
-		logger:     deps.Logger,
+		store:         deps.Admin,
+		ui:            deps.UI,
+		groups:        deps.Store,
+		verifier:      deps.Verifier,
+		mapper:        auth.NewMapper(deps.Store),
+		adminGroup:    deps.AdminGroup,
+		auditorGroup:  deps.AuditorGroup,
+		readonlyGroup: deps.ReadOnlyGroup,
+		logger:        deps.Logger,
 	}
-	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(admin.handleListGrants))
-	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(admin.handleCreateGrant))
-	mux.HandleFunc("GET /v1/admin/grants/{id}", admin.authorized(admin.handleGetGrant))
-	mux.HandleFunc("PUT /v1/admin/grants/{id}", admin.authorized(admin.handleUpdateGrant))
-	mux.HandleFunc("DELETE /v1/admin/grants/{id}", admin.authorized(admin.handleDeleteGrant))
-	mux.HandleFunc("POST /v1/admin/grants/apply", admin.authorized(admin.handleApplyGrants))
-	mux.HandleFunc("GET /v1/admin/ci-grants", admin.authorized(admin.handleListCIGrants))
-	mux.HandleFunc("POST /v1/admin/ci-grants", admin.authorized(admin.handleCreateCIGrant))
-	mux.HandleFunc("GET /v1/admin/ci-grants/{id}", admin.authorized(admin.handleGetCIGrant))
-	mux.HandleFunc("PUT /v1/admin/ci-grants/{id}", admin.authorized(admin.handleUpdateCIGrant))
-	mux.HandleFunc("DELETE /v1/admin/ci-grants/{id}", admin.authorized(admin.handleDeleteCIGrant))
-	mux.HandleFunc("POST /v1/admin/ci-grants/apply", admin.authorized(admin.handleApplyCIGrants))
+	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(roleReadOnly, admin.handleListGrants))
+	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(roleAdmin, admin.handleCreateGrant))
+	mux.HandleFunc("GET /v1/admin/grants/{id}", admin.authorized(roleReadOnly, admin.handleGetGrant))
+	mux.HandleFunc("PUT /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.handleUpdateGrant))
+	mux.HandleFunc("DELETE /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.handleDeleteGrant))
+	mux.HandleFunc("POST /v1/admin/grants/apply", admin.authorized(roleAdmin, admin.handleApplyGrants))
+	mux.HandleFunc("GET /v1/admin/ci-grants", admin.authorized(roleReadOnly, admin.handleListCIGrants))
+	mux.HandleFunc("POST /v1/admin/ci-grants", admin.authorized(roleAdmin, admin.handleCreateCIGrant))
+	mux.HandleFunc("GET /v1/admin/ci-grants/{id}", admin.authorized(roleReadOnly, admin.handleGetCIGrant))
+	mux.HandleFunc("PUT /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.handleUpdateCIGrant))
+	mux.HandleFunc("DELETE /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.handleDeleteCIGrant))
+	mux.HandleFunc("POST /v1/admin/ci-grants/apply", admin.authorized(roleAdmin, admin.handleApplyCIGrants))
+	registerUIRoutes(mux, admin)
 }
 
 // adminHandler ist ein Handler mit authentifiziertem Admin-Kontext; actor ist
 // die KeyID-Form des Admins (für Audit-Events).
 type adminHandler func(w http.ResponseWriter, r *http.Request, claims *auth.Claims, actor string)
 
-// authorized prüft Bearer-Token, aktiven Benutzer und Mitgliedschaft in der
-// Admin-Gruppe (aus den frischen Token-Claims, konsistent zum Sign-Endpoint).
-func (a *adminContext) authorized(next adminHandler) http.HandlerFunc {
+// hasRole prüft, ob die Claims die Mindest-Rolle erfüllen; höhere Rollen
+// schließen niedrigere ein. Eine leere Gruppen-Konfiguration vergibt die
+// jeweilige Rolle an niemanden (fail-closed).
+func (a *adminContext) hasRole(claims *auth.Claims, minRole string) bool {
+	inGroup := func(group string) bool {
+		return group != "" && slices.Contains(claims.Groups, group)
+	}
+	isAdmin := inGroup(a.adminGroup)
+	isAuditor := isAdmin || inGroup(a.auditorGroup)
+	isReadOnly := isAuditor || inGroup(a.readonlyGroup)
+	switch minRole {
+	case roleAdmin:
+		return isAdmin
+	case roleAuditor:
+		return isAuditor
+	default:
+		return isReadOnly
+	}
+}
+
+// authorized prüft Bearer-Token, aktiven Benutzer und die Mindest-Rolle
+// (aus den frischen Token-Claims, konsistent zum Sign-Endpoint).
+func (a *adminContext) authorized(minRole string, next adminHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rawToken, ok := bearerToken(r)
 		if !ok {
@@ -151,9 +187,9 @@ func (a *adminContext) authorized(next adminHandler) http.HandlerFunc {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		if !slices.Contains(claims.Groups, a.adminGroup) {
-			a.logger.Info("admin: zugriff verweigert", "subject", claims.Subject, "groups", claims.Groups)
-			http.Error(w, "keine admin-berechtigung (gruppe "+a.adminGroup+" erforderlich)", http.StatusForbidden)
+		if !a.hasRole(claims, minRole) {
+			a.logger.Info("admin: zugriff verweigert", "subject", claims.Subject, "groups", claims.Groups, "min_role", minRole)
+			http.Error(w, "keine berechtigung (rolle "+minRole+" erforderlich)", http.StatusForbidden)
 			return
 		}
 		next(w, r, claims, ca.UserKeyID(claims.Subject, claims.Issuer))

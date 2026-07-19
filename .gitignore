@@ -3,8 +3,17 @@
 coverage.out
 /coverage/
 
+# Web-UI (Phase 8): Build-Ausgabe wird ins Go-Binary eingebettet; nur der
+# Platzhalter .gitkeep ist versioniert, damit go:embed ohne Node-Build baut.
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+web/.angular/
+
 # Tooling-Ausgaben
-graphify-out/
+graphify-out/cost.json
+graphify-out/.graphify_python
+graphify-out/cache/
 
 # OS
 .DS_Store

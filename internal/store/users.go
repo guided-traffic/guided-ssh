@@ -37,6 +37,25 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return queryAll[User](ctx, s.pool, `SELECT * FROM users ORDER BY username, id`)
 }
 
+// UserDetailed ist ein Benutzer inklusive seiner Gruppennamen (für die
+// Web-UI, Phase 8).
+type UserDetailed struct {
+	User
+	Groups []string `db:"groups"`
+}
+
+// ListUsersDetailed liefert alle Benutzer inklusive ihrer Gruppennamen.
+func (s *Store) ListUsersDetailed(ctx context.Context) ([]UserDetailed, error) {
+	return queryAll[UserDetailed](ctx, s.pool, `
+		SELECT u.*,
+			COALESCE((SELECT array_agg(g.name ORDER BY g.name)
+				FROM user_groups ug
+				JOIN groups g ON g.id = ug.group_id
+				WHERE ug.user_id = u.id), '{}') AS groups
+		FROM users u
+		ORDER BY u.username, u.id`)
+}
+
 // UpdateUser aktualisiert die veränderlichen Felder eines Benutzers.
 func (s *Store) UpdateUser(ctx context.Context, u *User) error {
 	updated, err := queryOne[User](ctx, s.pool, `

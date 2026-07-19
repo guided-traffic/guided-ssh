@@ -1,0 +1,13 @@
+# Build-Kontext klein halten; die Web-UI-Stage installiert Abhängigkeiten
+# selbst (npm ci) und baut dist frisch.
+web/node_modules
+web/dist
+web/.angular
+bin
+coverage
+coverage.out
+graphify-out
+dist
+.git
+.github
+docs

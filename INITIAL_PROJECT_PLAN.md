@@ -303,18 +303,36 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 
 ## Phase 8 — Web-UI & Auditing-Oberfläche
 
-- [ ] Angular-Projekt aufsetzen (`web/`): Standalone Components, Angular Material,
+- [x] Angular-Projekt aufsetzen (`web/`): Standalone Components, Angular Material,
       OIDC-Login (Authorization Code + PKCE, z. B. `angular-auth-oidc-client`),
       Rollen (Admin, Auditor, Read-only) aus Token-Claims
-- [ ] API-Client aus OpenAPI-Spec generieren (Single Source of Truth für REST-API)
-- [ ] Build-Integration: Angular-Build in CI, Assets via `embed.FS` ins Go-Binary
-- [ ] Ansichten: Hosts (Status, Tags, Zertifikatsablauf), Grants, Benutzer/Gruppen,
+      → Angular 21 + Material 21 (M3-Dark, Glass-Optik); OIDC-Bootstrap via
+      `GET /v1/ui/config`; Rollen-Gruppen `GSSH_ADMIN_GROUP`/`GSSH_AUDITOR_GROUP`/
+      `GSSH_READONLY_GROUP` (admin ⊃ auditor ⊃ readonly, fail-closed; ADR-020)
+- [x] API-Client aus OpenAPI-Spec generieren (Single Source of Truth für REST-API)
+      → `api/openapi.yaml` (handgepflegt, komplette REST-API) + ng-openapi-gen
+      nach `web/src/app/api` (`make web-api`)
+- [x] Build-Integration: Angular-Build in CI, Assets via `embed.FS` ins Go-Binary
+      → `web/embed.go` (go:embed, `.gitkeep`-Platzhalter — Go-Build ohne Node),
+      SPA-Handler mit index.html-Fallback; `make web`; CI-Job `web-build`;
+      Docker-Node-Stage im Release-Image
+- [x] Ansichten: Hosts (Status, Tags, Zertifikatsablauf), Grants, Benutzer/Gruppen,
       Service-Accounts/CI-Regeln
-- [ ] Audit-Ansicht: filterbar nach Nutzer, Host, Pipeline, Zeitraum, Ereignistyp
+      → Read-Endpoints `/v1/admin/{hosts,users,groups,service-accounts,certificates}`;
+      Grants/CI-Grants-CRUD in der UI (Admin), Service-Account-Not-Aus per Toggle
+- [x] Audit-Ansicht: filterbar nach Nutzer, Host, Pipeline, Zeitraum, Ereignistyp
       (Ausstellung, Login, sudo, Session-Ende, Enrollment, Grant-Änderung)
-- [ ] Audit-Export: CSV/JSON-Download + strukturierte Logs (JSON auf stdout) für
+      → `GET /v1/admin/audit` (event_type, actor, q über Actor+Payload für
+      Host/Pipeline, Zeitraum, Pagination; Rolle Auditor); sudo/Session-Events
+      folgen mit Phase 9
+- [x] Audit-Export: CSV/JSON-Download + strukturierte Logs (JSON auf stdout) für
       SIEM-Anbindung; optionaler Webhook
-- [ ] Admin-Änderungen über UI erzeugen selbst Audit-Events (wer änderte welchen Grant)
+      → `GET /v1/admin/audit/export` (CSV/JSON, max. 100 000 Zeilen);
+      `internal/auditstream`: Poller emittiert committete Events als JSON-Logs
+      (`GSSH_AUDIT_STREAM=true`) und an `GSSH_AUDIT_WEBHOOK_URL`
+- [x] Admin-Änderungen über UI erzeugen selbst Audit-Events (wer änderte welchen Grant)
+      → UI nutzt dieselben Admin-Endpoints (transaktionale Audit-Events mit Actor);
+      neu auch für Service-Account-Umschaltung (`service_account.updated`)
 
 ## Phase 9 — Session-Audit auf dem Host (Ausbaustufe)
 
