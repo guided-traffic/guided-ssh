@@ -171,7 +171,7 @@ func (u *uiAuthContext) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure bewusst dynamisch (isSecureRequest ⇒ hinter TLS/Ingress true, lokal http false); HttpOnly und SameSite sind gesetzt
 		Name: stateCookieName, Value: sealed,
 		Path: "/v1/auth", MaxAge: int(stateCookieTTL.Seconds()),
 		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
@@ -258,7 +258,7 @@ func (u *uiAuthContext) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure bewusst dynamisch (isSecureRequest ⇒ hinter TLS/Ingress true, lokal http false); HttpOnly und SameSite sind gesetzt
 		Name: sessionCookieName, Value: sealed,
 		Path: "/", MaxAge: int(u.cfg.SessionTTL.Seconds()),
 		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
@@ -331,7 +331,7 @@ func uiRoles(groups []string, adminGroup, auditorGroup, readonlyGroup string) []
 
 // clearCookie löscht ein Cookie (MaxAge < 0) mit identischen Attributen.
 func (u *uiAuthContext) clearCookie(w http.ResponseWriter, r *http.Request, name, path string) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure bewusst dynamisch (isSecureRequest ⇒ hinter TLS/Ingress true, lokal http false); HttpOnly und SameSite sind gesetzt
 		Name: name, Value: "", Path: path, MaxAge: -1,
 		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
 	})
