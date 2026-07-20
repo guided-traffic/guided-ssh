@@ -152,10 +152,11 @@ Vollständige Liste mit Kommentaren: [values.yaml](values.yaml).
 
 ## Chart-Release (GitHub Pages)
 
-Der Workflow `.github/workflows/chart-release.yml` veröffentlicht das Chart
-bei einem Version-Bump in `Chart.yaml` (Push auf `main`) via
+Der `helm-chart`-Job in `.github/workflows/build.yml` veröffentlicht das Chart
+zusammen mit Binaries und Image bei jedem Release (`vX.Y.Z`) via
 [chart-releaser](https://github.com/helm/chart-releaser-action) auf den
-`gh-pages`-Branch. Einmalige Einrichtung:
+`gh-pages`-Branch. `version` und `appVersion` kommen dabei aus dem Release-Tag,
+die Chart.yaml-Werte sind nur Lint-Baseline. Einmalige Einrichtung:
 
 ```bash
 git checkout --orphan gh-pages

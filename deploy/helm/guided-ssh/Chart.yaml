@@ -6,8 +6,8 @@ description: >-
   certificates, audit log and web UI.
 type: application
 # Lint-Baseline (ct check-version-increment). Beim Release werden version und
-# appVersion aus dem git-Tag gesetzt (siehe .github/workflows/chart-release.yml);
-# die veröffentlichte Chart-Version = App-Version = Image-Tag.
+# appVersion aus dem git-Tag gesetzt (siehe .github/workflows/build.yml, Job
+# helm-chart); die veröffentlichte Chart-Version = App-Version = Image-Tag.
 version: 0.1.0
 appVersion: "0.1.0"
 kubeVersion: ">=1.27.0-0"

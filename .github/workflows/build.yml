@@ -113,3 +113,57 @@ jobs:
             DATE=${{ steps.buildinfo.outputs.date }}
           provenance: true
           sbom: true
+
+  # Helm-Chart als gh-pages-Helm-Repo veröffentlichen (chart-releaser), im selben
+  # Release-Lauf wie Binaries und Image. version + appVersion kommen aus dem
+  # Release-Tag; appVersion ist der Default-Image-Tag (_helpers.tpl:
+  # default .Chart.AppVersion .Values.image.tag) — das Chart zeigt so auf das
+  # gleichnamige Image dieses Releases.
+  #
+  # Guard wie bei den anderen Jobs: chart-releaser erzeugt selbst guided-ssh-*-
+  # Releases; ohne den Filter würde deren `release: published` diesen Job erneut
+  # anstoßen (Endlos-Schleife). Die von semantic-release erzeugten vX.Y.Z-Releases
+  # matchen den Filter nicht und laufen durch.
+  helm-chart:
+    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
+    name: Release Helm Chart (gh-pages)
+    runs-on: self-hosted
+    permissions:
+      contents: write # gh-pages-Branch + guided-ssh-*-Release/Tag schreiben
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # chart-releaser braucht die Tag-Historie
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      # Chart-Version = App-Version aus dem Release-Tag (vX.Y.Z ⇒ X.Y.Z). version
+      # steuert die gh-pages-Release-Version, appVersion den Default-Image-Tag.
+      # Die Werte in Chart.yaml sind nur Lint-Baseline (ct check-version-increment)
+      # und werden hier zur Release-Zeit überschrieben.
+      - name: Chart-Version + appVersion aus Release-Tag setzen
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "Release-Chart-Version: ${VERSION}"
+          sed -i -E "s/^version:.*/version: ${VERSION}/" deploy/helm/guided-ssh/Chart.yaml
+          sed -i -E "s/^appVersion:.*/appVersion: \"${VERSION}\"/" deploy/helm/guided-ssh/Chart.yaml
+
+      - name: Subchart-Dependencies auflösen
+        run: helm dependency build deploy/helm/guided-ssh
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1
+        with:
+          charts_dir: deploy/helm
+          skip_existing: true
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
