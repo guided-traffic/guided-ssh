@@ -13,7 +13,7 @@ Betriebssicht: [betriebshandbuch.md](betriebshandbuch.md).
 | `gssh` (CLI) | Benutzer-CLI: SSO-Login, Zertifikat nur im ssh-agent (ADR-016); `gssh ci-login` für GitLab-Jobs |
 | `gssh-admin` (CLI) | Grant-/CI-Grant-Verwaltung über die Admin-API, deklaratives `apply` (GitOps) |
 | Web-UI | read-mostly Ansichten + Grant-CRUD/Audit, Rollen aus IdP-Gruppen (ADR-020); nutzt dieselbe Admin-API |
-| IdP (z. B. Keycloak) | OIDC-Issuer für Menschen (CLI: Code+PKCE/Device-Flow, UI: Code+PKCE); optional Gruppen-Sync über die Keycloak-Admin-API (ADR-015) |
+| IdP (z. B. Keycloak) | OIDC-Issuer für Menschen (CLI: Code+PKCE/Device-Flow; UI: server-seitiger Code-Flow mit Client-Secret — BFF, Session-Cookie, kein Token im Browser); optional Gruppen-Sync über die Keycloak-Admin-API (ADR-015) |
 | GitLab | zweiter, strikt getrennter OIDC-Issuer für CI-Job-Tokens (`id_tokens`, ADR-019) |
 | Host: `gssh-agentd` + sshd | Host-Agent (Enrollment, Zertifikats-/Bundle-Pflege, Principals-Cache) und sshd mit `TrustedUserCAKeys` + `AuthorizedPrincipalsCommand` (ADR-017); optional Session-/sudo-Audit via pam_exec (ADR-021) |
 | SIEM | optionaler Abnehmer der Audit-Events (JSON-Logs auf stdout und/oder Webhook) |

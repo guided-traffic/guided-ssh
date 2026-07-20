@@ -5,6 +5,10 @@ export type { GetHealth$Params as GetHealth$Params } from './fn/system/get-healt
 export { getHealth as getHealth } from './fn/system/get-health';
 export type { GetUiConfig$Params as GetUiConfig$Params } from './fn/system/get-ui-config';
 export { getUiConfig as getUiConfig } from './fn/system/get-ui-config';
+export type { GetAuthMe$Params as GetAuthMe$Params } from './fn/system/get-auth-me';
+export { getAuthMe as getAuthMe } from './fn/system/get-auth-me';
+export type { PostAuthLogout$Params as PostAuthLogout$Params } from './fn/system/post-auth-logout';
+export { postAuthLogout as postAuthLogout } from './fn/system/post-auth-logout';
 export type { GetCaBundle$Params as GetCaBundle$Params } from './fn/ca/get-ca-bundle';
 export { getCaBundle as getCaBundle } from './fn/ca/get-ca-bundle';
 export type { SignUser$Params as SignUser$Params } from './fn/sign/sign-user';

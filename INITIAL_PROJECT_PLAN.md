@@ -309,6 +309,15 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
       → Angular 21 + Material 21 (M3-Dark, Glass-Optik); OIDC-Bootstrap via
       `GET /v1/ui/config`; Rollen-Gruppen `GSSH_ADMIN_GROUP`/`GSSH_AUDITOR_GROUP`/
       `GSSH_READONLY_GROUP` (admin ⊃ auditor ⊃ readonly, fail-closed; ADR-020)
+- [x] UI-Login auf server-seitiges OIDC umgestellt (BFF): der Server führt
+      Authorization Code + PKCE mit Client-Secret aus (`/v1/auth/login|callback|
+      logout|me`, `internal/api/ui_auth.go`); Session als HttpOnly-Cookie
+      (AES-GCM, Schlüssel per HKDF aus `GSSH_CA_MASTER_KEY`), Admin-API
+      akzeptiert Session-Cookie + `X-Requested-With` zusätzlich zu Bearer;
+      SPA ohne `angular-auth-oidc-client`, kein CORS/Discovery im Browser.
+      Aktivierung über `GSSH_UI_OIDC_CLIENT_SECRET` (Chart:
+      `config.oidc.uiExistingSecret`); Dex-Client wird confidential,
+      Redirect-URI `<base>/v1/auth/callback`
 - [x] API-Client aus OpenAPI-Spec generieren (Single Source of Truth für REST-API)
       → `api/openapi.yaml` (handgepflegt, komplette REST-API) + ng-openapi-gen
       nach `web/src/app/api` (`make web-api`)
@@ -539,3 +548,48 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
       → 80,4 % (`make cover`, Gate aktiv lokal + CI); Unit-/Integrations-Jobs
       laufen in `release.yml`; E2E-Job `e2e-tests` neu — lokal grün, erster
       Pipeline-Lauf mit dem nächsten Push auf den PR
+
+
+## Later Topics
+- [ ] gssh login: CLI-Login gegen Dex scheitert — Operator kann keine secretlosen
+      Public Clients
+
+      **Kontext.** `gssh login` nutzt einen eigenen Public Client (`gssh-cli`,
+      `internal/cli/config.go`) mit Authorization Code + PKCE (Default) bzw.
+      Device-Flow (`internal/auth/flow.go`) — beide tauschen den Code/Device-Code
+      ohne `client_secret` gegen Tokens. Dex prüft das Secret aber immer, sobald
+      am registrierten Client eines hinterlegt ist; `public: true` schaltet die
+      Prüfung nicht ab (Dex-Log: `missing client_secret on token request`).
+      Der dex-operator (`dex.gtrfc.com/v1 DexStaticClient`) hängt derzeit an
+      jeden Client ein Secret (`iso.gtrfc.com/autogenerate`-Annotation,
+      `clientSecretKey` wird gedefaultet, gerendert als `secretEnv` in der
+      Dex-Config) — echte secretlose Clients sind mit dem Operator nicht
+      abbildbar. Die Web-UI ist davon nicht mehr betroffen (BFF, confidential
+      Client); die CLI bleibt Public Client und läuft gegen Dex in denselben
+      401 am Token-Endpoint.
+
+      **Ziel.** `gssh login` (PKCE- und Device-Flow) funktioniert gegen Dex
+      end-to-end (Token-Tausch 200, `POST /v1/sign/user` liefert Zertifikat).
+
+      **Lösungsansatz.**
+      1. Operator-Fix: bei `public: true` den Client OHNE Secret rendern
+         (kein `secretEnv`, `clientSecretKey`/Autogenerate nicht erzwingen).
+      2. Operator muss leere `redirectURIs` erlauben: die CLI lauscht auf
+         `127.0.0.1:<random>`; Dex erlaubt localhost-Redirects für Public
+         Clients nur, wenn KEINE redirectURIs registriert sind — sonst ist
+         der zufällige Port nicht abbildbar.
+      3. Eigenen Dex-Client für die CLI anlegen (z. B.
+         `${cluster_name}-gssh-cli`, public, secretlos, ohne redirectURIs)
+         und `GSSH_OIDC_CLIENT_ID` (= erwartete Audience von /v1/sign/user)
+         darauf zeigen lassen — UI- und CLI-Client sind nach dem BFF-Umbau
+         getrennt.
+
+      **Verworfen:** `client_secret` in der CLI-Config (confidential CLI) —
+      Secret läge in jeder User-Config, faktisch doch public, nur mit
+      Verteilproblem.
+
+      **Akzeptanzkriterien.**
+      - `DexStaticClient` mit `public: true` rendert ohne Secret und ohne
+        Pflicht-redirectURIs
+      - `gssh login` (PKCE) gegen wds18-Dex erfolgreich, ebenso `--device`
+      - Audience-Kette dokumentiert: CLI-Client-ID = `GSSH_OIDC_CLIENT_ID`

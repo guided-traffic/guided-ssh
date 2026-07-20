@@ -78,6 +78,14 @@ spec:
             {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_ISSUER" "value" .Values.config.oidc.issuer) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_CLIENT_ID" "value" .Values.config.oidc.clientID) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_UI_OIDC_CLIENT_ID" "value" .Values.config.oidc.uiClientID) | nindent 12 }}
+            {{- if .Values.config.oidc.uiExistingSecret }}
+            - name: GSSH_UI_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.oidc.uiExistingSecret }}
+                  key: {{ .Values.config.oidc.uiExistingSecretKey }}
+            {{- end }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_UI_BASE_URL" "value" .Values.config.oidc.uiBaseURL) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_CI_ISSUER" "value" .Values.config.ci.issuer) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_CI_AUDIENCE" "value" .Values.config.ci.audience) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_ADMIN_GROUP" "value" .Values.config.groups.admin) | nindent 12 }}
