@@ -3,8 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +48,75 @@ func TestSetupOIDC(t *testing.T) {
 	t.Setenv(envOIDCClientID, "")
 	if _, err := setupOIDC(context.Background(), discardLogger()); err == nil {
 		t.Fatal("issuer ohne client-id muss fehlschlagen")
+	}
+}
+
+func TestSetupUIAuth(t *testing.T) {
+	// Ohne Client-Secret: BFF bewusst deaktiviert (nil, nil).
+	t.Setenv(envUIOIDCClientSecret, "")
+	cfg, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui")
+	if cfg != nil || err != nil {
+		t.Fatalf("ohne secret: %v %v", cfg, err)
+	}
+	// Secret ohne Issuer bzw. ohne Client-ID: Konfigurationsfehler (fail-fast).
+	t.Setenv(envUIOIDCClientSecret, "geheim")
+	t.Setenv(envOIDCIssuer, "")
+	if _, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui"); err == nil {
+		t.Fatal("secret ohne issuer muss fehlschlagen")
+	}
+	t.Setenv(envOIDCIssuer, "https://idp.example")
+	if _, err := setupUIAuth(context.Background(), discardLogger(), ""); err == nil {
+		t.Fatal("secret ohne client-id muss fehlschlagen")
+	}
+}
+
+// TestSetupUIAuthKomplett: vollständige Konfiguration gegen einen Fake-IdP
+// (nur Discovery) — prüft Scopes-Override, TTL-Parsing und Base-URL-Trim.
+func TestSetupUIAuthKomplett(t *testing.T) {
+	var idp *httptest.Server
+	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                idp.URL,
+			"authorization_endpoint":                idp.URL + "/auth",
+			"token_endpoint":                        idp.URL + "/token",
+			"jwks_uri":                              idp.URL + "/keys",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	}))
+	t.Cleanup(idp.Close)
+
+	t.Setenv(envUIOIDCClientSecret, "geheim")
+	t.Setenv(envOIDCIssuer, idp.URL)
+	t.Setenv(envMasterKey, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv(envUIOIDCScopes, "openid, email")
+	t.Setenv(envUISessionTTL, "1h")
+	t.Setenv(envUIBaseURL, "https://gssh.example.com/")
+
+	cfg, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui")
+	if err != nil {
+		t.Fatalf("setupUIAuth: %v", err)
+	}
+	if cfg.OAuth.ClientID != "gssh-ui" || cfg.OAuth.ClientSecret != "geheim" {
+		t.Errorf("oauth-client = %s/%s", cfg.OAuth.ClientID, cfg.OAuth.ClientSecret)
+	}
+	if !slices.Equal(cfg.OAuth.Scopes, []string{"openid", "email"}) {
+		t.Errorf("scopes = %v", cfg.OAuth.Scopes)
+	}
+	if cfg.SessionTTL != time.Hour {
+		t.Errorf("session-ttl = %v", cfg.SessionTTL)
+	}
+	if cfg.BaseURL != "https://gssh.example.com" {
+		t.Errorf("base-url = %q (trailing slash nicht entfernt?)", cfg.BaseURL)
+	}
+	if cfg.Verifier == nil || cfg.Codec == nil {
+		t.Error("verifier/codec fehlen")
+	}
+
+	// Ungültige Session-TTL: Konfigurationsfehler (fail-fast).
+	t.Setenv(envUISessionTTL, "nix")
+	if _, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui"); err == nil {
+		t.Error("ungültige ttl muss fehlschlagen")
 	}
 }
 

@@ -39,6 +39,15 @@ config:
     clientID: ""
     # GSSH_UI_OIDC_CLIENT_ID (leer = clientID)
     uiClientID: ""
+    # Server-seitiger UI-Login (BFF): Secret mit dem OIDC-Client-Secret der
+    # UI. Gesetzt ⇒ der Server führt den Login selbst aus (/v1/auth/…,
+    # Session-Cookie, kein CORS gegen den IdP); leer ⇒ UI-Login deaktiviert.
+    uiExistingSecret: ""
+    # Key im Secret mit dem Client-Secret (GSSH_UI_OIDC_CLIENT_SECRET).
+    uiExistingSecretKey: "client-secret"
+    # GSSH_UI_BASE_URL: externe Basis-URL der UI für die OIDC-Redirect-URL,
+    # z. B. https://gssh.example.com (leer = aus dem Request abgeleitet).
+    uiBaseURL: ""
   # GitLab-CI-Issuer. Ohne Issuer bleibt /v1/sign/ci deaktiviert.
   ci:
     # GSSH_CI_ISSUER (GitLab-Basis-URL)

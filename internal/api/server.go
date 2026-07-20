@@ -51,6 +51,9 @@ type Deps struct {
 	// UIConfig wird unauthentifiziert unter /v1/ui/config ausgeliefert und
 	// bootstrapt die Web-UI (OIDC-Discovery + Rollen-Mapping im Frontend).
 	UIConfig UIConfig
+	// UIAuth aktiviert den server-seitigen OIDC-Login der Web-UI
+	// (/v1/auth/…, BFF); nil ⇒ Endpunkte antworten mit 503.
+	UIAuth *UIAuthConfig
 }
 
 // UIConfig ist die öffentliche Bootstrap-Konfiguration der Web-UI.
@@ -132,6 +135,7 @@ func New(deps Deps) http.Handler {
 		})
 	}
 
+	registerUIAuthRoutes(mux, deps)
 	registerAdminRoutes(mux, deps)
 
 	// Web-UI (Phase 8): eingebetteter Angular-Build als SPA unter /.

@@ -309,6 +309,15 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
       → Angular 21 + Material 21 (M3-Dark, Glass-Optik); OIDC-Bootstrap via
       `GET /v1/ui/config`; Rollen-Gruppen `GSSH_ADMIN_GROUP`/`GSSH_AUDITOR_GROUP`/
       `GSSH_READONLY_GROUP` (admin ⊃ auditor ⊃ readonly, fail-closed; ADR-020)
+- [x] UI-Login auf server-seitiges OIDC umgestellt (BFF): der Server führt
+      Authorization Code + PKCE mit Client-Secret aus (`/v1/auth/login|callback|
+      logout|me`, `internal/api/ui_auth.go`); Session als HttpOnly-Cookie
+      (AES-GCM, Schlüssel per HKDF aus `GSSH_CA_MASTER_KEY`), Admin-API
+      akzeptiert Session-Cookie + `X-Requested-With` zusätzlich zu Bearer;
+      SPA ohne `angular-auth-oidc-client`, kein CORS/Discovery im Browser.
+      Aktivierung über `GSSH_UI_OIDC_CLIENT_SECRET` (Chart:
+      `config.oidc.uiExistingSecret`); Dex-Client wird confidential,
+      Redirect-URI `<base>/v1/auth/callback`
 - [x] API-Client aus OpenAPI-Spec generieren (Single Source of Truth für REST-API)
       → `api/openapi.yaml` (handgepflegt, komplette REST-API) + ng-openapi-gen
       nach `web/src/app/api` (`make web-api`)

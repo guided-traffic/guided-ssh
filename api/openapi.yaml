@@ -58,6 +58,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/UiConfig" }
 
+  /v1/auth/me:
+    get:
+      tags: [system]
+      summary: Login-Zustand der UI-Session (server-seitiges OIDC, BFF)
+      security: []
+      operationId: getAuthMe
+      responses:
+        "200":
+          description: Login-Zustand; unauthentifiziert ⇒ authenticated=false
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+
+  /v1/auth/logout:
+    post:
+      tags: [system]
+      summary: UI-Session beenden (Session-Cookie löschen)
+      security: []
+      operationId: postAuthLogout
+      responses:
+        "204":
+          description: Session beendet
+
   /v1/ca/bundle/{purpose}:
     get:
       tags: [ca]
@@ -496,6 +519,16 @@ components:
         text/plain: { schema: { type: string } }
 
   schemas:
+    AuthSession:
+      type: object
+      required: [authenticated]
+      properties:
+        authenticated: { type: boolean }
+        username: { type: string }
+        roles:
+          type: array
+          items: { type: string, enum: [admin, auditor, readonly] }
+
     UiConfig:
       type: object
       required: [oidc_issuer, oidc_client_id, admin_group, auditor_group, readonly_group]

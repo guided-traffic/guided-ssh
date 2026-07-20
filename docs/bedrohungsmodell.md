@@ -15,7 +15,10 @@ KMS/HSM) in Phase 10. Diese Datei wird bei Architekturänderungen fortgeschriebe
 
 ## Vertrauensgrenzen
 
-- CLI/Browser ↔ API: OIDC (Authorization Code + PKCE), TLS
+- CLI ↔ API: OIDC (Authorization Code + PKCE), TLS
+- Browser ↔ API: server-seitiger OIDC-Login (BFF); HttpOnly-Session-Cookie
+  (AES-GCM, Schlüssel per HKDF aus dem CA-Master-Key), SameSite=Lax +
+  X-Requested-With gegen CSRF; Tokens verlassen den Server nie
 - Host-Agent ↔ API: mTLS mit host-gebundenem Client-Zertifikat
 - CI-Job ↔ API: GitLab-OIDC-Token, Validierung gegen GitLab-JWKS
 - API ↔ Postgres: interner Cluster-Verkehr, NetworkPolicy, eigene DB-Rollen
