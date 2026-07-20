@@ -7,9 +7,10 @@ import (
 	"strings"
 )
 
-// hashedAsset erkennt Angular-Ausgabedateien mit Content-Hash im Namen
-// (z. B. main-Q3ZUVLNB.js) — die dürfen unbegrenzt gecacht werden.
-var hashedAsset = regexp.MustCompile(`-[A-Z0-9]{8,}\.[a-z0-9]+$`)
+// hashedAsset erkennt Angular-Ausgabedateien mit Content-Hash im Namen —
+// die dürfen unbegrenzt gecacht werden. Der Builder erzeugt zwei Formate:
+// Großbuchstaben-Hex (main-Q3ZUVLNB.js) und Base64url (chunk-DcHW0dVi.js).
+var hashedAsset = regexp.MustCompile(`-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$`)
 
 // NewUIHandler liefert den SPA-Handler über dem eingebetteten Angular-Build:
 // vorhandene Dateien werden direkt ausgeliefert, alle anderen Pfade fallen

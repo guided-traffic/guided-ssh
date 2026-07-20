@@ -3,6 +3,17 @@
     <mat-spinner diameter="36" />
     <span class="dim">Anmeldung wird geprüft …</span>
   </div>
+} @else if (session.error()) {
+  <div class="login-stage">
+    <div class="login-card glass-panel">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">guided-ssh</span>
+      </div>
+      <p class="login-claim error-text">{{ session.error() }}</p>
+      <button mat-stroked-button (click)="reload()">Erneut versuchen</button>
+    </div>
+  </div>
 } @else if (!session.authenticated()) {
   <div class="login-stage">
     <div class="login-card glass-panel">

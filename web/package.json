@@ -6,7 +6,8 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "test:smoke": "node e2e/smoke.mjs"
   },
   "private": true,
   "packageManager": "npm@12.0.1",
@@ -30,6 +31,7 @@
     "@angular/compiler-cli": "^22.0.0",
     "jsdom": "^29.0.0",
     "ng-openapi-gen": "^1.0.5",
+    "playwright-core": "^1.61.1",
     "prettier": "^3.8.1",
     "typescript": "~6.0.0",
     "vitest": "^4.0.8"

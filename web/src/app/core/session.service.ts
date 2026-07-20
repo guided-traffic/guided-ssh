@@ -38,13 +38,26 @@ export class SessionService {
   readonly authenticated = signal(false);
   readonly username = signal('');
   readonly roles = signal<ReadonlySet<Role>>(new Set());
+  /** Fehlermeldung, wenn die Login-Prüfung nicht möglich war (Config/OIDC down). */
+  readonly error = signal('');
 
   readonly isAdmin = computed(() => this.roles().has('admin'));
   readonly isAuditor = computed(() => this.roles().has('auditor'));
   readonly hasAnyRole = computed(() => this.roles().size > 0);
 
-  /** init führt checkAuth aus (inkl. Code-Callback) und lädt die Rollen. */
-  async init(): Promise<void> {
+  private ready?: Promise<void>;
+
+  /**
+   * init führt checkAuth aus (inkl. Code-Callback) und lädt die Rollen.
+   * Idempotent (App-Start und Route-Guards teilen sich einen Lauf) und
+   * rejected nie: Fehler landen im error-Signal, damit die UI sie anzeigt.
+   */
+  init(): Promise<void> {
+    this.ready ??= this.run();
+    return this.ready;
+  }
+
+  private async run(): Promise<void> {
     try {
       const config = await firstValueFrom(this.http.get<UiConfig>('/v1/ui/config'));
       const result = await firstValueFrom(this.oidc.checkAuth());
@@ -55,6 +68,12 @@ export class SessionService {
         this.username.set(payload?.['preferred_username'] ?? payload?.['email'] ?? payload?.['sub'] ?? '');
         this.roles.set(rolesFor(groups, config));
       }
+    } catch (err) {
+      console.error('Login-Prüfung fehlgeschlagen', err);
+      this.error.set(
+        'Anmeldung derzeit nicht möglich: Server-Konfiguration oder OIDC-Provider ' +
+          'nicht erreichbar. Details in der Browser-Konsole.',
+      );
     } finally {
       this.checking.set(false);
     }
