@@ -416,10 +416,11 @@ Web-UI read-mostly (Verwaltung primär via CLI/API, GitOps-freundlich).
 - [x] Chart-Tests (`helm test`, chart-testing in CI)
       → `templates/tests/test-connection.yaml` (healthz-Check);
       `helm-lint`-Job (ct lint, `.github/ct.yaml`) in der Test-Pipeline
-- [x] Chart-Release über GitHub Pages als Helm-Repository (chart-releaser:
-      `gh-pages`-Branch mit `index.yaml`, Release-Workflow bei Chart-Version-Bump)
-      → `.github/workflows/chart-release.yml`; Docker-Release-Workflow ignoriert
-      Chart-Tags (`guided-ssh-*`); einmalige gh-pages-Einrichtung im Chart-README
+- [x] Chart-Release über GitHub Pages als Helm-Repository (manuelles
+      `helm package` + `helm repo index`, `.tgz` + `index.yaml` auf `gh-pages`
+      committet, zusätzlich ans `vX.Y.Z`-Release gehängt — Vorbild valkey-operator)
+      → `helm-chart`-Job in `.github/workflows/build.yml`, gemeinsam mit Binaries
+      und Image; einmalige gh-pages-Einrichtung im Chart-README
 - [x] Image-Referenzen im Chart default auf `docker.io/guidedtraffic/*`
       → `image.repository: docker.io/guidedtraffic/guided-ssh`, Tag default
       Chart-`appVersion`

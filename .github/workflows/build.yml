@@ -14,7 +14,6 @@ jobs:
   # Versionierte Binaries + deb/rpm-Pakete als Release-Assets (Phase 13);
   # die Version kommt über git describe aus dem Release-Tag (Makefile).
   binaries:
-    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
     name: Release-Binaries anhängen
     runs-on: self-hosted
     permissions:
@@ -60,9 +59,6 @@ jobs:
             dist/SHA256SUMS
 
   build:
-    # Helm-Chart-Releases (Tags guided-ssh-*) vom chart-releaser bauen kein
-    # Docker-Image — nur die App-Releases (vX.Y.Z) von semantic-release.
-    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
     name: Build & Push Docker Image
     runs-on: self-hosted
     steps:
@@ -114,40 +110,35 @@ jobs:
           provenance: true
           sbom: true
 
-  # Helm-Chart als gh-pages-Helm-Repo veröffentlichen (chart-releaser), im selben
-  # Release-Lauf wie Binaries und Image. version + appVersion kommen aus dem
-  # Release-Tag; appVersion ist der Default-Image-Tag (_helpers.tpl:
-  # default .Chart.AppVersion .Values.image.tag) — das Chart zeigt so auf das
-  # gleichnamige Image dieses Releases.
+  # Helm-Chart als gh-pages-Helm-Repo veröffentlichen, im selben Release-Lauf wie
+  # Binaries und Image. Statt chart-releaser (das eigene guided-ssh-*-Releases
+  # anlegt und die .tgz nur als Release-Assets ablegt) wird das Paket direkt auf
+  # den gh-pages-Branch committet und die index.yaml auf die GitHub-Pages-URLs
+  # gezeigt — Vorbild: valkey-operator/.github/workflows/build.yml (release-helm-gh).
   #
-  # Guard wie bei den anderen Jobs: chart-releaser erzeugt selbst guided-ssh-*-
-  # Releases; ohne den Filter würde deren `release: published` diesen Job erneut
-  # anstoßen (Endlos-Schleife). Die von semantic-release erzeugten vX.Y.Z-Releases
-  # matchen den Filter nicht und laufen durch.
+  # version + appVersion kommen aus dem Release-Tag; appVersion ist der Default-
+  # Image-Tag (_helpers.tpl: default .Chart.AppVersion .Values.image.tag) — das
+  # Chart zeigt so auf das gleichnamige Image dieses Releases. Das Paket wird
+  # zusätzlich an das auslösende vX.Y.Z-Release gehängt.
   helm-chart:
-    if: ${{ !startsWith(github.event.release.tag_name, 'guided-ssh-') }}
     name: Release Helm Chart (gh-pages)
+    needs: build
     runs-on: self-hosted
     permissions:
-      contents: write # gh-pages-Branch + guided-ssh-*-Release/Tag schreiben
+      contents: write # gh-pages-Branch schreiben + Chart ans Release hängen
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # chart-releaser braucht die Tag-Historie
-
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          fetch-depth: 0
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
 
       # Chart-Version = App-Version aus dem Release-Tag (vX.Y.Z ⇒ X.Y.Z). version
-      # steuert die gh-pages-Release-Version, appVersion den Default-Image-Tag.
-      # Die Werte in Chart.yaml sind nur Lint-Baseline (ct check-version-increment)
-      # und werden hier zur Release-Zeit überschrieben.
+      # steuert die Repo-Chart-Version, appVersion den Default-Image-Tag. Die Werte
+      # in Chart.yaml sind nur Lint-Baseline (ct check-version-increment) und werden
+      # hier zur Release-Zeit überschrieben.
       - name: Chart-Version + appVersion aus Release-Tag setzen
         env:
           TAG: ${{ github.event.release.tag_name }}
@@ -160,10 +151,56 @@ jobs:
       - name: Subchart-Dependencies auflösen
         run: helm dependency build deploy/helm/guided-ssh
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1
+      - name: Helm-Paket erstellen
+        run: |
+          cd deploy/helm
+          helm package guided-ssh/
+          mkdir -p repo
+          mv *.tgz repo/
+          helm repo index repo/ --url https://guided-traffic.github.io/guided-ssh/
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Chart-Paket zwischenspeichern
+        run: |
+          mkdir -p /tmp/helm-charts
+          cp -r deploy/helm/repo/* /tmp/helm-charts/
+
+      - name: gh-pages-Branch auschecken
+        uses: actions/checkout@v7
         with:
-          charts_dir: deploy/helm
-          skip_existing: true
+          ref: gh-pages
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auf GitHub Pages veröffentlichen
+        run: |
+          # Neue Charts ins Root-Verzeichnis kopieren
+          cp /tmp/helm-charts/*.tgz .
+
+          # index.yaml mit existierendem Index mergen, falls vorhanden
+          if [ -f index.yaml ]; then
+            mkdir -p temp-repo
+            cp *.tgz temp-repo/
+            helm repo index temp-repo/ --url https://guided-traffic.github.io/guided-ssh/ --merge index.yaml
+            cp temp-repo/index.yaml .
+            rm -rf temp-repo
+          else
+            helm repo index . --url https://guided-traffic.github.io/guided-ssh/
+          fi
+
+          git add --force *.tgz index.yaml
+          git commit -m "Release Helm chart for $GITHUB_REF_NAME"
+          git push --force origin gh-pages
+
+      - name: Chart ans Release hängen
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            *.tgz
+            index.yaml
         env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

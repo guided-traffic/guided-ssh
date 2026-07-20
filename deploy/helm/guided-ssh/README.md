@@ -153,10 +153,12 @@ Vollständige Liste mit Kommentaren: [values.yaml](values.yaml).
 ## Chart-Release (GitHub Pages)
 
 Der `helm-chart`-Job in `.github/workflows/build.yml` veröffentlicht das Chart
-zusammen mit Binaries und Image bei jedem Release (`vX.Y.Z`) via
-[chart-releaser](https://github.com/helm/chart-releaser-action) auf den
-`gh-pages`-Branch. `version` und `appVersion` kommen dabei aus dem Release-Tag,
-die Chart.yaml-Werte sind nur Lint-Baseline. Einmalige Einrichtung:
+zusammen mit Binaries und Image bei jedem Release (`vX.Y.Z`): `helm package`
+baut das `.tgz`, das zusammen mit einer gemergten `index.yaml` (Repo-URL
+`https://guided-traffic.github.io/guided-ssh/`) direkt auf den `gh-pages`-Branch
+committet und zusätzlich ans Release gehängt wird. `version` und `appVersion`
+kommen dabei aus dem Release-Tag, die Chart.yaml-Werte sind nur Lint-Baseline.
+Einmalige Einrichtung:
 
 ```bash
 git checkout --orphan gh-pages
