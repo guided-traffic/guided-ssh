@@ -1,36 +1,141 @@
-// guided-ssh Web-UI — dunkles, professionelles Theme mit Glass-Optik.
-// Material M3 (dark) liefert die Komponenten-Tokens; die Glass-Flächen
-// (transluzente Panels, Blur, feine Border) liegen als eigene Klassen darüber.
+// guided-ssh Web UI — "Obsidian Ledger": a quiet, premium enterprise-dark theme
+// in the Linear/Vercel/Stripe register. Solid, layered obsidian surfaces instead
+// of glass/blur; 1px hairline edges; one disciplined azure accent used only where
+// it means something; tinted status badges; and Inter's typographic hierarchy
+// doing the heavy lifting instead of color. Angular Material M3 supplies the
+// component tokens; the $m3-overrides map below retargets Material's own internal
+// surface/primary/tertiary system variables so no default M3 blue-grey can leak
+// through under the obsidian palette.
 @use '@angular/material' as mat;
+@use 'sass:map';
+
+// System-level color overrides fed directly into `mat.theme()` — the robust way
+// to retarget Material's internal surface/outline/primary tokens (used by Select,
+// Menu, Datepicker, Checkbox, SlideToggle, Tabs, Tooltip, Snackbar …); CSS custom
+// properties layered on top alone would miss less-visible subcomponents.
+$m3-overrides: (
+  background: #08090b,
+  on-background: #edeff3,
+  surface: #14161c,
+  surface-dim: #0b0c10,
+  surface-bright: #20232b,
+  surface-container-lowest: #0a0b0e,
+  surface-container-low: #101318,
+  surface-container: #14161c,
+  surface-container-high: #191c22,
+  surface-container-highest: #1e2129,
+  surface-variant: #191c22,
+  on-surface: #edeff3,
+  on-surface-variant: #9ba1ac,
+  outline: #3b3f48,
+  outline-variant: #23262d,
+  inverse-surface: #edeff3,
+  inverse-on-surface: #14161a,
+  scrim: #000000,
+  shadow: #000000,
+  // Brand-exact primary so Material internals (checkbox tick, slide-toggle track,
+  // tab indicator, focus/selection states) match --accent precisely.
+  primary: #4c8dff,
+  on-primary: #04101c,
+  primary-container: #16314f,
+  on-primary-container: #cfe0ff,
+  primary-fixed: #cfe0ff,
+  primary-fixed-dim: #4c8dff,
+  on-primary-fixed: #04101c,
+  on-primary-fixed-variant: #16314f,
+  inverse-primary: #1c5fc4,
+  tertiary: #2fd4c6,
+  on-tertiary: #05231f,
+  tertiary-container: #123a36,
+  on-tertiary-container: #b7f2ea,
+  tertiary-fixed: #b7f2ea,
+  tertiary-fixed-dim: #2fd4c6,
+  on-tertiary-fixed: #05231f,
+  on-tertiary-fixed-variant: #123a36,
+  error: #f0453d,
+  on-error: #2a0605,
+  error-container: #4a1210,
+  on-error-container: #ffd9d6,
+);
 
 :root {
   color-scheme: dark;
 
-  @include mat.theme((
-    color: (
-      primary: mat.$azure-palette,
-      tertiary: mat.$cyan-palette,
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$azure-palette,
+        tertiary: mat.$cyan-palette,
+      ),
+      typography: (
+        plain-family: ('Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
+        brand-family: ('Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
+        // Inter reads "shouty" at 700+; cap emphasis at 600 for body/headings.
+        bold-weight: 600,
+        medium-weight: 500,
+        regular-weight: 400,
+      ),
+      density: 0,
     ),
-    typography: (
-      plain-family: (ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
-      brand-family: (ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
-    ),
-    density: 0,
-  ));
+    $m3-overrides
+  );
 
-  // Glass-Design-Tokens
-  --glass-bg: rgba(255, 255, 255, 0.045);
-  --glass-bg-strong: rgba(17, 24, 36, 0.86);
-  --glass-border: rgba(255, 255, 255, 0.09);
-  --glass-highlight: rgba(255, 255, 255, 0.16);
-  --glass-blur: 18px;
-  --glass-radius: 16px;
-  --accent: #6cb2ff;
-  --accent-soft: rgba(108, 178, 255, 0.16);
-  --ok: #62d99b;
-  --warn: #f2c14e;
-  --danger: #ef7a70;
-  --text-dim: rgba(232, 238, 248, 0.62);
+  // Tightened M3 shape tokens (names confirmed against the compiled component
+  // CSS — this Material version exposes `--mat-*`, not `--mdc-*`, shape custom
+  // properties). Obsidian geometry: 8px controls, 10px calendar, 12px dialog.
+  --mat-button-filled-container-shape: 8px;
+  --mat-button-outlined-container-shape: 8px;
+  --mat-button-protected-container-shape: 8px;
+  --mat-button-text-container-shape: 8px;
+  --mat-button-tonal-container-shape: 8px;
+  --mat-icon-button-container-shape: 999px; // the one place round geometry survives
+  --mat-dialog-container-shape: 12px;
+  --mat-snack-bar-container-shape: 8px;
+  --mat-datepicker-calendar-container-shape: 10px;
+  --mat-tooltip-container-shape: 6px;
+  --mat-form-field-filled-container-shape: 8px;
+  --mat-form-field-outlined-container-shape: 8px;
+
+  // ---------------------------------------------------------- Design tokens
+
+  // Obsidian elevation scale — solid, opaque, layered (never translucent-blurred).
+  --surface-0: #08090b; // canvas
+  --surface-1: #101318; // panels, .glass-panel, sidenav, table container
+  --surface-3: #14161c; // true overlays: dialog, menu, select, datepicker
+  --surface-2: #161a20; // hover fill (row/menu-item) — the lightest step, so hover pops
+
+  // Hairline edges — 1px translucent, engineered rather than glassy.
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.14);
+  // 1px inset top-edge sheen: fakes elevation on flat opaque surfaces.
+  --glass-highlight: rgba(255, 255, 255, 0.05);
+
+  // One disciplined brand accent, descended from the gssh_ wordmark gradient.
+  // Two-tier: *-fill drives borders/icons/focus/fills; *-text is a lighter tint
+  // reserved for small accent-colored text so 12-13px labels/links keep >=4.5:1.
+  --accent: #4c8dff;
+  --accent-text: #8fb4ff;
+  // Cyan is demoted to a signature brand flourish only (login/dialog seam, logo).
+  --accent-alt: #2fd4c6;
+  --accent-alt-text: #8fb4ff;
+  --accent-soft: rgba(76, 141, 255, 0.12);
+  --seam: linear-gradient(90deg, var(--accent), var(--accent-alt));
+  --seam-vertical: linear-gradient(180deg, var(--accent), var(--accent-alt));
+
+  // Semantic — deepened/saturated so status reads confident, not friendly-soft.
+  --ok: #34d399;
+  --warn: #f0b429;
+  --danger: #f0453d;
+  --info: var(--accent-text);
+
+  --text: #edeff3;
+  --text-dim: rgba(237, 239, 243, 0.58);
+
+  // Legacy aliases kept so any un-migrated selector still resolves sensibly.
+  --glass-bg: var(--surface-1);
+  --glass-bg-strong: var(--surface-3);
+  --glass-border: var(--hairline);
+  --glass-radius: 10px;
 }
 
 html, body {
@@ -39,27 +144,75 @@ html, body {
 }
 
 body {
-  color: #e8eef8;
+  color: var(--text);
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
-  // Tiefer Slate-Verlauf mit zwei farbigen Glows — die Bühne für die Glasflächen.
-  background:
-    radial-gradient(1100px 700px at 85% -10%, rgba(56, 116, 230, 0.16), transparent 60%),
-    radial-gradient(900px 600px at -10% 110%, rgba(64, 201, 198, 0.10), transparent 55%),
-    linear-gradient(160deg, #0d1220 0%, #0a0e18 55%, #090c14 100%);
+  line-height: 1.5;
+  // Flat obsidian stage: a near-invisible top vignette for depth only (reads
+  // almost-flat when squinting) over a subtle top-to-bottom tonal shift. No
+  // colored blooms, no grid — depth comes from layered surfaces, not the canvas.
+  background-color: #08090b;
+  background-image:
+    radial-gradient(1200px 480px at 50% -12%, rgba(255, 255, 255, 0.035), transparent 60%),
+    linear-gradient(180deg, #0b0c10 0%, #08090b 100%);
   background-attachment: fixed;
 }
 
-// ---------------------------------------------------------------- Glass-Panels
+// ---------------------------------------------------------------- Typography
 
+h1, h2, h3 {
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+// Structural micro-label voice: table headers, sidenav section labels — the one
+// deliberate uppercase move, reserved for short structural labels only.
+@mixin micro-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+}
+
+.mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(237, 239, 243, 0.82);
+}
+
+.dim { color: var(--text-dim); }
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+
+  &:hover { text-decoration: underline; }
+}
+
+// Precision focus ring: crisp accent outline plus a soft halo — visible,
+// accessible, rewarding keyboard-driven operation.
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+// ---------------------------------------------------------------- Faceplates
+
+// .glass-panel keeps its name (style hook) but drops blur: a solid, opaque,
+// hairline-bordered obsidian surface with a tight dual-layer shadow that reads
+// as engineered depth rather than floating fog.
 .glass-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--glass-radius);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  position: relative;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
   box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 2px rgba(0, 0, 0, 0.6),
+    0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .page {
@@ -77,142 +230,208 @@ body {
   margin: 8px 0 20px;
 
   h1 {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
-    letter-spacing: 0.2px;
+    letter-spacing: -0.1px;
     margin: 0;
   }
 
   .page-sub {
     color: var(--text-dim);
-    font-size: 13px;
+    font-size: 12.5px;
   }
 }
 
-// ------------------------------------------------------------------- Tabellen
+// -------------------------------------------------------------------- Tables
 
 .glass-panel .mat-mdc-table {
   background: transparent;
 }
 
 .glass-panel .mat-mdc-header-row {
-  background: rgba(255, 255, 255, 0.03);
+  // Recessed header row (slightly darker than its panel) so it reads as inset,
+  // not floating — no accent decoration, the accent stays rationed.
+  background: rgba(0, 0, 0, 0.28);
 }
 
 .glass-panel .mat-mdc-header-cell {
-  color: var(--text-dim);
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  border-bottom-color: var(--glass-border);
+  @include micro-label;
+  border-bottom-color: var(--hairline);
 }
 
 .glass-panel .mat-mdc-cell {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
 }
 
 .glass-panel .mat-mdc-row:hover .mat-mdc-cell {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-2);
+}
+
+// Critical rows are scannable by position, not color alone: any row carrying a
+// danger/warn pill gets a 2px semantic left rule — pure CSS, no template changes.
+.glass-panel .mat-mdc-row:has(.pill.danger) {
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+.glass-panel .mat-mdc-row:has(.pill.warn) {
+  box-shadow: inset 2px 0 0 var(--warn);
 }
 
 .glass-panel .mat-mdc-paginator {
   background: transparent;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--hairline-strong);
+}
+
+.mat-mdc-paginator-range-label,
+.mat-mdc-paginator-page-size-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .table-scroll {
   overflow-x: auto;
-  border-radius: var(--glass-radius);
+  border-radius: 10px;
 }
 
-// ------------------------------------------------------------ Status & Badges
+// -------------------------------------------------------------- Status & tags
 
+// Tinted status badge: low-alpha semantic fill over the panel, a 1px hairline
+// border at the semantic color, full-strength semantic text. Fully round — the
+// one deliberately soft shape in an otherwise sharp system, where roundness
+// signals "status token", not softness.
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 10px;
+  padding: 2px 11px;
   border-radius: 999px;
+  border: 1px solid var(--hairline);
   font-size: 12px;
-  line-height: 20px;
-  border: 1px solid var(--glass-border);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  line-height: 18px;
   background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
   white-space: nowrap;
 }
 
-.pill.ok      { color: var(--ok);     border-color: rgba(98, 217, 155, 0.35); background: rgba(98, 217, 155, 0.08); }
-.pill.warn    { color: var(--warn);   border-color: rgba(242, 193, 78, 0.35); background: rgba(242, 193, 78, 0.08); }
-.pill.danger  { color: var(--danger); border-color: rgba(239, 122, 112, 0.4); background: rgba(239, 122, 112, 0.09); }
-.pill.accent  { color: var(--accent); border-color: rgba(108, 178, 255, 0.4); background: var(--accent-soft); }
-.pill.muted   { color: var(--text-dim); }
+.pill.ok     { background: rgba(52, 211, 153, 0.10); border-color: rgba(52, 211, 153, 0.35); color: var(--ok); }
+.pill.warn   { background: rgba(240, 180, 41, 0.10); border-color: rgba(240, 180, 41, 0.35); color: var(--warn); }
+.pill.danger { background: rgba(240, 69, 61, 0.11);  border-color: rgba(240, 69, 61, 0.40);  color: var(--danger); }
+.pill.accent { background: var(--accent-soft);       border-color: rgba(76, 141, 255, 0.35); color: var(--accent-text); }
+.pill.muted  { background: rgba(255, 255, 255, 0.04); border-color: var(--hairline);         color: var(--text-dim); }
 
 .tag-chip {
   display: inline-block;
   padding: 1px 8px;
   margin: 1px 4px 1px 0;
   border-radius: 6px;
+  border: 1px solid var(--hairline);
   font-size: 12px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  background: rgba(108, 178, 255, 0.10);
-  border: 1px solid rgba(108, 178, 255, 0.22);
-  color: #a8cdff;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(237, 239, 243, 0.82);
   white-space: nowrap;
 }
 
-.mono {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 12.5px;
-}
-
-.dim { color: var(--text-dim); }
-
-// ------------------------------------------------------------------- Dialoge
+// ------------------------------------------------------------------- Dialogs
 
 .mat-mdc-dialog-surface {
-  background: var(--glass-bg-strong) !important;
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--glass-radius) !important;
+  position: relative;
+  background: var(--surface-3) !important;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 12px !important;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 2px 8px rgba(0, 0, 0, 0.55),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+
+  // The sole place the brand's dual-color gradient appears in the shell outside
+  // the wordmark: a 1px sliver on the top edge, echoed exactly once per screen.
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--seam);
+  }
 }
 
 .cdk-overlay-dark-backdrop {
-  background: rgba(5, 8, 14, 0.55);
-  backdrop-filter: blur(2px);
+  background: rgba(5, 8, 14, 0.6);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-// Menüs/Selects/Datepicker im Overlay ebenfalls glasig.
+// Menus/selects/datepicker overlays reuse the dialog's solid recipe (no seam —
+// that flourish stays rationed to dialogs and the login card).
 div.mat-mdc-select-panel,
 div.mat-mdc-menu-panel,
 .mat-datepicker-content {
-  background: var(--glass-bg-strong) !important;
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid var(--glass-border);
+  background: var(--surface-3) !important;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px !important;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
-// --------------------------------------------------------------------- Layout
-
-a {
-  color: var(--accent);
-  text-decoration: none;
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
+
+// -------------------------------------------------------------------- Tabs
+
+.mat-mdc-tab-header {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.mdc-tab-indicator__content--underline {
+  border-color: var(--accent) !important;
+  border-top-width: 2px !important;
+}
+
+.mdc-tab__text-label {
+  color: var(--text-dim);
+}
+
+.mdc-tab--active .mdc-tab__text-label {
+  color: var(--text);
+}
+
+// ------------------------------------------------------------------ Layout
 
 pre.payload {
   margin: 0;
   padding: 12px 14px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-0);
+  border: 1px solid var(--hairline);
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px;
   line-height: 1.5;
   overflow-x: auto;
-  color: #c9d7ee;
+  color: rgba(237, 239, 243, 0.82);
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
 }
 
 .spacer { flex: 1 1 auto; }
+.grow { flex: 1 1 220px; }
 
 .empty-state {
   padding: 48px 24px;
@@ -221,8 +440,8 @@ pre.payload {
   font-size: 14px;
 }
 
-// Feine Scrollbars, passend zum dunklen Thema.
+// Fine scrollbars matching the obsidian theme.
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: var(--hairline-strong) transparent;
 }

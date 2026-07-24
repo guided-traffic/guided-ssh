@@ -1,73 +1,77 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { OidcSecurityService } from 'angular-auth-oidc-client';
 import { firstValueFrom } from 'rxjs';
 
-import { UiConfig } from '../api/models';
+import { AuthSession } from '../api/models';
 
 /** Rollen der Admin-API; admin ⊃ auditor ⊃ readonly (wie im Backend). */
 export type Role = 'admin' | 'auditor' | 'readonly';
 
-/** rolesFor mappt die Gruppen aus den Token-Claims auf UI-Rollen. */
-export function rolesFor(groups: readonly string[], cfg: UiConfig): Set<Role> {
-  const has = (group: string) => group !== '' && groups.includes(group);
-  const roles = new Set<Role>();
-  if (has(cfg.admin_group)) {
-    roles.add('admin');
-  }
-  if (roles.has('admin') || has(cfg.auditor_group)) {
-    roles.add('auditor');
-  }
-  if (roles.has('auditor') || has(cfg.readonly_group)) {
-    roles.add('readonly');
-  }
-  return roles;
-}
-
 /**
  * SessionService hält Login-Zustand und Rollen der angemeldeten Person.
- * Die Rollen dienen nur der Anzeige (Navigation, Buttons) — durchgesetzt
- * werden sie vom Server bei jedem Request.
+ * Der Login läuft server-seitig (BFF): GET /v1/auth/login startet den
+ * OIDC-Flow beim Server, die Session liegt in einem HttpOnly-Cookie und
+ * GET /v1/auth/me liefert Zustand, Benutzername und Rollen. Die Rollen
+ * dienen nur der Anzeige (Navigation, Buttons) — durchgesetzt werden sie
+ * vom Server bei jedem Request.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
-  private readonly oidc = inject(OidcSecurityService);
   private readonly http = inject(HttpClient);
 
   readonly checking = signal(true);
   readonly authenticated = signal(false);
   readonly username = signal('');
   readonly roles = signal<ReadonlySet<Role>>(new Set());
+  /** Fehlermeldung, wenn die Login-Prüfung nicht möglich war (Server down). */
+  readonly error = signal('');
 
   readonly isAdmin = computed(() => this.roles().has('admin'));
   readonly isAuditor = computed(() => this.roles().has('auditor'));
   readonly hasAnyRole = computed(() => this.roles().size > 0);
 
-  /** init führt checkAuth aus (inkl. Code-Callback) und lädt die Rollen. */
-  async init(): Promise<void> {
+  private ready?: Promise<void>;
+
+  /**
+   * init lädt den Login-Zustand vom Server. Idempotent (App-Start und
+   * Route-Guards teilen sich einen Lauf) und rejected nie: Fehler landen
+   * im error-Signal, damit die UI sie anzeigt.
+   */
+  init(): Promise<void> {
+    this.ready ??= this.run();
+    return this.ready;
+  }
+
+  private async run(): Promise<void> {
     try {
-      const config = await firstValueFrom(this.http.get<UiConfig>('/v1/ui/config'));
-      const result = await firstValueFrom(this.oidc.checkAuth());
-      this.authenticated.set(result.isAuthenticated);
-      if (result.isAuthenticated) {
-        const payload = await firstValueFrom(this.oidc.getPayloadFromIdToken());
-        const groups: string[] = Array.isArray(payload?.['groups']) ? payload['groups'] : [];
-        this.username.set(payload?.['preferred_username'] ?? payload?.['email'] ?? payload?.['sub'] ?? '');
-        this.roles.set(rolesFor(groups, config));
+      const session = await firstValueFrom(this.http.get<AuthSession>('/v1/auth/me'));
+      this.authenticated.set(session.authenticated);
+      if (session.authenticated) {
+        this.username.set(session.username ?? '');
+        this.roles.set(new Set((session.roles ?? []) as Role[]));
       }
+    } catch (err) {
+      console.error('Login-Prüfung fehlgeschlagen', err);
+      this.error.set(
+        'Anmeldung derzeit nicht möglich: Server nicht erreichbar oder ' +
+          'Login nicht konfiguriert. Details in der Browser-Konsole.',
+      );
     } finally {
       this.checking.set(false);
     }
   }
 
+  /** Startet den server-seitigen Login; zurück geht es auf die aktuelle Seite. */
   login(): void {
-    this.oidc.authorize();
+    const target = window.location.pathname + window.location.search;
+    window.location.assign('/v1/auth/login?redirect=' + encodeURIComponent(target));
   }
 
+  /** Beendet die Server-Session; die IdP-Session bleibt bestehen (Dex ohne End-Session). */
   logout(): void {
-    this.oidc.logoffAndRevokeTokens().subscribe({
-      // Fallback, falls der IdP kein End-Session unterstützt.
-      error: () => this.oidc.logoffLocal(),
+    this.http.post('/v1/auth/logout', null).subscribe({
+      complete: () => window.location.assign('/'),
+      error: () => window.location.assign('/'),
     });
   }
 }

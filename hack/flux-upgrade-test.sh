@@ -107,8 +107,15 @@ spec:
   selector: { app: postgres }
   ports: [{ port: 5432 }]
 EOF
+# Postgres-Zugang als einzelne Keys + CA-Master-Key im selben Secret
+# (secrets.db und secrets.ca zeigen beide darauf).
 kubectl -n guided-ssh create secret generic guided-ssh \
-  --from-literal=dsn='postgres://gssh:gssh@postgres:5432/gssh?sslmode=disable' \
+  --from-literal=host=postgres \
+  --from-literal=port=5432 \
+  --from-literal=username=gssh \
+  --from-literal=password=gssh \
+  --from-literal=database=gssh \
+  --from-literal=sslmode=disable \
   --from-literal=ca-master-key="$(openssl rand -base64 32)"
 kubectl -n guided-ssh rollout status deploy/postgres --timeout=120s
 
@@ -145,7 +152,10 @@ spec:
       tag: ${IMAGE_TAG}
       pullPolicy: Never
     secrets:
-      existingSecret: guided-ssh
+      db:
+        existingSecret: guided-ssh
+      ca:
+        existingSecret: guided-ssh
 EOF
 
 log "Warten auf Release ${VERSION_A}"

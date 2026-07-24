@@ -1,25 +1,15 @@
 import { HttpInterceptorFn } from '@angular/common/http';
-import { inject } from '@angular/core';
-import { OidcSecurityService } from 'angular-auth-oidc-client';
-import { switchMap, take } from 'rxjs';
 
 /**
- * Hängt das OIDC-ID-Token als Bearer-Token an alle API-Requests — der
- * Server validiert ID-Tokens (konsistent zu gssh-admin). /v1/ui/config
- * bleibt ohne Token (öffentlich, wird vor dem Login geladen).
+ * Markiert alle API-Requests mit X-Requested-With: Cookie-authentifizierte
+ * Requests akzeptiert der Server nur mit diesem Custom-Header (CSRF-Schutz
+ * zusätzlich zu SameSite=Lax, weil Cross-Site-Formulare keine Custom-Header
+ * setzen können). Das Session-Cookie selbst schickt der Browser bei
+ * Same-Origin-Requests automatisch mit — hier ist kein Token nötig.
  */
-export const authTokenInterceptor: HttpInterceptorFn = (req, next) => {
-  if (!req.url.startsWith('/v1/') || req.url.startsWith('/v1/ui/config')) {
+export const apiHeaderInterceptor: HttpInterceptorFn = (req, next) => {
+  if (!req.url.startsWith('/v1/')) {
     return next(req);
   }
-  const oidc = inject(OidcSecurityService);
-  return oidc.getIdToken().pipe(
-    take(1),
-    switchMap((token) => {
-      if (token) {
-        req = req.clone({ setHeaders: { Authorization: `Bearer ${token}` } });
-      }
-      return next(req);
-    }),
-  );
+  return next(req.clone({ setHeaders: { 'X-Requested-With': 'XMLHttpRequest' } }));
 };

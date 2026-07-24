@@ -4,6 +4,7 @@
 export type { ApplyResult } from './models/apply-result';
 export type { AuditEvent } from './models/audit-event';
 export type { AuditList } from './models/audit-list';
+export type { AuthSession } from './models/auth-session';
 export type { Certificate } from './models/certificate';
 export type { CiGrant } from './models/ci-grant';
 export type { CiGrantRequest } from './models/ci-grant-request';

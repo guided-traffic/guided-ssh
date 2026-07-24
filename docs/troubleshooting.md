@@ -209,11 +209,11 @@ stammen aus dem Code (Stand Phase 13). Grundlagen:
 | Meldung | Ursache → Fix |
 |---|---|
 | `GSSH_OIDC_ISSUER ist gesetzt, aber GSSH_OIDC_CLIENT_ID fehlt` | fail-fast statt stiller Ablehnung aller Tokens → Client-ID setzen |
-| `GSSH_DB_DSN nicht gesetzt` | Secret fehlt/Key-Mapping falsch (`secrets.existingSecret`, Key `dsn`) |
+| `datenbank-konfiguration unvollständig: GSSH_DB_… nicht gesetzt` | Secret fehlt/Key-Mapping falsch (`secrets.db.existingSecret`, Keys via `secrets.db.keys`) |
 | `GSSH_CA_MASTER_KEY dekodieren: …` | Wert ist kein gültiges Base64 → korrekt erzeugen (`head -c 32 /dev/urandom \| base64`) |
 | `ca: ungültiger master-key: <n> Bytes statt 32` | Wert dekodiert nicht zu 32 Bytes → 32-Byte-Key verwenden |
 | `ca: ungültiger master-key: entschlüsselung fehlgeschlagen` | Master-Key passt nicht zu den bereits verschlüsselten `ca_keys` (vertauschtes Secret zwischen Umgebungen) → richtigen Key einspielen; **nicht** die DB „bereinigen" — das wäre eine neue CA |
-| `migrationen: …` | DSN/Netz/DB-Rechte prüfen; Advisory-Lock: hängt eine andere Instanz in der Migration? |
+| `migrationen: …` | DB-Verbindungsdaten/Netz/DB-Rechte prüfen; Advisory-Lock: hängt eine andere Instanz in der Migration? |
 
 ## Clock-Skew
 

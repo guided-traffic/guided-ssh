@@ -25,4 +25,9 @@ export class App implements OnInit {
   ngOnInit(): void {
     void this.session.init();
   }
+
+  /** Harter Reload als Ausweg, wenn die Login-Prüfung fehlgeschlagen ist. */
+  reload(): void {
+    window.location.reload();
+  }
 }
