@@ -4,8 +4,39 @@ entries:
   - annotations:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
+    appVersion: 2.0.0
+    created: "2026-07-24T11:14:05.93717929Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.8.0
+    description: 'SSH certificate authority with IdP-backed access control: short-lived
+      user certificates via OIDC, host enrollment with mTLS agents, GitLab CI certificates,
+      audit log and web UI.'
+    digest: fc0a391da053c5c1e649f1497bb4496033885a043f3c95e25b5d6c904bbd8bae
+    home: https://github.com/guided-traffic/guided-ssh
+    keywords:
+    - ssh
+    - certificate-authority
+    - oidc
+    - security
+    kubeVersion: '>=1.27.0-0'
+    maintainers:
+    - name: Guided Traffic
+      url: https://github.com/guided-traffic
+    name: guided-ssh
+    sources:
+    - https://github.com/guided-traffic/guided-ssh
+    type: application
+    urls:
+    - https://guided-traffic.github.io/guided-ssh/guided-ssh-2.0.0.tgz
+    version: 2.0.0
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
     appVersion: 1.2.0
-    created: "2026-07-24T07:12:49.080798782Z"
+    created: "2026-07-24T11:14:05.929812895Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -36,7 +67,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.4
-    created: "2026-07-24T07:12:49.073743453Z"
+    created: "2026-07-24T11:14:05.921865906Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -67,7 +98,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.3
-    created: "2026-07-24T07:12:49.068115244Z"
+    created: "2026-07-24T11:14:05.91364447Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -98,7 +129,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.2
-    created: "2026-07-24T07:12:49.061319826Z"
+    created: "2026-07-24T11:14:05.905525908Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -129,7 +160,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.1
-    created: "2026-07-24T07:12:49.054090129Z"
+    created: "2026-07-24T11:14:05.89817898Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -160,7 +191,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.0
-    created: "2026-07-24T07:12:49.048163187Z"
+    created: "2026-07-24T11:14:05.890494686Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -191,7 +222,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.0.5
-    created: "2026-07-24T07:12:49.041224698Z"
+    created: "2026-07-24T11:14:05.881660515Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -311,4 +342,4 @@ entries:
     urls:
     - https://github.com/guided-traffic/guided-ssh/releases/download/guided-ssh-0.1.0/guided-ssh-0.1.0.tgz
     version: 0.1.0
-generated: "2026-07-24T07:12:49.033509006Z"
+generated: "2026-07-24T11:14:05.874378349Z"
