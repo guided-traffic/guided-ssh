@@ -59,7 +59,8 @@ gssh-server enroll-token -name web01.example.com -tags env=prod,role=web -ttl 24
 Der Klartext (`gssh-et-…`, 256 bit Zufall) geht einmalig nach stdout — in
 der Datenbank liegt nur der SHA-256-Hash. Das Token ist **Single-Use**: der
 Verbrauch ist transaktional, ein zweiter Versuch liefert 403. Das Kommando
-braucht `GSSH_DB_DSN` (z. B. via `kubectl exec` im Server-Pod ausführen).
+braucht die `GSSH_DB_*`-Verbindungsdaten (z. B. via `kubectl exec` im
+Server-Pod ausführen).
 
 ## 4. Host registrieren
 

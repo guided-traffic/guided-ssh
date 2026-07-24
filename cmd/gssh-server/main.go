@@ -16,13 +16,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 
 	"github.com/guided-traffic/guided-ssh/internal/api"
 	"github.com/guided-traffic/guided-ssh/internal/auditstream"
@@ -36,7 +41,16 @@ import (
 // Umgebungsvariablen des Servers (Werte kommen im Kubernetes-Deployment
 // aus Secrets, siehe Plan Phase 11).
 const (
-	envDSN       = "GSSH_DB_DSN"
+	// PostgreSQL-Verbindung: einzelne Variablen statt einer DSN, damit die
+	// Werte 1:1 aus einem Kubernetes-Secret kommen können (z. B. dem
+	// App-Secret von CloudNativePG) — kein zusammengesetztes DSN-Secret nötig.
+	envDBHost     = "GSSH_DB_HOST"     // Pflicht
+	envDBPort     = "GSSH_DB_PORT"     // leer ⇒ 5432 (Treiber-Default)
+	envDBUser     = "GSSH_DB_USER"     // Pflicht
+	envDBPassword = "GSSH_DB_PASSWORD" //nolint:gosec // Name der Env-Variable, kein Secret; Pflicht
+	envDBName     = "GSSH_DB_NAME"     // Pflicht (Datenbank-Name)
+	envDBSSLMode  = "GSSH_DB_SSLMODE"  // leer ⇒ prefer (Treiber-Default)
+
 	envMasterKey = "GSSH_CA_MASTER_KEY" // Base64, 32 Bytes (AES-256)
 
 	// OIDC (Phase 3); ohne Issuer bleibt der Sign-Endpoint deaktiviert (503).
@@ -65,9 +79,15 @@ const (
 	envAuditorGroup  = "GSSH_AUDITOR_GROUP"
 	envReadOnlyGroup = "GSSH_READONLY_GROUP"
 
-	// OIDC-Client der Web-UI (Public Client, Authorization Code + PKCE);
-	// Default ist die Client-ID aus GSSH_OIDC_CLIENT_ID.
-	envUIOIDCClientID = "GSSH_UI_OIDC_CLIENT_ID"
+	// OIDC-Client der Web-UI; Default ist die Client-ID aus
+	// GSSH_OIDC_CLIENT_ID. Mit gesetztem Client-Secret führt der Server den
+	// Login selbst aus (BFF: Authorization Code + PKCE + Secret, Session-
+	// Cookie); ohne Secret bleiben die /v1/auth-Endpunkte deaktiviert.
+	envUIOIDCClientID     = "GSSH_UI_OIDC_CLIENT_ID"
+	envUIOIDCClientSecret = "GSSH_UI_OIDC_CLIENT_SECRET" //nolint:gosec // Name der Env-Variable, kein Secret
+	envUIOIDCScopes       = "GSSH_UI_OIDC_SCOPES"        // Komma-getrennt; Default openid,profile,email,groups
+	envUIBaseURL          = "GSSH_UI_BASE_URL"           // externe Basis-URL der UI; leer = aus Request ableiten
+	envUISessionTTL       = "GSSH_UI_SESSION_TTL"        // Go-Duration, Default 12h
 
 	// Audit-Streaming (Phase 8): committete Audit-Events als strukturierte
 	// JSON-Logs (SIEM) und optional an einen Webhook.
@@ -89,6 +109,16 @@ const (
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
 const defaultSyncInterval = 5 * time.Minute
+
+// defaultUISessionTTL ist die Standard-Lebensdauer der UI-Session; solange
+// bleiben die Gruppen-Claims des Logins wirksam (vergleichbar mit der
+// bisherigen ID-Token-Laufzeit). Deaktivierte Benutzer blockt der Server
+// unabhängig davon bei jedem Request.
+const defaultUISessionTTL = 12 * time.Hour
+
+// defaultUIScopes sind die OIDC-Scopes des UI-Logins; groups liefert die
+// Gruppen-Claims für das Rollen-Mapping (Dex gibt sie nur auf Anfrage heraus).
+var defaultUIScopes = []string{"openid", "profile", "email", "groups"}
 
 // hostCertValidityFromEnv parst GSSH_HOST_CERT_VALIDITY; leer ⇒ 0 (Default
 // 30 Tage in internal/api). Ungültige Werte sind ein Konfigurationsfehler
@@ -147,13 +177,43 @@ func run(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+// dbConnString baut die PostgreSQL-Verbindungs-URL aus den einzelnen
+// GSSH_DB_*-Variablen. Benutzer und Passwort werden URL-escaped — Sonderzeichen
+// im Passwort sind damit unkritisch. Port und SSL-Mode sind optional und
+// fallen auf die Treiber-Defaults zurück (5432 bzw. prefer).
+func dbConnString() (string, error) {
+	var missing []string
+	for _, v := range []string{envDBHost, envDBUser, envDBPassword, envDBName} {
+		if os.Getenv(v) == "" {
+			missing = append(missing, v)
+		}
+	}
+	if len(missing) > 0 {
+		return "", fmt.Errorf("datenbank-konfiguration unvollständig: %s nicht gesetzt", strings.Join(missing, ", "))
+	}
+	host := os.Getenv(envDBHost)
+	if port := os.Getenv(envDBPort); port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(os.Getenv(envDBUser), os.Getenv(envDBPassword)),
+		Host:   host,
+		Path:   "/" + os.Getenv(envDBName),
+	}
+	if sslmode := os.Getenv(envDBSSLMode); sslmode != "" {
+		u.RawQuery = url.Values{"sslmode": {sslmode}}.Encode()
+	}
+	return u.String(), nil
+}
+
 // runMigrate wendet die Datenbank-Migrationen an und beendet sich (Subkommando
 // `gssh-server migrate`, für den Init-Container im Kubernetes-Deployment,
 // Plan Phase 11). Konkurrierende Läufe serialisiert ein Advisory-Lock.
 func runMigrate(stdout, stderr io.Writer) int {
-	dsn := os.Getenv(envDSN)
-	if dsn == "" {
-		fmt.Fprintf(stderr, "gssh-server: %s nicht gesetzt\n", envDSN)
+	dsn, err := dbConnString()
+	if err != nil {
+		fmt.Fprintf(stderr, "gssh-server: %v\n", err)
 		return 2
 	}
 	if err := store.Migrate(context.Background(), dsn); err != nil {
@@ -249,15 +309,12 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 		return err
 	}
 
-	verifier, err := setupOIDC(ctx, logger)
-	if err != nil {
-		return err
+	uiClientID := os.Getenv(envUIOIDCClientID)
+	if uiClientID == "" {
+		uiClientID = os.Getenv(envOIDCClientID)
 	}
-	ciVerifier, err := setupCIOIDC(ctx, logger)
+	verifier, ciVerifier, uiAuth, err := setupVerifiers(ctx, logger, uiClientID)
 	if err != nil {
-		return err
-	}
-	if err := checkAudienceSeparation(); err != nil {
 		return err
 	}
 	startGroupSync(ctx, st, logger)
@@ -265,10 +322,6 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	adminGroup := os.Getenv(envAdminGroup)
 	if adminGroup == "" {
 		logger.Warn("admin-api nicht konfiguriert — grant-verwaltung deaktiviert", "env", envAdminGroup)
-	}
-	uiClientID := os.Getenv(envUIOIDCClientID)
-	if uiClientID == "" {
-		uiClientID = os.Getenv(envOIDCClientID)
 	}
 	startAuditStream(ctx, st, logger)
 
@@ -286,6 +339,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 				OIDCIssuer:   os.Getenv(envOIDCIssuer),
 				OIDCClientID: uiClientID,
 			},
+			UIAuth: uiAuth,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -386,6 +440,92 @@ func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, err
 	}
 	logger.Info("oidc konfiguriert", "issuer", issuer)
 	return verifier, nil
+}
+
+// setupVerifiers bündelt die OIDC-Konfiguration des Servers: Benutzer- und
+// CI-Token-Verifier, Audience-Separation und den server-seitigen UI-Login.
+func setupVerifiers(ctx context.Context, logger *slog.Logger, uiClientID string) (api.TokenVerifier, api.CITokenVerifier, *api.UIAuthConfig, error) {
+	verifier, err := setupOIDC(ctx, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ciVerifier, err := setupCIOIDC(ctx, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := checkAudienceSeparation(); err != nil {
+		return nil, nil, nil, err
+	}
+	uiAuth, err := setupUIAuth(ctx, logger, uiClientID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return verifier, ciVerifier, uiAuth, nil
+}
+
+// setupUIAuth baut die Konfiguration des server-seitigen UI-Logins (BFF),
+// falls ein Client-Secret gesetzt ist; ohne Secret bleiben die
+// /v1/auth-Endpunkte deaktiviert (503). Der Session-Schlüssel wird aus dem
+// CA-Master-Key abgeleitet — kein zusätzliches Secret nötig.
+func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*api.UIAuthConfig, error) {
+	secret := os.Getenv(envUIOIDCClientSecret)
+	if secret == "" {
+		logger.Warn("ui-login nicht konfiguriert — /v1/auth deaktiviert", "env", envUIOIDCClientSecret)
+		return nil, nil //nolint:nilnil // nil-Config schaltet die Endpunkte gezielt ab
+	}
+	issuer := os.Getenv(envOIDCIssuer)
+	if issuer == "" {
+		return nil, fmt.Errorf("%s ist gesetzt, aber %s fehlt", envUIOIDCClientSecret, envOIDCIssuer)
+	}
+	if clientID == "" {
+		return nil, fmt.Errorf("%s ist gesetzt, aber %s fehlt", envUIOIDCClientSecret, envOIDCClientID)
+	}
+	provider, err := oidc.NewProvider(ctx, issuer)
+	if err != nil {
+		return nil, fmt.Errorf("ui-login: oidc-discovery für %s: %w", issuer, err)
+	}
+	// Eigener Verifier: die Audience der UI-Tokens ist die UI-Client-ID,
+	// die von GSSH_OIDC_CLIENT_ID abweichen kann.
+	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{IssuerURL: issuer, ClientID: clientID})
+	if err != nil {
+		return nil, err
+	}
+	masterKey, err := base64.StdEncoding.DecodeString(os.Getenv(envMasterKey))
+	if err != nil {
+		return nil, fmt.Errorf("%s dekodieren: %w", envMasterKey, err)
+	}
+	codec, err := auth.NewSessionCodec(masterKey)
+	if err != nil {
+		return nil, err
+	}
+	scopes := defaultUIScopes
+	if raw := os.Getenv(envUIOIDCScopes); raw != "" {
+		scopes = strings.Split(raw, ",")
+		for i := range scopes {
+			scopes[i] = strings.TrimSpace(scopes[i])
+		}
+	}
+	sessionTTL := defaultUISessionTTL
+	if raw := os.Getenv(envUISessionTTL); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			return nil, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envUISessionTTL, raw)
+		}
+		sessionTTL = parsed
+	}
+	logger.Info("ui-login konfiguriert (server-seitiges oidc)", "issuer", issuer, "client_id", clientID, "session_ttl", sessionTTL)
+	return &api.UIAuthConfig{
+		OAuth: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: secret,
+			Endpoint:     provider.Endpoint(),
+			Scopes:       scopes,
+		},
+		Verifier:   verifier,
+		Codec:      codec,
+		BaseURL:    strings.TrimSuffix(os.Getenv(envUIBaseURL), "/"),
+		SessionTTL: sessionTTL,
+	}, nil
 }
 
 // setupRateLimit baut den Rate-Limiter der Sign-/Enroll-Endpunkte aus der
@@ -503,12 +643,12 @@ func startGroupSync(ctx context.Context, st *store.Store, logger *slog.Logger) {
 	logger.Info("gruppen-sync gestartet", "issuer", source.Issuer(), "interval", interval)
 }
 
-// setupStore liest die DSN aus der Umgebung, migriert die Datenbank und
-// öffnet den Store.
+// setupStore baut die Verbindungs-URL aus der Umgebung, migriert die
+// Datenbank und öffnet den Store.
 func setupStore(ctx context.Context) (*store.Store, error) {
-	dsn := os.Getenv(envDSN)
-	if dsn == "" {
-		return nil, fmt.Errorf("%s nicht gesetzt", envDSN)
+	dsn, err := dbConnString()
+	if err != nil {
+		return nil, err
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
 		return nil, fmt.Errorf("migrationen: %w", err)

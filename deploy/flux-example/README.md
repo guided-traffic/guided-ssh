@@ -73,8 +73,9 @@ reviewbar. Die Cluster-Kustomization entschlüsselt beim Apply
 (`decryption.provider: sops`, `secretRef: sops-age`). Die hier eingecheckten
 `secrets.yaml` sind Platzhalter-Beispiele; im echten Repo niemals Klartext
 committen. Das Chart selbst erzeugt keine Secrets, es referenziert nur
-`secrets.existingSecret` — SOPS und external-secrets sind damit gleichwertig
-austauschbar.
+existierende Secrets (`secrets.db.existingSecret` mit den einzelnen
+Postgres-Verbindungsdaten, `secrets.ca.existingSecret` mit dem CA-Master-Key)
+— SOPS und external-secrets sind damit gleichwertig austauschbar.
 
 ## Grants deklarativ (GitOps)
 

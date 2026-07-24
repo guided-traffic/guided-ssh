@@ -34,36 +34,45 @@ func TestRunUnbekanntesFlag(t *testing.T) {
 	}
 }
 
-func TestRunListenOhneDSN(t *testing.T) {
-	t.Setenv("GSSH_DB_DSN", "")
+// clearDBEnv leert alle GSSH_DB_*-Variablen, damit Tests unabhängig von der
+// Umgebung des Entwicklers laufen.
+func clearDBEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range []string{envDBHost, envDBPort, envDBUser, envDBPassword, envDBName, envDBSSLMode} {
+		t.Setenv(v, "")
+	}
+}
+
+func TestRunListenOhneDBKonfig(t *testing.T) {
+	clearDBEnv(t)
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"-listen", "127.0.0.1:0"}); got != 1 {
-		t.Fatalf("run(-listen) ohne DSN = %d, erwartet 1", got)
+		t.Fatalf("run(-listen) ohne DB-Konfiguration = %d, erwartet 1", got)
 	}
-	if !strings.Contains(stdout.String(), "GSSH_DB_DSN") {
-		t.Errorf("Log %q enthält keinen Hinweis auf GSSH_DB_DSN", stdout.String())
+	if !strings.Contains(stdout.String(), "GSSH_DB_HOST") {
+		t.Errorf("Log %q enthält keinen Hinweis auf GSSH_DB_HOST", stdout.String())
 	}
 }
 
-func TestRunMigrateOhneDSN(t *testing.T) {
-	t.Setenv("GSSH_DB_DSN", "")
+func TestRunMigrateOhneDBKonfig(t *testing.T) {
+	clearDBEnv(t)
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"migrate"}); got != 2 {
-		t.Fatalf("migrate ohne DSN = %d, erwartet 2 (Konfigurationsfehler)", got)
+		t.Fatalf("migrate ohne DB-Konfiguration = %d, erwartet 2 (Konfigurationsfehler)", got)
 	}
-	if !strings.Contains(stderr.String(), "GSSH_DB_DSN") {
-		t.Errorf("stderr %q ohne DSN-Hinweis", stderr.String())
+	if !strings.Contains(stderr.String(), "GSSH_DB_HOST") {
+		t.Errorf("stderr %q ohne Hinweis auf GSSH_DB_HOST", stderr.String())
 	}
 }
 
-func TestRunEnrollTokenOhneDSN(t *testing.T) {
-	t.Setenv("GSSH_DB_DSN", "")
+func TestRunEnrollTokenOhneDBKonfig(t *testing.T) {
+	clearDBEnv(t)
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"enroll-token"}); got != 1 {
-		t.Fatalf("enroll-token ohne DSN = %d, erwartet 1", got)
+		t.Fatalf("enroll-token ohne DB-Konfiguration = %d, erwartet 1", got)
 	}
-	if !strings.Contains(stderr.String(), "GSSH_DB_DSN") {
-		t.Errorf("stderr %q ohne DSN-Hinweis", stderr.String())
+	if !strings.Contains(stderr.String(), "GSSH_DB_HOST") {
+		t.Errorf("stderr %q ohne Hinweis auf GSSH_DB_HOST", stderr.String())
 	}
 }
 
@@ -101,7 +110,7 @@ func TestParseTags(t *testing.T) {
 }
 
 func TestSetupUngueltigerMasterKey(t *testing.T) {
-	t.Setenv("GSSH_DB_DSN", "postgres://irrelevant")
+	// Der Master-Key wird vor der DB-Konfiguration geprüft — DB-Env irrelevant.
 	t.Setenv("GSSH_CA_MASTER_KEY", "kein-base64!")
 	if _, _, err := setup(context.Background()); err == nil {
 		t.Fatal("Fehler erwartet (Master-Key kein Base64)")

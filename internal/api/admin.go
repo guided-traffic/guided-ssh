@@ -96,6 +96,7 @@ type adminContext struct {
 	ui            UIStore
 	groups        auth.Store
 	verifier      TokenVerifier
+	uiAuth        *UIAuthConfig
 	mapper        *auth.Mapper
 	adminGroup    string
 	auditorGroup  string
@@ -119,6 +120,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 		ui:            deps.UI,
 		groups:        deps.Store,
 		verifier:      deps.Verifier,
+		uiAuth:        deps.UIAuth,
 		mapper:        auth.NewMapper(deps.Store),
 		adminGroup:    deps.AdminGroup,
 		auditorGroup:  deps.AuditorGroup,
@@ -164,19 +166,13 @@ func (a *adminContext) hasRole(claims *auth.Claims, minRole string) bool {
 	}
 }
 
-// authorized prüft Bearer-Token, aktiven Benutzer und die Mindest-Rolle
-// (aus den frischen Token-Claims, konsistent zum Sign-Endpoint).
+// authorized prüft die Authentifizierung (Bearer-Token oder UI-Session),
+// aktiven Benutzer und die Mindest-Rolle (aus den Claims des Logins,
+// konsistent zum Sign-Endpoint).
 func (a *adminContext) authorized(minRole string, next adminHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rawToken, ok := bearerToken(r)
+		claims, ok := a.authenticate(w, r)
 		if !ok {
-			http.Error(w, "authorization: bearer-token fehlt", http.StatusUnauthorized)
-			return
-		}
-		claims, err := a.verifier.Verify(r.Context(), rawToken)
-		if err != nil {
-			a.logger.Info("admin: token abgelehnt", "error", err)
-			http.Error(w, "id-token ungültig", http.StatusUnauthorized)
 			return
 		}
 		if _, err := a.mapper.EnsureUser(r.Context(), claims); errors.Is(err, auth.ErrUserInactive) {
@@ -194,6 +190,35 @@ func (a *adminContext) authorized(minRole string, next adminHandler) http.Handle
 		}
 		next(w, r, claims, ca.UserKeyID(claims.Subject, claims.Issuer))
 	}
+}
+
+// authenticate ermittelt die Claims des Aufrufers: Bearer-Token (CLI,
+// Service-Accounts) oder Session-Cookie der Web-UI. Cookie-Requests müssen
+// zusätzlich den X-Requested-With-Header tragen — ein Custom-Header, den
+// Cross-Site-Formulare nicht setzen können (CSRF-Schutz zusätzlich zu
+// SameSite=Lax). false ⇒ Fehlerantwort wurde geschrieben.
+func (a *adminContext) authenticate(w http.ResponseWriter, r *http.Request) (*auth.Claims, bool) {
+	if rawToken, ok := bearerToken(r); ok {
+		claims, err := a.verifier.Verify(r.Context(), rawToken)
+		if err != nil {
+			a.logger.Info("admin: token abgelehnt", "error", err)
+			http.Error(w, "id-token ungültig", http.StatusUnauthorized)
+			return nil, false
+		}
+		return claims, true
+	}
+	if a.uiAuth != nil {
+		if claims := a.uiAuth.sessionFromRequest(r); claims != nil {
+			if r.Header.Get("X-Requested-With") == "" {
+				a.logger.Info("admin: session-request ohne x-requested-with abgelehnt", "path", r.URL.Path)
+				http.Error(w, "x-requested-with-header fehlt", http.StatusForbidden)
+				return nil, false
+			}
+			return claims, true
+		}
+	}
+	http.Error(w, "authorization fehlt (bearer-token oder ui-session)", http.StatusUnauthorized)
+	return nil, false
 }
 
 // writeJSON schreibt eine JSON-Antwort mit Statuscode.

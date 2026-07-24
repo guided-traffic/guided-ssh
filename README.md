@@ -2,174 +2,197 @@
 
 ![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fguided-traffic%2Fguided-ssh%2Fmain%2F.github%2Fbadges%2Fcoverage.json)
 
-Zertifikatsbasierte SSH-Zugriffsplattform: kurzlebige SSH-Zertifikate statt statischer
-`authorized_keys`, Single Sign-On über den bestehenden Identity Provider, maschinelle
-Zugänge für CI-Pipelines (GitLab) und vollständige Auditierbarkeit aller Zugriffe.
-Betrieb in Kubernetes via Helm, verwaltet über GitOps (FluxCD).
+**SSH access without key sprawl.** guided-ssh replaces static `authorized_keys`
+files with short-lived SSH certificates issued by a central CA: users log in
+through your existing identity provider, CI pipelines exchange their OIDC job
+token for a certificate, and every access is auditable — nothing long-lived to
+distribute, rotate, or leak.
 
-Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
+## Key features
 
-## Repository-Struktur
+- **Short-lived certificates instead of static keys** — key pair and
+  certificate live only in the `ssh-agent`, nothing is written to disk.
+  Offboarding happens through certificate expiry and group sync, not by
+  hunting down keys on servers.
+- **Single sign-on** — `gssh login` opens your IdP (Keycloak, Dex, any OIDC
+  provider), including a device flow for headless machines. Works
+  transparently with native `ssh` via a one-line `ssh_config` snippet.
+- **Central, declarative access rules** — grants map IdP groups to host tags
+  and Unix accounts (`group devs may log in as deploy on env=prod`), managed
+  via CLI, web UI, or a GitOps-reconciled YAML file.
+- **Host automation** — `gssh-agentd` enrolls a host with a one-time token,
+  configures `sshd`, renews the host certificate automatically, and resolves
+  allowed principals live with a fail-closed cache.
+- **GitLab CI integration** — pipelines trade their per-job OIDC token for a
+  short-lived certificate (`gssh ci-login`); no SSH keys in CI variables.
+- **Full auditability** — every issued certificate and every decision in an
+  append-only audit log, streamable to your SIEM (JSON logs or webhook).
+- **Kubernetes-native** — Helm chart, FluxCD reference manifests, Prometheus
+  metrics, embedded web UI for administration and audit.
 
-| Pfad | Inhalt |
-|---|---|
-| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI), `gssh-agentd` (Host-Agent), `gssh-admin` (Admin-CLI) |
-| `internal/` | Go-Pakete (nicht öffentlich importierbar) |
-| `api/` | [OpenAPI-Spezifikation](api/openapi.yaml) — Single Source of Truth der REST-API |
-| `web/` | Angular-Frontend, eingebettet ins Go-Binary ([docs/web-ui.md](docs/web-ui.md)) |
-| `deploy/helm/` | Helm-Chart (ab Phase 11) |
-| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [GitLab-CI](docs/gitlab-ci.md), [Web-UI](docs/web-ui.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
-| `hack/` | Hilfsskripte für Build und CI |
+## How it works
 
-## gssh-server
+The server embeds an SSH certificate authority. Hosts trust the user CA
+(`TrustedUserCAKeys`), clients trust the host CA (`@cert-authority` in
+`known_hosts`) — after that, no per-user or per-host key distribution:
 
-API-Server mit integrierter Zertifizierungsstelle (CA). Beim Start laufen die
-Datenbank-Migrationen; fehlen CA-Keys, werden sie erzeugt (je ein Ed25519-Key
-für Benutzer- und Host-Zertifikate, Private Keys AES-256-GCM-verschlüsselt in
-der Datenbank, siehe [ADR-014](docs/adr/014-software-signer-aes-gcm.md)).
+1. `gssh login` → SSO against your IdP → the server checks the grants and
+   signs a short-lived user certificate (e.g. 8 h) into your `ssh-agent`.
+2. `ssh deploy@web-01` works natively; `sshd` validates the certificate and
+   the allowed principals against the CA — no `authorized_keys`.
+3. Certificates expire on their own. Access removal = group change in the IdP.
 
-```sh
-gssh-server -listen :8080                      # HTTP-API starten
-gssh-server -listen :8080 -agent-listen :8443  # zusätzlich Agent-API (mTLS)
-gssh-server enroll-token -tags env=prod -ttl 24h  # einmaliges Enrollment-Token
-gssh-server -version                           # Version ausgeben
-```
+## Quick start
 
-Konfiguration über Umgebungsvariablen:
+### 1. Run the server (5 minutes, local)
 
-| Variable | Bedeutung |
-|---|---|
-| `GSSH_DB_DSN` | PostgreSQL-DSN, z. B. `postgres://user:pass@host:5432/db` |
-| `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`) |
-| `GSSH_AGENT_TLS_NAMES` | SANs des mTLS-Server-Zertifikats der Agent-API (Komma-getrennt; Default `localhost,127.0.0.1`) |
-| `GSSH_ADMIN_GROUP` | IdP-Gruppe, deren Mitglieder die Admin-API (`/v1/admin/…`) nutzen dürfen; leer ⇒ Admin-API deaktiviert |
-
-Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
-
-| Endpoint | Bedeutung |
-|---|---|
-| `GET /healthz` | Liveness |
-| `GET /v1/ca/bundle/user` | Public Keys der Benutzer-CA (authorized_keys-Format) — Inhalt für `TrustedUserCAKeys` auf Hosts |
-| `GET /v1/ca/bundle/host` | Public Keys der Host-CA — für `@cert-authority`-Einträge in `known_hosts` |
-
-Die Bundles enthalten alle aktiven und in Ablösung befindlichen Keys
-(Übergangsfenster bei Key-Rotation).
-
-## gssh (Benutzer-CLI)
-
-SSO-Login gegen den IdP, kurzlebiges SSH-Zertifikat vom Server — Schlüsselpaar
-und Zertifikat leben ausschließlich im `ssh-agent`, nichts wird auf Platte
-persistiert ([ADR-016](docs/adr/016-cli-gssh-agent-only.md)).
+You need a PostgreSQL instance and two environment values — no config file.
+Grab `gssh-server` from the [releases](https://github.com/guided-traffic/guided-ssh/releases)
+(or `make build` from source):
 
 ```sh
-gssh login               # SSO im Browser, Zertifikat in den ssh-agent
-gssh login --device      # Device-Flow (headless, ohne Browser)
-gssh ssh <host> …        # wie ssh, mit Auto-Login bei fehlendem Zertifikat
-gssh status              # Zertifikatsstatus; Exit-Code 1 ohne gültiges Zertifikat
-gssh logout              # guided-ssh-Einträge aus dem Agenten entfernen
-gssh integrate           # ssh_config-Schnipsel für transparentes natives ssh
-gssh ci-login            # GitLab-CI: Job-Token gegen CI-Zertifikat tauschen
+docker run -d --name gssh-db \
+  -e POSTGRES_USER=gssh -e POSTGRES_PASSWORD=gssh -e POSTGRES_DB=gssh \
+  -p 5432:5432 postgres:16-alpine
+
+export GSSH_DB_HOST=localhost
+export GSSH_DB_USER=gssh
+export GSSH_DB_PASSWORD=gssh
+export GSSH_DB_NAME=gssh
+export GSSH_DB_SSLMODE=disable
+export GSSH_CA_MASTER_KEY="$(openssl rand -base64 32)"   # encrypts the CA keys — keep it!
+
+gssh-server -listen :8080
 ```
 
-`gssh ci-login` läuft ohne Konfigurationsdatei (Flags/`GSSH_API_URL`,
-Job-Token aus `GSSH_CI_TOKEN` via `id_tokens`) — Details und Referenz-Pipeline
-in [docs/gitlab-ci.md](docs/gitlab-ci.md).
+The server migrates the database and bootstraps its CA on first start:
 
-Konfiguration in `~/.config/guided-ssh/config.yaml` (Override: `--config`
-bzw. `GSSH_CONFIG`):
+```sh
+curl localhost:8080/healthz            # → ok
+curl localhost:8080/v1/ca/bundle/user  # public key(s) of the user CA
+```
+
+### 2. Connect your identity provider
+
+User logins are OIDC. Point the server at your IdP and restart:
+
+```sh
+export GSSH_OIDC_ISSUER=https://idp.example.com/realms/acme
+export GSSH_OIDC_CLIENT_ID=gssh-cli
+export GSSH_ADMIN_GROUP=gssh-admins    # IdP group allowed to manage grants
+```
+
+Configure the CLI (`~/.config/guided-ssh/config.yaml`):
 
 ```yaml
-api_url: https://gssh.example.com
-issuer: https://idp.example.com/realms/example
+api_url: http://localhost:8080
+issuer: https://idp.example.com/realms/acme
 client_id: gssh-cli
-# optional:
-# pin_sha256: <Base64-SHA-256 des Server-SPKI — ersetzt die CA-Prüfung>
-# validity: 8h        # gewünschte Laufzeit (Policy-Maximum des Servers greift)
 ```
 
-Pin ermitteln:
+Log in and create a first access rule:
 
 ```sh
-openssl s_client -connect gssh.example.com:443 </dev/null 2>/dev/null \
-  | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
-  | openssl dgst -sha256 -binary | base64
-```
+gssh login                # SSO in the browser, certificate into the ssh-agent
+gssh status               # show the current certificate
 
-Transparente Integration in natives `ssh` (`gssh integrate >> ~/.ssh/config`):
-
-```
-Match host "*.example.com" exec "gssh login --if-needed"
-```
-
-## gssh-admin (Admin-CLI)
-
-Verwaltet die Zugriffsregeln (Grants) über die Admin-API
-([docs/grants.md](docs/grants.md), [ADR-018](docs/adr/018-grants-additiv.md)).
-Nutzt dieselbe Konfigurationsdatei wie `gssh`; Voraussetzung serverseitig:
-`GSSH_ADMIN_GROUP`.
-
-```sh
-gssh-admin grant list
-gssh-admin grant create --group deployers --tags env=prod \
+gssh-admin grant create --group devs --tags env=dev \
     --principals deploy --max-validity 8h
-gssh-admin grant update <id> --principals deploy,root
-gssh-admin grant delete <id>
-gssh-admin ci-grant list          # CI-Zugriffsregeln (GitLab-Pipelines)
-gssh-admin ci-grant create --project infra/ansible --ref main \
-    --tags env=prod --principals deploy --max-validity 1h
-gssh-admin apply -f grants.yaml   # deklarativer Vollabgleich (GitOps, inkl. ci_grants)
 ```
 
-Authentifizierung: OIDC wie `gssh` (Browser bzw. `--device`), alternativ
-fertiges ID-Token via `--token` oder `GSSH_ID_TOKEN` (CI).
-
-## gssh-agentd (Host-Agent)
-
-Registriert einen Host bei der CA und hält ihn aktuell
-([ADR-017](docs/adr/017-host-enrollment-mtls.md)): Host-Zertifikat
-(automatische Erneuerung bei 2/3 der Laufzeit), `TrustedUserCAKeys`-Bundle
-und der `AuthorizedPrincipalsCommand`-Helper mit Fail-closed-Cache — bei
-nicht erreichbarer API tragen gecachte Principals bis zur `cache_ttl`,
-danach wird der Login verweigert.
+### 3. Enroll a host
 
 ```sh
-# 1. Token auf dem Server erzeugen
-gssh-server enroll-token -tags env=prod,role=web -ttl 24h
+# on the server: create a one-time enrollment token
+gssh-server enroll-token -tags env=dev,role=web -ttl 24h
 
-# 2. Auf dem Host registrieren (schreibt sshd_config.d/guided-ssh.conf,
-#    Host-Zertifikat und CA-Bundle; nutzt den vorhandenen sshd-Host-Key)
+# on the host: registers with the CA, configures sshd, starts renewing
 gssh-agentd enroll --server https://gssh.example.com \
   --agent-url https://gssh.example.com:8443 --token gssh-et-…
-
-# 3. Dienst starten (systemd-Unit im Paket enthalten)
 systemctl enable --now gssh-agentd
 ```
 
-State liegt unter `/var/lib/guided-ssh/` (mTLS-Client-Zertifikat,
-Konfiguration, Principals-Cache). Pakete (deb/rpm via nfpm) und
-Install-Skript: [deploy/packaging/](deploy/packaging/), Build mit
-`make cross packages`.
-
-## Entwicklung
-
-Voraussetzungen: Go ≥ 1.26, golangci-lint ≥ 2.x, Docker (Image-Builds, später Testcontainer).
+### 4. SSH
 
 ```sh
-make build     # Binaries nach bin/ (statisch, versioniert)
-make cross     # gssh (linux/amd64, linux/arm64, darwin/arm64) + gssh-agentd (linux)
-make packages  # deb/rpm für gssh-agentd (braucht nfpm)
-make test      # Unit-Tests mit Race-Detector
-make cover   # Tests + Coverage-Gate (>= 80 %)
-make lint    # golangci-lint
-make fmt     # Formatierung (gofumpt/goimports)
-make image   # Container-Image lokal bauen
+gssh ssh deploy@web-01        # like ssh, with auto-login if needed
+# or fully transparent for native ssh/scp/rsync:
+gssh integrate >> ~/.ssh/config
+ssh deploy@web-01
 ```
 
-CI (GitHub Actions, self-hosted Runner — Anforderungen: [docs/ci-runner.md](docs/ci-runner.md)):
-Lint, Test mit Coverage-Gate, Build, Container-Image (Push nach `docker.io/guidedtraffic`
-auf `main` und Tags; Tagging SemVer + `sha-<commit>`).
+## Deploy on Kubernetes
 
-## Lizenz und Versionierung
+**Try it (test environments)** — no database required. The chart can run an
+ephemeral PostgreSQL sidecar (`internalDatabase.enabled=true`, Kubernetes
+≥ 1.29); only the CA secret is needed:
 
-Apache-2.0 ([LICENSE](LICENSE)). Semantic Versioning über Git-Tags `vX.Y.Z` —
-Details in [ADR-011](docs/adr/011-versionierung-und-lizenz.md).
+```sh
+helm repo add guided-ssh https://guided-traffic.github.io/guided-ssh
+kubectl create namespace guided-ssh
+kubectl -n guided-ssh create secret generic guided-ssh-ca \
+  --from-literal=ca-master-key="$(openssl rand -base64 32)"
+helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
+  --set internalDatabase.enabled=true \
+  --set secrets.ca.existingSecret=guided-ssh-ca
+```
+
+Data is ephemeral — every pod restart starts with an empty database (and a
+fresh CA). Setting a database secret at the same time is rejected, so the
+test database cannot be used by accident.
+
+**Production** — database credentials and CA master key come from existing
+secrets (external-secrets/SOPS compatible, CloudNativePG app secrets work
+out of the box):
+
+```sh
+helm repo add guided-ssh https://guided-traffic.github.io/guided-ssh
+helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
+  --set secrets.db.existingSecret=guided-ssh-db \
+  --set secrets.ca.existingSecret=guided-ssh-ca \
+  --set config.oidc.issuer=https://idp.example.com/realms/acme \
+  --set config.oidc.clientID=gssh-cli
+```
+
+Details (secrets layout, CloudNativePG, ingress, mTLS agent API, metrics):
+[deploy/helm/guided-ssh/README.md](deploy/helm/guided-ssh/README.md).
+GitOps reference (FluxCD, SOPS, declarative grants):
+[deploy/flux-example/](deploy/flux-example/).
+
+## GitLab CI
+
+Pipelines authenticate with their per-job OIDC `id_token` — no key material
+in CI variables:
+
+```yaml
+provision:
+  id_tokens:
+    GSSH_CI_TOKEN: { aud: guided-ssh }
+  variables:
+    GSSH_API_URL: https://gssh.example.com
+  script:
+    - eval $(ssh-agent -s) && gssh ci-login
+    - ansible-playbook -i inventory.yml site.yml
+```
+
+Reference pipeline and server-side CI grants:
+[docs/gitlab-ci.md](docs/gitlab-ci.md).
+
+## Documentation
+
+| Topic | Document |
+|---|---|
+| Operations manual (config, secrets, backup, CA rotation) | [docs/betriebshandbuch.md](docs/betriebshandbuch.md) |
+| Access rules (grants) | [docs/grants.md](docs/grants.md) |
+| Host enrollment guide | [docs/enrollment-guide.md](docs/enrollment-guide.md) |
+| GitLab CI integration | [docs/gitlab-ci.md](docs/gitlab-ci.md) |
+| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Threat model | [docs/bedrohungsmodell.md](docs/bedrohungsmodell.md) |
+| Architecture decisions (ADRs) | [docs/adr/README.md](docs/adr/README.md) |
+
+Contributing, building from source, repository layout:
+[DEVELOPER.md](DEVELOPER.md).
+
+## License
+
+Apache-2.0 ([LICENSE](LICENSE)). Semantic versioning via git tags `vX.Y.Z`.

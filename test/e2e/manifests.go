@@ -322,7 +322,10 @@ image:
   tag: e2e
   pullPolicy: Never
 secrets:
-  existingSecret: guided-ssh-e2e
+  db:
+    existingSecret: guided-ssh-e2e
+  ca:
+    existingSecret: guided-ssh-e2e
 config:
   oidc:
     issuer: http://dex.{{NS}}.svc.cluster.local:5556/dex
@@ -339,6 +342,24 @@ config:
   extraEnv:
     - name: GSSH_HOST_CERT_VALIDITY
       value: 3m
+`
+
+// helmValuesInternal konfiguriert das Chart mit interner Test-Datenbank
+// (Postgres-Sidecar, internalDatabase.enabled): kein DB-Secret, nur das
+// CA-Secret — der Minimal-Pfad "ausprobieren ohne eigene Postgres-Instanz".
+const helmValuesInternal = `
+image:
+  repository: gssh-e2e-server
+  tag: e2e
+  pullPolicy: Never
+internalDatabase:
+  enabled: true
+secrets:
+  ca:
+    existingSecret: {{RELEASE}}-ca
+config:
+  rateLimit:
+    trustProxy: false
 `
 
 // grantsBase: Ausgangszustand — Gruppe dev darf als deploy auf role=web-Hosts,
