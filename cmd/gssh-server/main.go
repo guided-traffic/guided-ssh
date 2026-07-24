@@ -16,7 +16,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -39,7 +41,16 @@ import (
 // Umgebungsvariablen des Servers (Werte kommen im Kubernetes-Deployment
 // aus Secrets, siehe Plan Phase 11).
 const (
-	envDSN       = "GSSH_DB_DSN"
+	// PostgreSQL-Verbindung: einzelne Variablen statt einer DSN, damit die
+	// Werte 1:1 aus einem Kubernetes-Secret kommen können (z. B. dem
+	// App-Secret von CloudNativePG) — kein zusammengesetztes DSN-Secret nötig.
+	envDBHost     = "GSSH_DB_HOST"     // Pflicht
+	envDBPort     = "GSSH_DB_PORT"     // leer ⇒ 5432 (Treiber-Default)
+	envDBUser     = "GSSH_DB_USER"     // Pflicht
+	envDBPassword = "GSSH_DB_PASSWORD" //nolint:gosec // Name der Env-Variable, kein Secret; Pflicht
+	envDBName     = "GSSH_DB_NAME"     // Pflicht (Datenbank-Name)
+	envDBSSLMode  = "GSSH_DB_SSLMODE"  // leer ⇒ prefer (Treiber-Default)
+
 	envMasterKey = "GSSH_CA_MASTER_KEY" // Base64, 32 Bytes (AES-256)
 
 	// OIDC (Phase 3); ohne Issuer bleibt der Sign-Endpoint deaktiviert (503).
@@ -166,13 +177,43 @@ func run(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+// dbConnString baut die PostgreSQL-Verbindungs-URL aus den einzelnen
+// GSSH_DB_*-Variablen. Benutzer und Passwort werden URL-escaped — Sonderzeichen
+// im Passwort sind damit unkritisch. Port und SSL-Mode sind optional und
+// fallen auf die Treiber-Defaults zurück (5432 bzw. prefer).
+func dbConnString() (string, error) {
+	var missing []string
+	for _, v := range []string{envDBHost, envDBUser, envDBPassword, envDBName} {
+		if os.Getenv(v) == "" {
+			missing = append(missing, v)
+		}
+	}
+	if len(missing) > 0 {
+		return "", fmt.Errorf("datenbank-konfiguration unvollständig: %s nicht gesetzt", strings.Join(missing, ", "))
+	}
+	host := os.Getenv(envDBHost)
+	if port := os.Getenv(envDBPort); port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(os.Getenv(envDBUser), os.Getenv(envDBPassword)),
+		Host:   host,
+		Path:   "/" + os.Getenv(envDBName),
+	}
+	if sslmode := os.Getenv(envDBSSLMode); sslmode != "" {
+		u.RawQuery = url.Values{"sslmode": {sslmode}}.Encode()
+	}
+	return u.String(), nil
+}
+
 // runMigrate wendet die Datenbank-Migrationen an und beendet sich (Subkommando
 // `gssh-server migrate`, für den Init-Container im Kubernetes-Deployment,
 // Plan Phase 11). Konkurrierende Läufe serialisiert ein Advisory-Lock.
 func runMigrate(stdout, stderr io.Writer) int {
-	dsn := os.Getenv(envDSN)
-	if dsn == "" {
-		fmt.Fprintf(stderr, "gssh-server: %s nicht gesetzt\n", envDSN)
+	dsn, err := dbConnString()
+	if err != nil {
+		fmt.Fprintf(stderr, "gssh-server: %v\n", err)
 		return 2
 	}
 	if err := store.Migrate(context.Background(), dsn); err != nil {
@@ -602,12 +643,12 @@ func startGroupSync(ctx context.Context, st *store.Store, logger *slog.Logger) {
 	logger.Info("gruppen-sync gestartet", "issuer", source.Issuer(), "interval", interval)
 }
 
-// setupStore liest die DSN aus der Umgebung, migriert die Datenbank und
-// öffnet den Store.
+// setupStore baut die Verbindungs-URL aus der Umgebung, migriert die
+// Datenbank und öffnet den Store.
 func setupStore(ctx context.Context) (*store.Store, error) {
-	dsn := os.Getenv(envDSN)
-	if dsn == "" {
-		return nil, fmt.Errorf("%s nicht gesetzt", envDSN)
+	dsn, err := dbConnString()
+	if err != nil {
+		return nil, err
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
 		return nil, fmt.Errorf("migrationen: %w", err)

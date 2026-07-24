@@ -37,7 +37,12 @@ Alle Werte aus `cmd/gssh-server/main.go`; im Helm-Chart 1:1 über
 
 | Variable | Default | Wirkung |
 |---|---|---|
-| `GSSH_DB_DSN` | — (Pflicht) | PostgreSQL-DSN, z. B. `postgres://user:pass@host:5432/db` |
+| `GSSH_DB_HOST` | — (Pflicht) | PostgreSQL-Host |
+| `GSSH_DB_PORT` | `5432` | PostgreSQL-Port |
+| `GSSH_DB_USER` | — (Pflicht) | Datenbank-Benutzer |
+| `GSSH_DB_PASSWORD` | — (Pflicht) | Datenbank-Passwort (Sonderzeichen unkritisch, wird URL-escaped) |
+| `GSSH_DB_NAME` | — (Pflicht) | Datenbank-Name |
+| `GSSH_DB_SSLMODE` | `prefer` | `sslmode` der Verbindung (`disable`, `require`, `verify-full`, …) |
 | `GSSH_CA_MASTER_KEY` | — (Pflicht) | Master-Key der CA-Key-Verschlüsselung: 32 Bytes, Base64 |
 | `GSSH_OIDC_ISSUER` | leer | Issuer-URL des IdP; leer ⇒ `/v1/sign/user` deaktiviert (503) |
 | `GSSH_OIDC_CLIENT_ID` | leer | erwartete Audience der ID-Tokens; fehlt sie bei gesetztem Issuer ⇒ Startfehler (fail-fast) |
@@ -62,10 +67,12 @@ Alle Werte aus `cmd/gssh-server/main.go`; im Helm-Chart 1:1 über
 
 ## Secrets
 
-Zwei Pflicht-Secrets (im Chart: `secrets.existingSecret`, Keys `dsn` und
-`ca-master-key`):
+Zwei Pflicht-Secrets (im Chart: `secrets.db.existingSecret` mit den einzelnen
+Postgres-Verbindungsdaten, `secrets.ca.existingSecret` mit dem CA-Master-Key;
+Key-Namen über `secrets.*.keys` anpassbar, Details im Chart-README):
 
-- **`GSSH_DB_DSN`** — Datenbank-Zugang. Rotation: neues DB-Passwort setzen,
+- **`GSSH_DB_*`** — Datenbank-Zugang (Host, Port, Benutzer, Passwort, Name,
+  SSL-Mode als einzelne Keys, kein DSN). Rotation: neues DB-Passwort setzen,
   Secret aktualisieren, Rollout; kein Datenverlust.
 - **`GSSH_CA_MASTER_KEY`** — Erzeugung: `head -c 32 /dev/urandom | base64`
   (bzw. `openssl rand -base64 32`). Verschlüsselt alle CA-Private-Keys

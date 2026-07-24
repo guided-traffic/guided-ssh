@@ -202,20 +202,58 @@ func TestRunEnrollTokenUngueltigeTags(t *testing.T) {
 	}
 }
 
-func TestRunMigrateDSNUnerreichbar(t *testing.T) {
-	t.Setenv(envDSN, "postgres://gssh@127.0.0.1:1/gssh?sslmode=disable&connect_timeout=1")
+// setDBEnv setzt eine vollständige DB-Konfiguration für Tests.
+func setDBEnv(t *testing.T, host, port, user, password, name, sslmode string) {
+	t.Helper()
+	t.Setenv(envDBHost, host)
+	t.Setenv(envDBPort, port)
+	t.Setenv(envDBUser, user)
+	t.Setenv(envDBPassword, password)
+	t.Setenv(envDBName, name)
+	t.Setenv(envDBSSLMode, sslmode)
+}
+
+func TestDBConnString(t *testing.T) {
+	// Vollständige Konfiguration inkl. Sonderzeichen im Passwort.
+	setDBEnv(t, "db.example.com", "5433", "gssh", "p@ss:wort/mit?zeichen", "gsshdb", "require")
+	got, err := dbConnString()
+	if err != nil {
+		t.Fatalf("dbConnString: %v", err)
+	}
+	want := "postgres://gssh:p%40ss%3Awort%2Fmit%3Fzeichen@db.example.com:5433/gsshdb?sslmode=require"
+	if got != want {
+		t.Errorf("dbConnString = %q, erwartet %q", got, want)
+	}
+
+	// Port und SSL-Mode optional: Treiber-Defaults greifen.
+	setDBEnv(t, "db", "", "u", "p", "d", "")
+	if got, err := dbConnString(); err != nil || got != "postgres://u:p@db/d" {
+		t.Errorf("ohne port/sslmode: %q, %v", got, err)
+	}
+
+	// Fehlende Pflicht-Variablen: Fehler nennt alle fehlenden Namen.
+	setDBEnv(t, "", "", "u", "", "d", "")
+	if _, err := dbConnString(); err == nil ||
+		!strings.Contains(err.Error(), envDBHost) || !strings.Contains(err.Error(), envDBPassword) {
+		t.Errorf("fehlende pflicht-variablen: %v (erwartet hinweis auf %s und %s)", err, envDBHost, envDBPassword)
+	}
+}
+
+func TestRunMigrateDBUnerreichbar(t *testing.T) {
+	// Port 1 lehnt Verbindungen sofort ab — kein Timeout nötig.
+	setDBEnv(t, "127.0.0.1", "1", "gssh", "gssh", "gssh", "disable")
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"migrate"}); got != 1 {
-		t.Fatalf("unerreichbare dsn = %d, erwartet 1 (stderr: %s)", got, stderr.String())
+		t.Fatalf("unerreichbare datenbank = %d, erwartet 1 (stderr: %s)", got, stderr.String())
 	}
 }
 
 func TestServeUngueltigeHostCertValidity(t *testing.T) {
-	// serve schlägt an der DSN fehl, bevor die Validity geprüft wird — die
-	// Env-Validierung selbst deckt TestHostCertValidityFromEnv ab. Hier nur
-	// der frühe Fehlerpfad des Serverstarts ohne Store.
-	t.Setenv(envDSN, "")
+	// serve schlägt an der DB-Konfiguration fehl, bevor die Validity geprüft
+	// wird — die Env-Validierung selbst deckt TestHostCertValidityFromEnv ab.
+	// Hier nur der frühe Fehlerpfad des Serverstarts ohne Store.
+	setDBEnv(t, "", "", "", "", "", "")
 	if err := serve(discardLogger(), "127.0.0.1:0", "", ""); err == nil {
-		t.Fatal("serve ohne dsn muss fehlschlagen")
+		t.Fatal("serve ohne db-konfiguration muss fehlschlagen")
 	}
 }

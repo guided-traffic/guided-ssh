@@ -4,4 +4,5 @@ chart-dirs:
 target-branch: main
 # Maintainer sind eine Org, keine GitHub-User — Validierung würde fehlschlagen.
 validate-maintainers: false
-check-version-increment: true
+# Release erfolgt über git-Tag, nicht über Chart-Versions-Bump.
+check-version-increment: false

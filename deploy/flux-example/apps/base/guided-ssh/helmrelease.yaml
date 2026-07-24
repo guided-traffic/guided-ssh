@@ -31,5 +31,9 @@ spec:
     image:
       repository: docker.io/guidedtraffic/guided-ssh
     secrets:
-      # SOPS-verschlüsseltes Secret aus dem Overlay (dsn, ca-master-key).
-      existingSecret: guided-ssh
+      # SOPS-verschlüsselte Secrets aus dem Overlay: Postgres-Zugang
+      # (einzelne Keys) und CA-Master-Key getrennt.
+      db:
+        existingSecret: guided-ssh-db
+      ca:
+        existingSecret: guided-ssh-ca
