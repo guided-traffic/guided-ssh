@@ -3,7 +3,7 @@
   height: 100%;
 }
 
-// ----------------------------------------------------------- Splash und Login
+// ------------------------------------------------------------ Splash & login
 
 .splash {
   height: 100%;
@@ -22,15 +22,37 @@
   padding: 24px;
 }
 
+// The login card renders like a dialog surface (solid surface-3, hairline-strong
+// border, 12px radius, dual-layer shadow, one gradient seam echoing the wordmark)
+// — quiet and confident, the single gradient moment on the whole screen.
 .login-card {
+  position: relative;
   max-width: 420px;
   width: 100%;
-  padding: 40px 36px;
+  padding: 44px 40px;
   display: flex;
   flex-direction: column;
   gap: 20px;
   text-align: center;
   align-items: center;
+  background: var(--surface-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 2px 8px rgba(0, 0, 0, 0.55),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    border-radius: 12px 12px 0 0;
+    background: var(--seam);
+  }
 }
 
 .login-claim {
@@ -47,7 +69,7 @@
   min-width: 220px;
 }
 
-// -------------------------------------------------------------------- Branding
+// -------------------------------------------------------------------- Brand
 
 .brand {
   display: flex;
@@ -58,7 +80,8 @@
 .brand-logo {
   display: block;
   height: 22px;
-  filter: drop-shadow(0 0 10px rgba(108, 178, 255, 0.35));
+  // A tight, precise brand-mark glow — not a soft halo.
+  filter: drop-shadow(0 0 4px rgba(76, 141, 255, 0.22));
 }
 
 .login-card .brand-logo {
@@ -69,20 +92,20 @@
 
 .shell {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 20px;
+  grid-template-columns: 236px 1fr;
+  gap: 16px;
   height: 100%;
-  padding: 20px;
+  padding: 16px;
   box-sizing: border-box;
 }
 
 .sidenav {
   display: flex;
   flex-direction: column;
-  padding: 22px 14px 14px;
+  padding: 20px 12px 12px;
   position: sticky;
-  top: 20px;
-  height: calc(100vh - 40px);
+  top: 16px;
+  height: calc(100vh - 32px);
   box-sizing: border-box;
 
   .brand {
@@ -99,11 +122,12 @@
       align-items: center;
       gap: 12px;
       padding: 9px 12px;
-      border-radius: 10px;
+      border-radius: 8px;
+      border-left: 2px solid transparent;
       color: var(--text-dim);
       font-size: 13.5px;
       font-weight: 500;
-      transition: background 0.15s ease, color 0.15s ease;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
       mat-icon {
         width: 18px;
@@ -112,14 +136,18 @@
       }
 
       &:hover {
-        background: rgba(255, 255, 255, 0.05);
-        color: #e8eef8;
+        background: var(--surface-2);
+        color: var(--text);
       }
 
+      // The single most Linear/Vercel-coded detail: a crisp 2px accent rule
+      // flush to the panel's left edge, plus a flat accent-tint fill.
       &.active {
         background: var(--accent-soft);
-        color: var(--accent);
-        box-shadow: inset 0 0 0 1px rgba(108, 178, 255, 0.25);
+        border-left-color: var(--accent);
+        color: var(--accent-text);
+
+        mat-icon { color: var(--accent); }
       }
     }
   }
@@ -132,7 +160,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 12px 10px 4px;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--hairline-strong);
 
   .user {
     display: flex;
@@ -143,13 +171,17 @@
   .user-name {
     font-size: 13px;
     font-weight: 600;
+    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .user-role {
-    font-size: 11.5px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
   }
 }
 
