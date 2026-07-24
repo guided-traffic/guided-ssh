@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,7 +26,8 @@ import (
 
 // TestE2E fährt die Szenarien des Plans (Phase 13) in fester Reihenfolge auf
 // einer gemeinsamen Umgebung: SSO-Login, Grant-Änderung, CI-Zertifikat +
-// Ansible, Host-Rotation, Chaos (API down), Offboarding, Audit.
+// Ansible, Host-Rotation, Chaos (API down), Offboarding, Audit sowie die
+// interne Test-Datenbank (Postgres-Sidecar, eigenes Helm-Release).
 // Session-/sudo-Audit-Events sind hier bewusst nicht abgedeckt (Opt-in-Feature,
 // PAM-Verhalten ist in den Phase-9-Tests verifiziert).
 func TestE2E(t *testing.T) {
@@ -47,6 +49,85 @@ func TestE2E(t *testing.T) {
 	step("05_Chaos_API_Down", e.testChaos)
 	step("06_Offboarding", e.testOffboarding)
 	step("07_Audit_Vollstaendigkeit", e.testAudit)
+	step("08_Interne_Datenbank", e.testInternalDatabase)
+}
+
+// testInternalDatabase: internalDatabase.enabled — zweites Helm-Release im
+// selben Namespace, Postgres läuft als nativer Sidecar im Server-Pod, ohne
+// DB-Secret. Geprüft wird der komplette Pfad Sidecar → Migrationen → Server
+// healthy → CA gebootstrapt, die Ephemeralität (Pod-Neustart ⇒ leere
+// Datenbank ⇒ NEUE CA — deshalb nur für Tests) und der Render-Guard gegen
+// ein gleichzeitig gesetztes DB-Secret.
+func (e *env) testInternalDatabase(t *testing.T) {
+	chart := filepath.Join(e.repoRoot, "deploy/helm/guided-ssh")
+	// Release-Name enthält den Chart-Namen ⇒ fullname == Release-Name.
+	const release = "guided-ssh-internal"
+
+	// CA-Secret — das einzige Pflicht-Secret bei interner Datenbank.
+	masterKey := make([]byte, 32)
+	if _, err := rand.Read(masterKey); err != nil {
+		t.Fatal(err)
+	}
+	secret := e.mustKubectl("create", "secret", "generic", release+"-ca",
+		"--from-literal=ca-master-key="+base64.StdEncoding.EncodeToString(masterKey),
+		"--dry-run=client", "-o", "yaml")
+	e.applyYAML(secret)
+
+	values := filepath.Join(e.tmp, "values-internal.yaml")
+	if err := os.WriteFile(values, []byte(render(helmValuesInternal, map[string]string{"RELEASE": release})), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run("", "", "helm", "--kube-context", e.context(),
+		"upgrade", "--install", release, chart,
+		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m")
+	if err != nil {
+		t.Fatalf("helm install (interne datenbank): %v\n%s", err, out)
+	}
+	t.Cleanup(func() {
+		_, _ = run("", "", "helm", "--kube-context", e.context(), "uninstall", release, "-n", e.ns)
+	})
+
+	pf := e.portForward("svc/"+release, 80)
+	e.poll(60*time.Second, "healthz (interne datenbank)", func() error {
+		_, err := httpGet(pf.URL()+"/healthz", "")
+		return err
+	})
+	bundleBefore, err := httpGet(pf.URL()+"/v1/ca/bundle/user", "")
+	if err != nil {
+		t.Fatalf("ca-bundle: %v", err)
+	}
+	if !strings.Contains(bundleBefore, "ssh-") {
+		t.Fatalf("ca-bundle ohne ssh-key: %q", bundleBefore)
+	}
+
+	// Ephemeralität: Pod löschen ⇒ emptyDir weg ⇒ frische Datenbank ⇒ der
+	// Server bootstrapt eine NEUE CA. Bleibt das Bundle identisch, ist die
+	// Datenbank nicht pod-lokal (Persistenz oder falsche Verbindung).
+	e.mustKubectl("delete", "pod", "-l", "app.kubernetes.io/instance="+release, "--wait=true")
+	e.mustKubectl("rollout", "status", "deploy/"+release, "--timeout=300s")
+	pf.restart()
+	e.poll(60*time.Second, "healthz nach pod-neustart", func() error {
+		_, err := httpGet(pf.URL()+"/healthz", "")
+		return err
+	})
+	bundleAfter, err := httpGet(pf.URL()+"/v1/ca/bundle/user", "")
+	if err != nil {
+		t.Fatalf("ca-bundle nach neustart: %v", err)
+	}
+	if bundleAfter == bundleBefore {
+		t.Error("ca-bundle nach pod-neustart unverändert — interne datenbank ist nicht ephemeral")
+	}
+
+	// Guard: internalDatabase + DB-Secret gleichzeitig ⇒ Render-Fehler mit
+	// klarer Meldung (Schutz vor versehentlicher Test-Datenbank).
+	out, err = run("", "", "helm", "template", release, chart,
+		"-f", values, "--set", "secrets.db.existingSecret=darf-nicht-sein")
+	if err == nil {
+		t.Fatal("helm template mit internalDatabase + db-secret muss fehlschlagen")
+	}
+	if !strings.Contains(out, "schließen sich gegenseitig aus") {
+		t.Errorf("guard-fehlermeldung unerwartet: %q", out)
+	}
 }
 
 // startWS startet ein Workstation-Kommando asynchron (für Device-Flow und

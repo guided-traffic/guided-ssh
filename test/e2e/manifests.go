@@ -344,6 +344,24 @@ config:
       value: 3m
 `
 
+// helmValuesInternal konfiguriert das Chart mit interner Test-Datenbank
+// (Postgres-Sidecar, internalDatabase.enabled): kein DB-Secret, nur das
+// CA-Secret — der Minimal-Pfad "ausprobieren ohne eigene Postgres-Instanz".
+const helmValuesInternal = `
+image:
+  repository: gssh-e2e-server
+  tag: e2e
+  pullPolicy: Never
+internalDatabase:
+  enabled: true
+secrets:
+  ca:
+    existingSecret: {{RELEASE}}-ca
+config:
+  rateLimit:
+    trustProxy: false
+`
+
 // grantsBase: Ausgangszustand — Gruppe dev darf als deploy auf role=web-Hosts,
 // CI-Projekt platform/deploy (nur protected refs) ebenfalls.
 const grantsBase = `
