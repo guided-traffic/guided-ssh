@@ -55,18 +55,14 @@
   gap: 10px;
 }
 
-.brand-mark {
-  width: 12px;
-  height: 12px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, #6cb2ff, #40c9c6);
-  box-shadow: 0 0 14px rgba(108, 178, 255, 0.65);
+.brand-logo {
+  display: block;
+  height: 22px;
+  filter: drop-shadow(0 0 10px rgba(108, 178, 255, 0.35));
 }
 
-.brand-name {
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: 0.4px;
+.login-card .brand-logo {
+  height: 30px;
 }
 
 // ---------------------------------------------------------------------- Shell
