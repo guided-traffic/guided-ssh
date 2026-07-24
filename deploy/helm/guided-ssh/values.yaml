@@ -14,19 +14,48 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Secrets (Pflicht): existierendes Secret mit DSN und CA-Master-Key.
-# Beispiel:
-#   kubectl create secret generic guided-ssh \
-#     --from-literal=dsn='postgres://gssh:...@db:5432/gssh' \
-#     --from-literal=ca-master-key="$(openssl rand -base64 32)"
+# Secrets (Pflicht): existierende Secrets — das Chart erzeugt keine.
+# Postgres-Zugang und CA-Master-Key sind getrennt referenzierbar; beide dürfen
+# auch auf dasselbe Secret zeigen. Die Key-Namen sind frei belegbar, damit
+# vorhandene Secrets (z. B. das App-Secret von CloudNativePG) direkt nutzbar
+# sind — Details und Beispiele im README.
 secrets:
-  # Name des Secrets mit den Pflicht-Schlüsseln (dsn, ca-master-key).
-  existingSecret: ""
-  keys:
-    # GSSH_DB_DSN — PostgreSQL-DSN
-    dsn: dsn
-    # GSSH_CA_MASTER_KEY — Base64, 32 Bytes (AES-256)
-    caMasterKey: ca-master-key
+  db:
+    # Name des Secrets mit den Postgres-Verbindungsdaten (Pflicht).
+    # Beispiel:
+    #   kubectl create secret generic guided-ssh-db \
+    #     --from-literal=host=db.example.com \
+    #     --from-literal=port=5432 \
+    #     --from-literal=username=gssh \
+    #     --from-literal=password=... \
+    #     --from-literal=database=gssh \
+    #     --from-literal=sslmode=require
+    existingSecret: ""
+    # Keys im Secret → GSSH_DB_*-Env. An das vorhandene Secret anpassen
+    # (CloudNativePG-App-Secret: database: dbname, username: user).
+    keys:
+      # GSSH_DB_HOST
+      host: host
+      # GSSH_DB_PORT — optional: fehlt der Key im Secret, gilt 5432
+      port: port
+      # GSSH_DB_USER
+      username: username
+      # GSSH_DB_PASSWORD
+      password: password
+      # GSSH_DB_NAME
+      database: database
+      # GSSH_DB_SSLMODE — optional: fehlt der Key im Secret, gilt der
+      # Treiber-Default "prefer"
+      sslmode: sslmode
+  ca:
+    # Name des Secrets mit dem CA-Master-Key (Pflicht; darf secrets.db
+    # entsprechen). Beispiel:
+    #   kubectl create secret generic guided-ssh-ca \
+    #     --from-literal=ca-master-key="$(openssl rand -base64 32)"
+    existingSecret: ""
+    keys:
+      # GSSH_CA_MASTER_KEY — Base64, 32 Bytes (AES-256)
+      masterKey: ca-master-key
 
 # Laufzeit-Konfiguration (landet als Env im Deployment; 1:1-Mapping auf die
 # GSSH_*-Variablen des Servers).

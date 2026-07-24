@@ -1,10 +1,10 @@
-# guided-ssh Helm-Chart
+# guided-ssh Helm Chart
 
-Deployt den guided-ssh-Server (API + eingebettete Web-UI, Agent-API mit mTLS,
-Prometheus-Metriken) auf Kubernetes.
+Deploys the guided-ssh server (API + embedded web UI, agent API with mTLS,
+Prometheus metrics) on Kubernetes.
 
-Für den Betrieb per GitOps (FluxCD: HelmRelease, SOPS-Secrets, deklarative
-Grants) siehe die Referenz-Manifeste in `deploy/flux-example/`.
+For GitOps-based operation (FluxCD: HelmRelease, SOPS secrets, declarative
+grants) see the reference manifests in `deploy/flux-example/`.
 
 ## Installation
 
@@ -14,55 +14,156 @@ helm repo update
 
 kubectl create namespace guided-ssh
 
-# Pflicht-Secret: DSN + CA-Master-Key (Beispiel; produktiv external-secrets/SOPS)
-kubectl -n guided-ssh create secret generic guided-ssh \
-  --from-literal=dsn='postgres://gssh:PASS@db.example.com:5432/gssh?sslmode=require' \
+# Required secrets (example; use external-secrets/SOPS in production):
+# 1. PostgreSQL connection — individual keys, no DSN
+kubectl -n guided-ssh create secret generic guided-ssh-db \
+  --from-literal=host=db.example.com \
+  --from-literal=port=5432 \
+  --from-literal=username=gssh \
+  --from-literal=password='PASS' \
+  --from-literal=database=gssh \
+  --from-literal=sslmode=require
+
+# 2. CA master key
+kubectl -n guided-ssh create secret generic guided-ssh-ca \
   --from-literal=ca-master-key="$(openssl rand -base64 32)"
 
 helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
-  --set secrets.existingSecret=guided-ssh \
+  --set secrets.db.existingSecret=guided-ssh-db \
+  --set secrets.ca.existingSecret=guided-ssh-ca \
   --set config.oidc.issuer=https://idp.example.com/realms/acme \
   --set config.oidc.clientID=guided-ssh \
   --set config.groups.admin=gssh-admins
 ```
 
-> **Achtung:** `ca-master-key` verschlüsselt die CA-Private-Keys in der
-> Datenbank (AES-256). Verlust ⇒ CA unbrauchbar. Sicher ablegen.
+> **Warning:** `ca-master-key` encrypts the CA private keys in the database
+> (AES-256). Losing it renders the CA unusable. Store it safely.
 
 ## Secrets
 
-Das Chart erzeugt **keine** Secrets — ausschließlich `existingSecret`-Referenzen,
-kompatibel mit [external-secrets](https://external-secrets.io) und
-[SOPS](https://github.com/getsops/sops):
+The chart **never creates secrets** — it only references existing ones
+(`existingSecret`), which makes it compatible with
+[external-secrets](https://external-secrets.io) and
+[SOPS](https://github.com/getsops/sops).
 
-| Wert | Secret-Key (Default) | Env |
-|---|---|---|
-| `secrets.existingSecret` (Pflicht) | `dsn` | `GSSH_DB_DSN` |
-| `secrets.existingSecret` (Pflicht) | `ca-master-key` | `GSSH_CA_MASTER_KEY` |
-| `config.keycloak.existingSecret` (optional) | `kc-client-secret` | `GSSH_KC_CLIENT_SECRET` |
+There are two independent references. They may point to two different secrets
+(recommended: database credentials and CA key usually have different owners
+and rotation cycles) or both to the same secret:
 
-Beispiel `ExternalSecret`:
+| Value | Purpose |
+|---|---|
+| `secrets.db.existingSecret` (required) | PostgreSQL connection values |
+| `secrets.ca.existingSecret` (required) | CA master key |
+| `config.keycloak.existingSecret` (optional) | Keycloak service-account client secret |
+| `config.oidc.uiExistingSecret` (optional) | OIDC client secret of the web UI |
+
+### Database secret (`secrets.db`)
+
+The PostgreSQL connection is configured through **individual values instead
+of a DSN**. Every value is read from the secret referenced by
+`secrets.db.existingSecret`; each key name inside that secret is
+configurable via `secrets.db.keys.*`:
+
+| `secrets.db.keys.*` | Default key | Env variable | Required in secret |
+|---|---|---|---|
+| `host` | `host` | `GSSH_DB_HOST` | yes |
+| `port` | `port` | `GSSH_DB_PORT` | no — missing key ⇒ `5432` |
+| `username` | `username` | `GSSH_DB_USER` | yes |
+| `password` | `password` | `GSSH_DB_PASSWORD` | yes |
+| `database` | `database` | `GSSH_DB_NAME` | yes |
+| `sslmode` | `sslmode` | `GSSH_DB_SSLMODE` | no — missing key ⇒ driver default `prefer` |
+
+Notes:
+
+- `port` and `sslmode` are mounted with `optional: true`: if the key does not
+  exist in the secret, the env variable stays unset and the server falls back
+  to its default. All other keys must exist, otherwise the pod does not start.
+- Special characters in the password are safe — the server URL-escapes
+  username and password when building the connection string.
+- The same env variables are injected into the `migrate` init container.
+
+**Remapping keys** — use an existing secret without copying it. Example:
+your secret stores the user under `user` and the database under `dbname`:
+
+```yaml
+secrets:
+  db:
+    existingSecret: my-db-secret
+    keys:
+      username: user
+      database: dbname
+```
+
+**CloudNativePG** — the `<cluster>-app` secret created by
+[CloudNativePG](https://cloudnative-pg.io) works directly, only two keys
+differ from the defaults:
+
+```yaml
+secrets:
+  db:
+    existingSecret: guided-ssh-db-app   # created by CNPG
+    keys:
+      username: user      # CNPG key name
+      database: dbname    # CNPG key name
+      # host, port, password match the defaults; the CNPG secret has no
+      # sslmode key ⇒ driver default "prefer" applies (in-cluster traffic).
+  ca:
+    existingSecret: guided-ssh-ca       # CA key stays in its own secret
+```
+
+**external-secrets** — one `ExternalSecret` per reference:
 
 ```yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: guided-ssh
+  name: guided-ssh-db
 spec:
   refreshInterval: 1h
   secretStoreRef: { name: vault, kind: ClusterSecretStore }
-  target: { name: guided-ssh }
+  target: { name: guided-ssh-db }
   data:
-    - secretKey: dsn
-      remoteRef: { key: guided-ssh/db, property: dsn }
+    - secretKey: host
+      remoteRef: { key: guided-ssh/db, property: host }
+    - secretKey: port
+      remoteRef: { key: guided-ssh/db, property: port }
+    - secretKey: username
+      remoteRef: { key: guided-ssh/db, property: username }
+    - secretKey: password
+      remoteRef: { key: guided-ssh/db, property: password }
+    - secretKey: database
+      remoteRef: { key: guided-ssh/db, property: database }
+    - secretKey: sslmode
+      remoteRef: { key: guided-ssh/db, property: sslmode }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: guided-ssh-ca
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: vault, kind: ClusterSecretStore }
+  target: { name: guided-ssh-ca }
+  data:
     - secretKey: ca-master-key
       remoteRef: { key: guided-ssh/ca, property: master-key }
 ```
 
+### CA secret (`secrets.ca`)
+
+| `secrets.ca.keys.*` | Default key | Env variable |
+|---|---|---|
+| `masterKey` | `ca-master-key` | `GSSH_CA_MASTER_KEY` |
+
+The value must be 32 random bytes, Base64-encoded
+(`openssl rand -base64 32`). It encrypts the CA private keys at rest
+(AES-256-GCM); rotation requires re-encrypting the stored CA keys — treat it
+as the most sensitive secret of the installation.
+
 ## PostgreSQL
 
-**Produktion — extern oder CloudNativePG.** Das Chart bringt bewusst keine
-produktive Datenbank mit. Mit [CloudNativePG](https://cloudnative-pg.io):
+**Production — external database or CloudNativePG.** The chart deliberately
+ships no production database. With [CloudNativePG](https://cloudnative-pg.io):
 
 ```yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -76,89 +177,87 @@ spec:
     initdb: { database: gssh, owner: gssh }
 ```
 
-CloudNativePG legt das Secret `guided-ssh-db-app` mit dem Key `uri` an — als
-DSN direkt nutzbar:
+Then reference the generated `guided-ssh-db-app` secret as shown in
+[Database secret](#database-secret-secretsdb) above.
 
-```yaml
-secrets:
-  existingSecret: guided-ssh-db-app
-  keys:
-    dsn: uri
-    # ca-master-key liegt in einem eigenen Secret? Dann stattdessen ein
-    # kombiniertes Secret pflegen — beide Keys müssen im selben Secret liegen.
-```
-
-Liegen DSN und CA-Master-Key getrennt, ein kombiniertes Secret erzeugen
-(external-secrets kann aus mehreren Quellen zusammenführen).
-
-**Entwicklung — optionales Subchart** (bitnami/postgresql, nicht für Produktion):
+**Development — optional subchart** (bitnami/postgresql, not for production):
 
 ```bash
+kubectl -n guided-ssh create secret generic guided-ssh-dev-db \
+  --from-literal=host=guided-ssh-postgresql \
+  --from-literal=username=gssh \
+  --from-literal=password=dev-only \
+  --from-literal=database=gssh \
+  --from-literal=sslmode=disable
+
 helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set postgresql.enabled=true \
   --set postgresql.auth.password=dev-only \
-  --set secrets.existingSecret=guided-ssh-dev
-# DSN im Dev-Secret: postgres://gssh:dev-only@guided-ssh-postgresql:5432/gssh
+  --set secrets.db.existingSecret=guided-ssh-dev-db \
+  --set secrets.ca.existingSecret=guided-ssh-ca
 ```
 
-## DB-Migrationen
+## Database migrations
 
-Laufen als Init-Container (`gssh-server migrate`) vor jedem Pod-Start;
-ein Postgres-Advisory-Lock serialisiert parallele Replikas — Rollouts mit
-mehreren Replikas sind sicher. Abschaltbar via `migrations.enabled=false`
-(der Server migriert beim Start ohnehin idempotent, ebenfalls mit Lock).
+Run as an init container (`gssh-server migrate`) before every pod start; a
+Postgres advisory lock serializes parallel replicas — rollouts with multiple
+replicas are safe. Disable via `migrations.enabled=false` (the server also
+migrates idempotently on startup, with the same lock).
 
-## Agent-API (mTLS)
+## Agent API (mTLS)
 
-Host-Agents (`gssh-agentd`) sprechen mTLS auf Port 8443. TLS endet in der
-Anwendung — **kein** HTTP-Ingress, sondern:
+Host agents (`gssh-agentd`) speak mTLS on port 8443. TLS terminates in the
+application — **no** HTTP ingress, instead:
 
-- `agent.service.type=LoadBalancer` (Default-Service ist ClusterIP), oder
-- Ingress-Controller mit TLS-Passthrough (z. B. ingress-nginx
+- `agent.service.type=LoadBalancer` (the default service is ClusterIP), or
+- an ingress controller with TLS passthrough (e.g. ingress-nginx
   `--enable-ssl-passthrough`).
 
-`agent.tlsNames` muss den DNS-Namen enthalten, unter dem Agents den Server
-erreichen (Default: Cluster-interner Service-Name).
+`agent.tlsNames` must contain the DNS name agents use to reach the server
+(default: cluster-internal service name).
 
-## Metriken
+## Metrics
 
-`/metrics` läuft auf eigenem Port (9090), wird nicht über den Ingress
-exponiert. `metrics.serviceMonitor.enabled=true` erzeugt einen ServiceMonitor
-(Prometheus-Operator-CRDs erforderlich). Metriken u. a.:
+`/metrics` listens on its own port (9090) and is not exposed through the
+ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
+(requires the Prometheus operator CRDs). Metrics include:
 
-- `gssh_certificates_issued_total{requester,cert_type}` — ausgestellte Zertifikate
-- `gssh_http_responses_total{code}` — Antworten nach Status (Fehlerraten)
-- `gssh_agent_heartbeats_total` — Agent-Kontakte
+- `gssh_certificates_issued_total{requester,cert_type}` — issued certificates
+- `gssh_http_responses_total{code}` — responses by status (error rates)
+- `gssh_agent_heartbeats_total` — agent contacts
 
-## Wichtige Values
+## Important values
 
-| Value | Default | Beschreibung |
+| Value | Default | Description |
 |---|---|---|
-| `secrets.existingSecret` | `""` (Pflicht) | Secret mit `dsn` und `ca-master-key` |
-| `config.oidc.issuer` / `clientID` | `""` | Benutzer-OIDC; leer ⇒ `/v1/sign/user` deaktiviert |
-| `config.ci.issuer` / `audience` | `""` | GitLab-CI-Issuer; leer ⇒ `/v1/sign/ci` deaktiviert |
-| `config.groups.admin/auditor/readOnly` | `""` | IdP-Rollen-Gruppen |
-| `config.keycloak.*` | `""` | Gruppen-Sync via Keycloak-Admin-API |
-| `config.rateLimit.trustProxy` | `true` | Client-IP aus `X-Forwarded-For` (hinter Ingress) |
-| `agent.enabled` / `agent.tlsNames` | `true` / Service-DNS | Agent-API (mTLS) |
-| `metrics.serviceMonitor.enabled` | `false` | ServiceMonitor für Prometheus-Operator |
-| `ingress.enabled` | `false` | Ingress für API/UI |
-| `networkPolicy.enabled` | `false` | NetworkPolicy (Ports http/agent/metrics) |
+| `secrets.db.existingSecret` | `""` (required) | Secret with the PostgreSQL connection values |
+| `secrets.db.keys.*` | `host`/`port`/`username`/`password`/`database`/`sslmode` | Key names inside the DB secret |
+| `secrets.ca.existingSecret` | `""` (required) | Secret with the CA master key |
+| `secrets.ca.keys.masterKey` | `ca-master-key` | Key name inside the CA secret |
+| `config.oidc.issuer` / `clientID` | `""` | User OIDC; empty ⇒ `/v1/sign/user` disabled |
+| `config.ci.issuer` / `audience` | `""` | GitLab CI issuer; empty ⇒ `/v1/sign/ci` disabled |
+| `config.groups.admin/auditor/readOnly` | `""` | IdP role groups |
+| `config.keycloak.*` | `""` | Group sync via Keycloak admin API |
+| `config.rateLimit.trustProxy` | `true` | Client IP from `X-Forwarded-For` (behind ingress) |
+| `agent.enabled` / `agent.tlsNames` | `true` / service DNS | Agent API (mTLS) |
+| `metrics.serviceMonitor.enabled` | `false` | ServiceMonitor for the Prometheus operator |
+| `ingress.enabled` | `false` | Ingress for API/UI |
+| `networkPolicy.enabled` | `false` | NetworkPolicy (ports http/agent/metrics) |
 | `podDisruptionBudget.enabled` | `false` | PDB (`minAvailable: 1`) |
-| `autoscaling.enabled` | `false` | HPA (CPU, optional Memory) |
-| `postgresql.enabled` | `false` | Dev-only-Subchart bitnami/postgresql |
+| `autoscaling.enabled` | `false` | HPA (CPU, optionally memory) |
+| `postgresql.enabled` | `false` | Dev-only subchart bitnami/postgresql |
 
-Vollständige Liste mit Kommentaren: [values.yaml](values.yaml).
+Full list with comments: [values.yaml](values.yaml).
 
-## Chart-Release (GitHub Pages)
+## Chart release (GitHub Pages)
 
-Der `helm-chart`-Job in `.github/workflows/build.yml` veröffentlicht das Chart
-zusammen mit Binaries und Image bei jedem Release (`vX.Y.Z`): `helm package`
-baut das `.tgz`, das zusammen mit einer gemergten `index.yaml` (Repo-URL
-`https://guided-traffic.github.io/guided-ssh/`) direkt auf den `gh-pages`-Branch
-committet und zusätzlich ans Release gehängt wird. `version` und `appVersion`
-kommen dabei aus dem Release-Tag, die Chart.yaml-Werte sind nur Lint-Baseline.
-Einmalige Einrichtung:
+The `helm-chart` job in `.github/workflows/build.yml` publishes the chart
+together with binaries and image on every release (`vX.Y.Z`): `helm package`
+builds the `.tgz`, which is committed — together with a merged `index.yaml`
+(repo URL `https://guided-traffic.github.io/guided-ssh/`) — directly to the
+`gh-pages` branch and additionally attached to the release. `version` and
+`appVersion` come from the release tag; the Chart.yaml values are only a lint
+baseline. One-time setup:
 
 ```bash
 git checkout --orphan gh-pages

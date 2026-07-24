@@ -68,3 +68,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .value | quote }}
 {{- end }}
 {{- end }}
+
+{{/* GSSH_DB_*-Env aus dem DB-Secret (secrets.db) — für Server und Migrations-
+Init-Container. Die Key-Namen sind über secrets.db.keys frei belegbar
+(z. B. CloudNativePG-App-Secret). port/sslmode sind optional: fehlt der Key
+im Secret, greifen die Server-Defaults (5432 bzw. prefer). */}}
+{{- define "guided-ssh.dbEnv" -}}
+{{- $secret := required "secrets.db.existingSecret ist Pflicht (Secret mit den Postgres-Verbindungsdaten, siehe README)" .Values.secrets.db.existingSecret -}}
+{{- $keys := .Values.secrets.db.keys -}}
+- name: GSSH_DB_HOST
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ $keys.host }}
+- name: GSSH_DB_PORT
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ $keys.port }}
+      optional: true
+- name: GSSH_DB_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ $keys.username }}
+- name: GSSH_DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ $keys.password }}
+- name: GSSH_DB_NAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ $keys.database }}
+- name: GSSH_DB_SSLMODE
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ $keys.sslmode }}
+      optional: true
+{{- end }}

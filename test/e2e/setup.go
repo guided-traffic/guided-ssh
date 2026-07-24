@@ -266,9 +266,16 @@ func (e *env) deployInfra() {
 	if _, err := rand.Read(masterKey); err != nil {
 		e.t.Fatal(err)
 	}
-	dsn := "postgres://gssh:gssh-e2e-pw@postgres." + e.ns + ".svc.cluster.local:5432/gssh?sslmode=disable"
+	// Postgres-Zugang als einzelne Keys (kein DSN) — dieselbe Struktur, die
+	// das Chart per secrets.db.keys erwartet; ca-master-key liegt im selben
+	// Secret (secrets.db und secrets.ca dürfen auf dasselbe Secret zeigen).
 	secret := e.mustKubectl("create", "secret", "generic", "guided-ssh-e2e",
-		"--from-literal=dsn="+dsn,
+		"--from-literal=host=postgres."+e.ns+".svc.cluster.local",
+		"--from-literal=port=5432",
+		"--from-literal=username=gssh",
+		"--from-literal=password=gssh-e2e-pw",
+		"--from-literal=database=gssh",
+		"--from-literal=sslmode=disable",
 		"--from-literal=ca-master-key="+base64.StdEncoding.EncodeToString(masterKey),
 		"--dry-run=client", "-o", "yaml")
 	e.applyYAML(secret)

@@ -322,7 +322,10 @@ image:
   tag: e2e
   pullPolicy: Never
 secrets:
-  existingSecret: guided-ssh-e2e
+  db:
+    existingSecret: guided-ssh-e2e
+  ca:
+    existingSecret: guided-ssh-e2e
 config:
   oidc:
     issuer: http://dex.{{NS}}.svc.cluster.local:5556/dex
