@@ -123,9 +123,27 @@ ssh deploy@web-01
 
 ## Deploy on Kubernetes
 
-Production deployments run on Kubernetes via the Helm chart — database
-credentials and CA master key come from existing secrets (external-secrets/
-SOPS compatible, CloudNativePG app secrets work out of the box):
+**Try it (test environments)** — no database required. The chart can run an
+ephemeral PostgreSQL sidecar (`internalDatabase.enabled=true`, Kubernetes
+≥ 1.29); only the CA secret is needed:
+
+```sh
+helm repo add guided-ssh https://guided-traffic.github.io/guided-ssh
+kubectl create namespace guided-ssh
+kubectl -n guided-ssh create secret generic guided-ssh-ca \
+  --from-literal=ca-master-key="$(openssl rand -base64 32)"
+helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
+  --set internalDatabase.enabled=true \
+  --set secrets.ca.existingSecret=guided-ssh-ca
+```
+
+Data is ephemeral — every pod restart starts with an empty database (and a
+fresh CA). Setting a database secret at the same time is rejected, so the
+test database cannot be used by accident.
+
+**Production** — database credentials and CA master key come from existing
+secrets (external-secrets/SOPS compatible, CloudNativePG app secrets work
+out of the box):
 
 ```sh
 helm repo add guided-ssh https://guided-traffic.github.io/guided-ssh

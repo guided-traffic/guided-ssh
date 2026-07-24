@@ -52,10 +52,14 @@ and rotation cycles) or both to the same secret:
 
 | Value | Purpose |
 |---|---|
-| `secrets.db.existingSecret` (required) | PostgreSQL connection values |
+| `secrets.db.existingSecret` (required¹) | PostgreSQL connection values |
 | `secrets.ca.existingSecret` (required) | CA master key |
 | `config.keycloak.existingSecret` (optional) | Keycloak service-account client secret |
 | `config.oidc.uiExistingSecret` (optional) | OIDC client secret of the web UI |
+
+¹ Not allowed together with `internalDatabase.enabled=true` (test
+environments, see [Internal database](#internal-database-test-environments-only));
+setting both is a render error.
 
 ### Database secret (`secrets.db`)
 
@@ -160,6 +164,33 @@ The value must be 32 random bytes, Base64-encoded
 (AES-256-GCM); rotation requires re-encrypting the stored CA keys — treat it
 as the most sensitive secret of the installation.
 
+## Internal database (test environments only)
+
+For trying out guided-ssh or short-lived test deployments you can skip
+provisioning PostgreSQL entirely:
+
+```bash
+helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
+  --set internalDatabase.enabled=true \
+  --set secrets.ca.existingSecret=guided-ssh-ca
+```
+
+`internalDatabase.enabled=true` runs PostgreSQL as a native sidecar container
+inside the server pod (requires Kubernetes ≥ 1.29):
+
+- **No database secret needed** — the sidecar listens on `127.0.0.1` only
+  (not reachable from outside the pod) and uses fixed dev credentials.
+- **Ephemeral by design** — data lives in an `emptyDir`; every pod restart
+  starts with an empty database. Since the CA keys are stored in the
+  database, a restart also means a **new CA** — fine for tests, fatal for
+  anything real.
+- **Guard rails** — setting `secrets.db.existingSecret` at the same time is a
+  render error (protects against accidentally running on the test database),
+  as is `replicaCount > 1` or `autoscaling.enabled=true` (each replica would
+  get its own empty database).
+
+Never use this in production or anything you care about.
+
 ## PostgreSQL
 
 **Production — external database or CloudNativePG.** The chart deliberately
@@ -234,6 +265,7 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `secrets.db.keys.*` | `host`/`port`/`username`/`password`/`database`/`sslmode` | Key names inside the DB secret |
 | `secrets.ca.existingSecret` | `""` (required) | Secret with the CA master key |
 | `secrets.ca.keys.masterKey` | `ca-master-key` | Key name inside the CA secret |
+| `internalDatabase.enabled` | `false` | **Test only**: ephemeral Postgres sidecar instead of `secrets.db` (mutually exclusive) |
 | `config.oidc.issuer` / `clientID` | `""` | User OIDC; empty ⇒ `/v1/sign/user` disabled |
 | `config.ci.issuer` / `audience` | `""` | GitLab CI issuer; empty ⇒ `/v1/sign/ci` disabled |
 | `config.groups.admin/auditor/readOnly` | `""` | IdP role groups |

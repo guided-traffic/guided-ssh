@@ -57,6 +57,17 @@ secrets:
       # GSSH_CA_MASTER_KEY — Base64, 32 Bytes (AES-256)
       masterKey: ca-master-key
 
+# Interne Datenbank — NUR für Test-Umgebungen. Startet Postgres als nativen
+# Sidecar (Init-Container mit restartPolicy Always, benötigt Kubernetes >= 1.29)
+# im Server-Pod: nur über 127.0.0.1 erreichbar, feste Dev-Credentials, Daten
+# in einem emptyDir — jeder Pod-Neustart beginnt mit leerer Datenbank.
+# Schließt secrets.db.existingSecret aus (Render-Fehler, Schutz vor
+# versehentlicher Nutzung) und erfordert replicaCount=1 ohne Autoscaling.
+internalDatabase:
+  enabled: false
+  image: docker.io/library/postgres:16-alpine
+  resources: {}
+
 # Laufzeit-Konfiguration (landet als Env im Deployment; 1:1-Mapping auf die
 # GSSH_*-Variablen des Servers).
 config:

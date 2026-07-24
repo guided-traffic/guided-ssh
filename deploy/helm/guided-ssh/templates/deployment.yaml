@@ -31,8 +31,58 @@ spec:
       automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if .Values.migrations.enabled }}
+      {{- if or .Values.migrations.enabled .Values.internalDatabase.enabled }}
       initContainers:
+        {{- if .Values.internalDatabase.enabled }}
+        # Interne Test-Datenbank als nativer Sidecar (restartPolicy Always,
+        # Kubernetes >= 1.29): startet vor migrate/Server, läuft danach weiter.
+        # Nur im Pod erreichbar (listen_addresses=127.0.0.1); Daten ephemeral
+        # im emptyDir — NIEMALS produktiv einsetzen.
+        - name: db
+          image: {{ .Values.internalDatabase.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          restartPolicy: Always
+          args: ["-c", "listen_addresses=127.0.0.1"]
+          env:
+            - name: POSTGRES_USER
+              value: {{ include "guided-ssh.internalDBUser" . }}
+            - name: POSTGRES_PASSWORD
+              value: {{ include "guided-ssh.internalDBPassword" . }}
+            - name: POSTGRES_DB
+              value: {{ include "guided-ssh.internalDBName" . }}
+            # Unterverzeichnis: initdb verlangt 0700/0750 auf PGDATA — der
+            # emptyDir-Mount selbst ist durch fsGroup gruppenbeschreibbar.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          # migrate/Server starten erst, wenn Postgres Verbindungen annimmt
+          # (während initdb lauscht nur ein Socket-only-Tempserver — die
+          # TCP-Probe schlägt dann bewusst fehl).
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", {{ include "guided-ssh.internalDBUser" . | quote }}]
+            periodSeconds: 2
+            failureThreshold: 60
+          # postgres-Image läuft als uid 70 (alpine); Schreibrecht auf den
+          # emptyDir kommt über die fsGroup als Supplementary-Group. Kein
+          # readOnlyRootFilesystem: das Image braucht /var/run/postgresql.
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          {{- with .Values.internalDatabase.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: internal-db-data
+              mountPath: /var/lib/postgresql/data
+        {{- end }}
+        {{- if .Values.migrations.enabled }}
         # Migrationen laufen vor dem Server; ein Postgres-Advisory-Lock
         # serialisiert parallele Init-Container mehrerer Replikas.
         - name: migrate
@@ -47,6 +97,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+        {{- end }}
       {{- end }}
       containers:
         - name: gssh-server
@@ -141,6 +192,12 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if .Values.internalDatabase.enabled }}
+      volumes:
+        # Ephemeral: Pod-Neustart = leere Datenbank (Test-Umgebung).
+        - name: internal-db-data
+          emptyDir: {}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

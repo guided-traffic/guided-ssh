@@ -1,4 +1,10 @@
 guided-ssh {{ .Chart.AppVersion }} installiert als Release {{ .Release.Name }}.
+{{- if .Values.internalDatabase.enabled }}
+
+*** ACHTUNG: internalDatabase.enabled=true — interne TEST-Datenbank aktiv. ***
+*** Daten sind ephemeral (emptyDir): jeder Pod-Neustart loescht alles,     ***
+*** inklusive der verschluesselten CA-Keys. NIEMALS produktiv einsetzen.   ***
+{{- end }}
 
 API/UI:
 {{- if .Values.ingress.enabled }}
