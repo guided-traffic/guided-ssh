@@ -40,7 +40,7 @@ spec:
         # im emptyDir — NIEMALS produktiv einsetzen.
         - name: db
           image: {{ .Values.internalDatabase.image }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.internalDatabase.pullPolicy }}
           restartPolicy: Always
           args: ["-c", "listen_addresses=127.0.0.1"]
           env:

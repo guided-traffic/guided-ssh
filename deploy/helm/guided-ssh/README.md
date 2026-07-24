@@ -266,6 +266,7 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `secrets.ca.existingSecret` | `""` (required) | Secret with the CA master key |
 | `secrets.ca.keys.masterKey` | `ca-master-key` | Key name inside the CA secret |
 | `internalDatabase.enabled` | `false` | **Test only**: ephemeral Postgres sidecar instead of `secrets.db` (mutually exclusive) |
+| `internalDatabase.image` / `pullPolicy` | `postgres:16-alpine` / `IfNotPresent` | Sidecar image; pull policy is independent of `image.pullPolicy` |
 | `config.oidc.issuer` / `clientID` | `""` | User OIDC; empty ⇒ `/v1/sign/user` disabled |
 | `config.ci.issuer` / `audience` | `""` | GitLab CI issuer; empty ⇒ `/v1/sign/ci` disabled |
 | `config.groups.admin/auditor/readOnly` | `""` | IdP role groups |
