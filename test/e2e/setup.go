@@ -357,6 +357,19 @@ func (e *env) setupTesthost(name, fqdn, tags string) {
 	e.applyYAML(render(testhostYAML, map[string]string{"NAME": name}))
 	e.mustKubectl("rollout", "status", "deploy/"+name, "--timeout=180s")
 
+	// Der Entrypoint erzeugt erst die SSH-Host-Keys (ssh-keygen -A); das
+	// Enrollment liest sie. "Running" reicht nicht — auf die Marke warten.
+	e.poll(60*time.Second, name+" host-keys", func() error {
+		logs, err := e.kubectl("logs", "deploy/"+name)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(logs, "entrypoint ready") {
+			return fmt.Errorf("host-keys noch nicht erzeugt")
+		}
+		return nil
+	})
+
 	// Einmal-Token über das Server-Binary im Pod (distroless — kein sh).
 	out := e.mustKubectl("exec", "deploy/guided-ssh", "--",
 		"/usr/local/bin/gssh-server", "enroll-token", "-name", fqdn, "-tags", tags, "-ttl", "1h")
