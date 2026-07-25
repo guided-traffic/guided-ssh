@@ -3,7 +3,9 @@ package ca
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -72,6 +74,37 @@ func (f *fakeStore) UpdateCAKeyState(_ context.Context, id uuid.UUID, state stri
 		}
 	}
 	return nil, store.ErrNotFound
+}
+
+// AdoptCAKey bildet die Select-or-Insert-Semantik des echten Stores nach
+// (siehe store.AdoptCAKey): vorhandene Zeile unverändert zurück, sonst neu
+// anlegen und bisherige aktive Keys desselben Zwecks auf "retiring" setzen.
+func (f *fakeStore) AdoptCAKey(_ context.Context, purpose, algorithm, publicKey string) (*store.CAKey, bool, error) {
+	for i := range f.keys {
+		if f.keys[i].Purpose != purpose || f.keys[i].PublicKey != publicKey {
+			continue
+		}
+		if f.keys[i].State == store.CAKeyStateRetired {
+			return nil, false, fmt.Errorf("%w: purpose %q", store.ErrCAKeyRetired, purpose)
+		}
+		k := f.keys[i]
+		return &k, false, nil
+	}
+	for i := range f.keys {
+		if f.keys[i].Purpose == purpose && f.keys[i].State == store.CAKeyStateActive {
+			f.keys[i].State = store.CAKeyStateRetiring
+		}
+	}
+	k := store.CAKey{
+		ID:        uuid.New(),
+		Purpose:   purpose,
+		Algorithm: algorithm,
+		PublicKey: publicKey,
+		State:     store.CAKeyStateActive,
+		CreatedAt: time.Now(),
+	}
+	f.keys = append(f.keys, k)
+	return &k, true, nil
 }
 
 func (f *fakeStore) AppendAuditEvent(_ context.Context, e *store.AuditEvent) error {
@@ -310,5 +343,448 @@ func TestRetireKeyNichtGefunden(t *testing.T) {
 	c, _ := newTestCA(t)
 	if err := c.RetireKey(context.Background(), uuid.New()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("ErrNotFound erwartet, bekommen: %v", err)
+	}
+}
+
+// --- self-managed mode (SELF_MANAGED_CA.md) ---------------------------------
+//
+// The tests below always take the production path: fresh key files on disk,
+// loaded through LoadExternalKeys, so an ExternalKeys value that the loader
+// could never produce cannot slip through.
+
+// mustLoadExternalKeys loads a mounted key set and fails the test if it does not
+// load — the fixtures are generated, so this is a test bug, not a case under test.
+func mustLoadExternalKeys(t *testing.T, paths ExternalKeyPaths) *ExternalKeys {
+	t.Helper()
+	keys, err := LoadExternalKeys(paths)
+	if err != nil {
+		t.Fatalf("LoadExternalKeys: %v", err)
+	}
+	return keys
+}
+
+// mountedKeys generates a complete set of CA key files in dir and loads it.
+func mountedKeys(t *testing.T, dir string) *ExternalKeys {
+	t.Helper()
+	return mustLoadExternalKeys(t, newExternalKeyFixtures(t, dir))
+}
+
+// newSelfManagedCA builds a CA that runs on mounted key material.
+func newSelfManagedCA(t *testing.T, st Store, keys *ExternalKeys) *CA {
+	t.Helper()
+	c, err := New(st, testMasterKey(), NewPolicyEngine(DefaultPolicies()), WithExternalKeys(keys))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !c.SelfManaged() {
+		t.Fatal("WithExternalKeys did not put the CA into self-managed mode")
+	}
+	return c
+}
+
+// caKeyFor returns the fake store's ca_keys row of a purpose with the given
+// public key; the zero value means "not adopted".
+func caKeyFor(fs *fakeStore, purpose, publicKey string) store.CAKey {
+	for _, k := range fs.keys {
+		if k.Purpose == purpose && (publicKey == "" || k.PublicKey == publicKey) {
+			return k
+		}
+	}
+	return store.CAKey{}
+}
+
+// adoptedPurposes returns the purpose of every ca.key_adopted audit event, in
+// order — the audit trail of first adoptions.
+func adoptedPurposes(t *testing.T, fs *fakeStore) []string {
+	t.Helper()
+	var purposes []string
+	for _, e := range fs.events {
+		if e.EventType != EventKeyAdopted {
+			continue
+		}
+		var payload struct {
+			CAKeyID string `json:"ca_key_id"`
+			Purpose string `json:"purpose"`
+		}
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			t.Fatalf("ca.key_adopted payload: %v", err)
+		}
+		if payload.CAKeyID == "" {
+			t.Errorf("ca.key_adopted event without ca_key_id: %s", e.Payload)
+		}
+		purposes = append(purposes, payload.Purpose)
+	}
+	slices.Sort(purposes)
+	return purposes
+}
+
+// selfManagedUserRequest is a user request that verifies cleanly against a
+// CertChecker (valid_after slightly in the past, within the allowed backdate).
+func selfManagedUserRequest(t *testing.T) CertRequest {
+	t.Helper()
+	req := userRequest(t)
+	req.ValidAfter = time.Now().Add(-time.Minute)
+	req.ValidBefore = req.ValidAfter.Add(time.Hour)
+	return req
+}
+
+// TestSelfManagedRefusesInAppKeyCreation: in self-managed mode the key files are
+// the source of truth, so every path that would create key material fails with
+// ErrSelfManaged — and managed mode keeps working exactly as before.
+func TestSelfManagedRefusesInAppKeyCreation(t *testing.T) {
+	ctx := context.Background()
+	operations := []struct {
+		name string
+		run  func(*CA) error
+	}{
+		{"EnsureCAKeys", func(c *CA) error { return c.EnsureCAKeys(ctx) }},
+		{"EnsureMTLSCA", func(c *CA) error { return c.EnsureMTLSCA(ctx) }},
+		{"Rotate", func(c *CA) error { _, err := c.Rotate(ctx, store.CertTypeUser); return err }},
+	}
+	for _, op := range operations {
+		t.Run(op.name+"/self-managed", func(t *testing.T) {
+			fs := &fakeStore{}
+			c := newSelfManagedCA(t, fs, mountedKeys(t, t.TempDir()))
+			if err := op.run(c); !errors.Is(err, ErrSelfManaged) {
+				t.Fatalf("%s: got %v, want ErrSelfManaged", op.name, err)
+			}
+			if len(fs.keys) != 0 || len(fs.events) != 0 {
+				t.Errorf("%s persisted state despite refusing: %d keys, %d events", op.name, len(fs.keys), len(fs.events))
+			}
+		})
+		t.Run(op.name+"/managed", func(t *testing.T) {
+			c, fs := newTestCA(t)
+			if err := op.run(c); err != nil {
+				t.Fatalf("%s in managed mode: %v", op.name, err)
+			}
+			if len(fs.keys) == 0 {
+				t.Errorf("%s in managed mode created no key", op.name)
+			}
+		})
+	}
+}
+
+// TestAdoptExternalKeysRequiresSelfManagedMode: adopting without mounted keys is
+// a programming error, not a silent no-op.
+func TestAdoptExternalKeysRequiresSelfManagedMode(t *testing.T) {
+	c, _ := newTestCA(t)
+	if err := c.AdoptExternalKeys(context.Background()); err == nil {
+		t.Fatal("expected an error (managed mode has no external keys)")
+	}
+}
+
+// TestAdoptExternalKeysOnEmptyStore: the first start in self-managed mode
+// derives one ca_keys row per purpose from the mounted files — public metadata
+// only, no private key in the database — and audits each adoption once.
+func TestAdoptExternalKeysOnEmptyStore(t *testing.T) {
+	fs := &fakeStore{}
+	keys := mountedKeys(t, t.TempDir())
+	c := newSelfManagedCA(t, fs, keys)
+	ctx := context.Background()
+
+	if err := c.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys: %v", err)
+	}
+
+	wantPublicKeys := map[string]string{
+		store.CertTypeUser:  keys.User.PublicKey,
+		store.CertTypeHost:  keys.Host.PublicKey,
+		store.CAPurposeMTLS: keys.MTLS.CertPEM,
+	}
+	if len(fs.keys) != len(wantPublicKeys) {
+		t.Fatalf("adopted %d ca_keys rows, want %d (user, host, mtls)", len(fs.keys), len(wantPublicKeys))
+	}
+	for purpose, wantPublicKey := range wantPublicKeys {
+		key := caKeyFor(fs, purpose, "")
+		switch {
+		case key.ID == uuid.Nil:
+			t.Errorf("%s: no ca_keys row adopted", purpose)
+		case key.PublicKey != wantPublicKey:
+			t.Errorf("%s: adopted public key does not match the mounted material", purpose)
+		}
+		if key.EncryptedPrivateKey != nil {
+			t.Errorf("%s: private key material written to the database", purpose)
+		}
+		if key.State != store.CAKeyStateActive {
+			t.Errorf("%s: state = %q, want %q", purpose, key.State, store.CAKeyStateActive)
+		}
+		if key.Algorithm != "ed25519" {
+			t.Errorf("%s: algorithm = %q, want ed25519", purpose, key.Algorithm)
+		}
+	}
+
+	want := []string{store.CertTypeHost, store.CAPurposeMTLS, store.CertTypeUser} // sorted
+	if got := adoptedPurposes(t, fs); !slices.Equal(got, want) {
+		t.Errorf("ca.key_adopted events = %v, want exactly %v", got, want)
+	}
+	if len(fs.events) != len(want) {
+		t.Errorf("audit events = %v, want only the adoptions", fs.eventTypes())
+	}
+}
+
+// TestAdoptExternalKeysRecordsMountedAlgorithm is the regression guard for
+// ca_keys.algorithm: the column must describe the mounted material. The loader
+// accepts every SSH key type, so an ssh-rsa user CA has to be recorded as "rsa"
+// and not as the hardcoded "ed25519".
+func TestAdoptExternalKeysRecordsMountedAlgorithm(t *testing.T) {
+	dir := t.TempDir()
+	paths := newExternalKeyFixtures(t, dir)
+	paths.UserKeyFile = newRSASSHKeyFixture(t, dir, "user-ca-rsa")
+	keys := mustLoadExternalKeys(t, paths)
+
+	fs := &fakeStore{}
+	if err := newSelfManagedCA(t, fs, keys).AdoptExternalKeys(context.Background()); err != nil {
+		t.Fatalf("AdoptExternalKeys: %v", err)
+	}
+	want := map[string]string{
+		store.CertTypeUser:  "rsa",
+		store.CertTypeHost:  "ed25519",
+		store.CAPurposeMTLS: "ed25519",
+	}
+	for purpose, wantAlgorithm := range want {
+		if got := caKeyFor(fs, purpose, "").Algorithm; got != wantAlgorithm {
+			t.Errorf("%s: algorithm = %q, want %q", purpose, got, wantAlgorithm)
+		}
+	}
+}
+
+// TestAdoptExternalKeysReAdoptsSameRows: a restart with unchanged key files
+// re-uses the existing rows and audits nothing — the row is derived state.
+func TestAdoptExternalKeysReAdoptsSameRows(t *testing.T) {
+	fs := &fakeStore{}
+	keys := mountedKeys(t, t.TempDir())
+	ctx := context.Background()
+	if err := newSelfManagedCA(t, fs, keys).AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys: %v", err)
+	}
+	first := slices.Clone(fs.keys)
+
+	// Same mounted secret, fresh process.
+	restarted := newSelfManagedCA(t, fs, keys)
+	if err := restarted.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (restart): %v", err)
+	}
+
+	if len(fs.keys) != len(first) {
+		t.Fatalf("ca_keys rows after restart = %d, want %d", len(fs.keys), len(first))
+	}
+	for i := range first {
+		if fs.keys[i].ID != first[i].ID || fs.keys[i].State != first[i].State {
+			t.Errorf("%s row changed on restart: %s/%s → %s/%s",
+				first[i].Purpose, first[i].ID, first[i].State, fs.keys[i].ID, fs.keys[i].State)
+		}
+	}
+	if got := adoptedPurposes(t, fs); len(got) != 3 {
+		t.Errorf("ca.key_adopted events after restart = %v, want one per purpose from the first adoption", got)
+	}
+}
+
+// TestAdoptExternalKeysRotationViaFileSwap: committing a new key file rotates
+// the CA (D6) — the new key becomes active, the previous one is demoted to
+// retiring and stays in the bundle so hosts keep trusting both.
+func TestAdoptExternalKeysRotationViaFileSwap(t *testing.T) {
+	dir := t.TempDir()
+	paths := newExternalKeyFixtures(t, dir)
+	keysA := mustLoadExternalKeys(t, paths)
+	fs := &fakeStore{}
+	ctx := context.Background()
+	if err := newSelfManagedCA(t, fs, keysA).AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (key a): %v", err)
+	}
+
+	// The operator replaces the user CA key in the mounted secret.
+	rotated := paths
+	rotated.UserKeyFile, _ = newSSHKeyFixture(t, dir, "user-ca-next")
+	keysB := mustLoadExternalKeys(t, rotated)
+	c := newSelfManagedCA(t, fs, keysB)
+	if err := c.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (key b): %v", err)
+	}
+
+	newRow := caKeyFor(fs, store.CertTypeUser, keysB.User.PublicKey)
+	oldRow := caKeyFor(fs, store.CertTypeUser, keysA.User.PublicKey)
+	if newRow.State != store.CAKeyStateActive {
+		t.Errorf("new user key state = %q, want %q", newRow.State, store.CAKeyStateActive)
+	}
+	if oldRow.State != store.CAKeyStateRetiring {
+		t.Errorf("previous user key state = %q, want %q", oldRow.State, store.CAKeyStateRetiring)
+	}
+
+	bundle, err := c.Bundle(ctx, store.CertTypeUser)
+	if err != nil {
+		t.Fatalf("Bundle: %v", err)
+	}
+	if lines := strings.Split(strings.TrimSpace(bundle), "\n"); len(lines) != 2 {
+		t.Fatalf("bundle with 2 keys expected, got %d:\n%s", len(lines), bundle)
+	}
+	if !strings.Contains(bundle, keysA.User.PublicKey) || !strings.Contains(bundle, keysB.User.PublicKey) {
+		t.Error("bundle must contain the previous and the new user ca key")
+	}
+
+	// Only the new user key is a first adoption; host and mtls were re-adopted.
+	want := []string{store.CertTypeHost, store.CAPurposeMTLS, store.CertTypeUser, store.CertTypeUser} // sorted
+	if got := adoptedPurposes(t, fs); !slices.Equal(got, want) {
+		t.Errorf("ca.key_adopted events = %v, want %v", got, want)
+	}
+}
+
+// TestAdoptExternalKeysRetiredKeyRefused: re-mounting a key an operator retired
+// on purpose must fail at startup with an actionable message.
+func TestAdoptExternalKeysRetiredKeyRefused(t *testing.T) {
+	fs := &fakeStore{}
+	keys := mountedKeys(t, t.TempDir())
+	ctx := context.Background()
+	if err := newSelfManagedCA(t, fs, keys).AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys: %v", err)
+	}
+	userKey := caKeyFor(fs, store.CertTypeUser, keys.User.PublicKey)
+	if _, err := fs.UpdateCAKeyState(ctx, userKey.ID, store.CAKeyStateRetired); err != nil {
+		t.Fatalf("retire key: %v", err)
+	}
+
+	err := newSelfManagedCA(t, fs, keys).AdoptExternalKeys(ctx)
+	if !errors.Is(err, store.ErrCAKeyRetired) {
+		t.Fatalf("got %v, want store.ErrCAKeyRetired", err)
+	}
+	for _, want := range []string{"retired", store.CertTypeUser} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error is not actionable, %q missing: %v", want, err)
+		}
+	}
+}
+
+// TestSelfManagedIssue: certificates are signed with the mounted key and carry
+// the ID of the adopted row.
+func TestSelfManagedIssue(t *testing.T) {
+	fs := &fakeStore{}
+	keys := mountedKeys(t, t.TempDir())
+	c := newSelfManagedCA(t, fs, keys)
+	ctx := context.Background()
+	if err := c.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys: %v", err)
+	}
+
+	cert, record, err := c.Issue(ctx, RequesterUser, selfManagedUserRequest(t), IssueRef{Actor: "test"})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	mountedPub := keys.User.Signer.PublicKey()
+	if !bytes.Equal(cert.SignatureKey.Marshal(), mountedPub.Marshal()) {
+		t.Fatal("certificate was not signed with the mounted user ca key")
+	}
+	checker := ssh.CertChecker{
+		IsUserAuthority: func(auth ssh.PublicKey) bool {
+			return bytes.Equal(auth.Marshal(), mountedPub.Marshal())
+		},
+	}
+	if _, err := checker.Authenticate(fakeConnMetadata{user: "alice"}, cert); err != nil {
+		t.Errorf("certificate does not verify against the mounted ca key: %v", err)
+	}
+	if want := caKeyFor(fs, store.CertTypeUser, keys.User.PublicKey); record.CAKeyID != want.ID {
+		t.Errorf("ca_key_id = %s, want the adopted row %s", record.CAKeyID, want.ID)
+	}
+	if len(fs.certs) != 1 {
+		t.Errorf("persisted certificates = %d, want 1", len(fs.certs))
+	}
+}
+
+// TestSelfManagedIssueWithoutAdopt: without AdoptExternalKeys there is no signer
+// — and no database key to silently fall back to.
+func TestSelfManagedIssueWithoutAdopt(t *testing.T) {
+	c := newSelfManagedCA(t, &fakeStore{}, mountedKeys(t, t.TempDir()))
+	_, _, err := c.Issue(context.Background(), RequesterUser, selfManagedUserRequest(t), IssueRef{})
+	if err == nil {
+		t.Fatal("expected an error (AdoptExternalKeys was not called)")
+	}
+}
+
+// TestSelfManagedRetiringKeyStillSigns is the regression guard for signer
+// selection: a replica still running on the previous key file finds its row in
+// state "retiring" after another replica adopted the new key. The signer is
+// chosen by the adopted ID, not by state = active, so signing keeps working
+// until that replica is rolled.
+func TestSelfManagedRetiringKeyStillSigns(t *testing.T) {
+	dir := t.TempDir()
+	paths := newExternalKeyFixtures(t, dir)
+	keysA := mustLoadExternalKeys(t, paths)
+	fs := &fakeStore{}
+	ctx := context.Background()
+	if err := newSelfManagedCA(t, fs, keysA).AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (key a): %v", err)
+	}
+	rotated := paths
+	rotated.UserKeyFile, _ = newSSHKeyFixture(t, dir, "user-ca-next")
+	if err := newSelfManagedCA(t, fs, mustLoadExternalKeys(t, rotated)).AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (key b): %v", err)
+	}
+
+	old := newSelfManagedCA(t, fs, keysA)
+	if err := old.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("re-adopting the demoted key: %v", err)
+	}
+	rowA := caKeyFor(fs, store.CertTypeUser, keysA.User.PublicKey)
+	if rowA.State != store.CAKeyStateRetiring {
+		t.Fatalf("precondition: previous key state = %q, want %q", rowA.State, store.CAKeyStateRetiring)
+	}
+
+	cert, record, err := old.Issue(ctx, RequesterUser, selfManagedUserRequest(t), IssueRef{Actor: "test"})
+	if err != nil {
+		t.Fatalf("issuing with an adopted key in state retiring: %v", err)
+	}
+	if record.CAKeyID != rowA.ID {
+		t.Errorf("ca_key_id = %s, want the adopted (retiring) row %s", record.CAKeyID, rowA.ID)
+	}
+	if !bytes.Equal(cert.SignatureKey.Marshal(), keysA.User.Signer.PublicKey().Marshal()) {
+		t.Error("certificate was not signed with the mounted key of this replica")
+	}
+}
+
+// TestSelfManagedRetireKeyKeepsSigning is the regression guard for the signer
+// cache: step 3 of the D6 rotation is the operator retiring the previous row
+// after the transition window. That is a pure ca_keys state change and must not
+// touch the running process — its signer comes from the mounted key file, so
+// nothing in the database can invalidate it (and nothing could rebuild it).
+func TestSelfManagedRetireKeyKeepsSigning(t *testing.T) {
+	dir := t.TempDir()
+	paths := newExternalKeyFixtures(t, dir)
+	keysA := mustLoadExternalKeys(t, paths)
+	fs := &fakeStore{}
+	ctx := context.Background()
+	if err := newSelfManagedCA(t, fs, keysA).AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (key a): %v", err)
+	}
+
+	// The operator commits the new key file; this process runs on it and
+	// demoted the previous key to "retiring" on adoption.
+	rotated := paths
+	rotated.UserKeyFile, _ = newSSHKeyFixture(t, dir, "user-ca-next")
+	keysB := mustLoadExternalKeys(t, rotated)
+	c := newSelfManagedCA(t, fs, keysB)
+	if err := c.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys (key b): %v", err)
+	}
+	oldRow := caKeyFor(fs, store.CertTypeUser, keysA.User.PublicKey)
+	if oldRow.State != store.CAKeyStateRetiring {
+		t.Fatalf("precondition: previous key state = %q, want %q", oldRow.State, store.CAKeyStateRetiring)
+	}
+
+	// D6 step 3: the transition window is over, the old row is retired.
+	if err := c.RetireKey(ctx, oldRow.ID); err != nil {
+		t.Fatalf("RetireKey: %v", err)
+	}
+	if got := caKeyFor(fs, store.CertTypeUser, keysA.User.PublicKey); got.State != store.CAKeyStateRetired {
+		t.Fatalf("previous key state = %q, want %q", got.State, store.CAKeyStateRetired)
+	}
+
+	cert, record, err := c.Issue(ctx, RequesterUser, selfManagedUserRequest(t), IssueRef{Actor: "test"})
+	if err != nil {
+		t.Fatalf("issuing after retiring the previous ca key: %v", err)
+	}
+	newRow := caKeyFor(fs, store.CertTypeUser, keysB.User.PublicKey)
+	if record.CAKeyID != newRow.ID {
+		t.Errorf("ca_key_id = %s, want the adopted row %s", record.CAKeyID, newRow.ID)
+	}
+	if !bytes.Equal(cert.SignatureKey.Marshal(), keysB.User.Signer.PublicKey().Marshal()) {
+		t.Error("certificate was not signed with the mounted user ca key")
 	}
 }

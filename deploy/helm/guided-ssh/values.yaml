@@ -48,14 +48,42 @@ secrets:
       # Treiber-Default "prefer"
       sslmode: sslmode
   ca:
-    # Name des Secrets mit dem CA-Master-Key (Pflicht; darf secrets.db
-    # entsprechen). Beispiel:
+    # Herkunft der CA-Private-Keys (GSSH_CA_MODE):
+    #   managed      — der Server erzeugt sie beim ersten Start und legt sie
+    #                  AES-256-GCM-verschlüsselt in der Datenbank ab (Default,
+    #                  bisheriges Verhalten).
+    #   self-managed — alle drei CAs (user, host, mtls) kommen als Dateien aus
+    #                  einem Secret (GitOps/SOPS); die Datenbank speichert kein
+    #                  privates Schlüsselmaterial. Erfordert
+    #                  secrets.ca.selfManaged.existingSecret.
+    mode: managed
+    # Name des Secrets mit dem CA-Master-Key (Pflicht in BEIDEN Modi; darf
+    # secrets.db entsprechen). Beispiel:
     #   kubectl create secret generic guided-ssh-ca \
     #     --from-literal=ca-master-key="$(openssl rand -base64 32)"
     existingSecret: ""
     keys:
       # GSSH_CA_MASTER_KEY — Base64, 32 Bytes (AES-256)
       masterKey: ca-master-key
+    # Nur bei mode=self-managed ausgewertet.
+    selfManaged:
+      # Secret mit den vier CA-Dateien; wird read-only unter mountPath
+      # gemountet (Erzeugung: siehe README). Darf secrets.ca.existingSecret
+      # entsprechen — gemountet werden ausschließlich die vier Keys unten.
+      existingSecret: ""
+      # Key-Namen im Secret. Der Key-Name ist zugleich der Dateiname unter
+      # mountPath und damit der Wert der jeweiligen GSSH_CA_*_FILE-Variable.
+      keys:
+        # GSSH_CA_USER_KEY_FILE — OpenSSH-Private-Key-PEM der Benutzer-CA
+        userKey: user-ca
+        # GSSH_CA_HOST_KEY_FILE — OpenSSH-Private-Key-PEM der Host-CA
+        hostKey: host-ca
+        # GSSH_CA_MTLS_KEY_FILE — PKCS#8-PEM des Agent-mTLS-CA-Keys
+        mtlsKey: mtls-ca.key
+        # GSSH_CA_MTLS_CERT_FILE — X.509-CA-Zertifikat der Agent-mTLS-CA
+        mtlsCert: mtls-ca.crt
+      # Mount-Pfad im Server-Container (read-only).
+      mountPath: /etc/gssh/ca
 
 # Interne Datenbank — NUR für Test-Umgebungen. Startet Postgres als nativen
 # Sidecar (Init-Container mit restartPolicy Always, benötigt Kubernetes >= 1.29)

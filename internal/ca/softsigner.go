@@ -72,30 +72,9 @@ func NewSoftwareSigner(k *store.CAKey, masterKey []byte) (*SoftwareSigner, error
 
 // Sign baut das SSH-Zertifikat aus dem Request und signiert es.
 func (s *SoftwareSigner) Sign(_ context.Context, req CertRequest) (*ssh.Certificate, error) {
-	var certType uint32
-	switch req.CertType {
-	case store.CertTypeUser:
-		certType = ssh.UserCert
-	case store.CertTypeHost:
-		certType = ssh.HostCert
-	default:
-		return nil, fmt.Errorf("ca: unbekannter zertifikatstyp %q", req.CertType)
-	}
-	if req.PublicKey == nil {
-		return nil, fmt.Errorf("ca: request ohne public key")
-	}
-	cert := &ssh.Certificate{
-		Key:             req.PublicKey,
-		Serial:          req.Serial,
-		CertType:        certType,
-		KeyId:           req.KeyID,
-		ValidPrincipals: req.Principals,
-		ValidAfter:      uint64(req.ValidAfter.Unix()),  //nolint:gosec // Unix-Zeit nach 1970, nie negativ
-		ValidBefore:     uint64(req.ValidBefore.Unix()), //nolint:gosec // dito
-		Permissions: ssh.Permissions{
-			CriticalOptions: req.CriticalOptions,
-			Extensions:      req.Extensions,
-		},
+	cert, err := buildCert(req)
+	if err != nil {
+		return nil, err
 	}
 	if err := cert.SignCert(rand.Reader, s.signer); err != nil {
 		return nil, fmt.Errorf("ca: signieren: %w", err)

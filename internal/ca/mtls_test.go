@@ -186,6 +186,61 @@ func TestMTLSHandshake(t *testing.T) {
 	_ = clientConn.Close()
 }
 
+// TestSelfManagedMTLSCA: in self-managed mode the agent PKI runs entirely on the
+// mounted files — the ca_keys row is derived state without any private key, and
+// issued agent certificates chain to the mounted CA certificate.
+func TestSelfManagedMTLSCA(t *testing.T) {
+	fs := &fakeStore{}
+	keys := mountedKeys(t, t.TempDir())
+	c := newSelfManagedCA(t, fs, keys)
+	ctx := context.Background()
+	if err := c.AdoptExternalKeys(ctx); err != nil {
+		t.Fatalf("AdoptExternalKeys: %v", err)
+	}
+
+	pemStr, err := c.MTLSCAPEM(ctx)
+	if err != nil {
+		t.Fatalf("MTLSCAPEM: %v", err)
+	}
+	if pemStr != keys.MTLS.CertPEM {
+		t.Errorf("MTLSCAPEM does not return the mounted certificate:\n%s", pemStr)
+	}
+	if row := caKeyFor(fs, store.CAPurposeMTLS, ""); row.EncryptedPrivateKey != nil {
+		t.Error("mtls ca row must not carry private key material")
+	}
+
+	hostID := uuid.New()
+	csrPEM, _ := testCSR(t)
+	agentCertPEM, err := c.IssueAgentCert(ctx, hostID, csrPEM)
+	if err != nil {
+		t.Fatalf("IssueAgentCert: %v", err)
+	}
+	block, _ := pem.Decode([]byte(agentCertPEM))
+	if block == nil {
+		t.Fatalf("agent certificate is not pem: %s", agentCertPEM)
+	}
+	agentCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse agent certificate: %v", err)
+	}
+	if agentCert.Subject.CommonName != hostID.String() {
+		t.Errorf("cn = %q, want the host id", agentCert.Subject.CommonName)
+	}
+	if err := agentCert.CheckSignatureFrom(keys.MTLS.Certificate); err != nil {
+		t.Errorf("agent certificate was not signed by the mounted ca: %v", err)
+	}
+	pool, err := c.MTLSCAPool(ctx)
+	if err != nil {
+		t.Fatalf("MTLSCAPool: %v", err)
+	}
+	if _, err := agentCert.Verify(x509.VerifyOptions{
+		Roots:     pool,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}); err != nil {
+		t.Errorf("chain check against the mounted ca: %v", err)
+	}
+}
+
 // tlsPipe verbindet Client und Server über net.Pipe und führt den Handshake aus.
 func tlsPipe(t *testing.T, serverCfg, clientCfg *tls.Config) (*tls.Conn, *tls.Conn) {
 	t.Helper()

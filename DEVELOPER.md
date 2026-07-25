@@ -27,6 +27,10 @@ API-Server mit integrierter Zertifizierungsstelle (CA). Beim Start laufen die
 Datenbank-Migrationen; fehlen CA-Keys, werden sie erzeugt (je ein Ed25519-Key
 für Benutzer- und Host-Zertifikate, Private Keys AES-256-GCM-verschlüsselt in
 der Datenbank, siehe [ADR-014](docs/adr/014-software-signer-aes-gcm.md)).
+Alternativ liefert der Betreiber die CA-Keys selbst als Dateien
+(`GSSH_CA_MODE=self-managed`) — dann schreibt der Server kein privates
+Schlüsselmaterial in die Datenbank
+([docs/self-managed-ca.md](docs/self-managed-ca.md)).
 
 ```sh
 gssh-server -listen :8080                      # HTTP-API starten
@@ -43,7 +47,10 @@ Konfiguration über Umgebungsvariablen:
 | `GSSH_DB_USER` / `GSSH_DB_PASSWORD` | Datenbank-Benutzer und -Passwort (Pflicht) |
 | `GSSH_DB_NAME` | Datenbank-Name (Pflicht) |
 | `GSSH_DB_SSLMODE` | `sslmode` der Verbindung (Default `prefer`) |
-| `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`) |
+| `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`); in beiden CA-Modi Pflicht |
+| `GSSH_CA_MODE` | `managed` (Default) oder `self-managed`; letzteres erfordert die vier `GSSH_CA_*_FILE`-Variablen, die im Modus `managed` umgekehrt nicht gesetzt sein dürfen |
+| `GSSH_CA_USER_KEY_FILE` / `GSSH_CA_HOST_KEY_FILE` | OpenSSH-Private-Key-PEM der Benutzer- bzw. Host-CA (nur `self-managed`) |
+| `GSSH_CA_MTLS_KEY_FILE` / `GSSH_CA_MTLS_CERT_FILE` | PKCS#8-PEM und X.509-CA-Zertifikat der Agent-mTLS-CA (nur `self-managed`) |
 | `GSSH_AGENT_TLS_NAMES` | SANs des mTLS-Server-Zertifikats der Agent-API (Komma-getrennt; Default `localhost,127.0.0.1`) |
 | `GSSH_ADMIN_GROUP` | IdP-Gruppe, deren Mitglieder die Admin-API (`/v1/admin/…`) nutzen dürfen; leer ⇒ Admin-API deaktiviert |
 

@@ -9,7 +9,7 @@ Betriebssicht: [betriebshandbuch.md](betriebshandbuch.md).
 | Komponente | Beschreibung |
 |---|---|
 | `gssh-server` | Ein Go-Binary: REST-API + CA, eingebettete Web-UI (Angular, `go:embed`, ADR-003), Agent-API (mTLS, eigener Port), Metrics-Endpoint (eigener Port). Stateless — skaliert horizontal |
-| PostgreSQL | einzige Persistenz: Benutzer/Gruppen, Hosts/Tags, Grants, Zertifikats-Metadaten, verschlüsselte CA-Keys, append-only Audit (ADR-002) |
+| PostgreSQL | einzige Persistenz: Benutzer/Gruppen, Hosts/Tags, Grants, Zertifikats-Metadaten, verschlüsselte CA-Keys (im Modus `self-managed` kommen diese aus gemounteten Dateien), append-only Audit (ADR-002) |
 | `gssh` (CLI) | Benutzer-CLI: SSO-Login, Zertifikat nur im ssh-agent (ADR-016); `gssh ci-login` für GitLab-Jobs |
 | `gssh-admin` (CLI) | Grant-/CI-Grant-Verwaltung über die Admin-API, deklaratives `apply` (GitOps) |
 | Web-UI | read-mostly Ansichten + Grant-CRUD/Audit, Rollen aus IdP-Gruppen (ADR-020); nutzt dieselbe Admin-API |
@@ -169,7 +169,7 @@ Schema in `internal/store/migrations/` (goose, ADR-012/013):
 | `access_grants` | Gruppe × Tag-Selektor → Ziel-Principals, sudo, max. Laufzeit (ADR-018) |
 | `ci_grants` | Projekt/Namespace × Ref-Bedingung × Tags → Principals, max. Laufzeit (ADR-019) |
 | `service_accounts` | CI-Identitäten pro Projekt (`active` = Not-Aus) |
-| `ca_keys` | CA-Keys (Zwecke user/host/mtls), Private Keys AES-256-GCM-verschlüsselt, Lebenszyklus active/retiring/retired (ADR-014) |
+| `ca_keys` | CA-Keys (Zwecke user/host/mtls), Private Keys AES-256-GCM-verschlüsselt, Lebenszyklus active/retiring/retired (ADR-014); im Modus `self-managed` ohne Private Key — nur Public-Key-Metadaten zu den gemounteten Keydateien ([self-managed-ca.md](self-managed-ca.md)) |
 | `certificates` | jede Ausstellung: Serial, KeyID, Principals, Gültigkeit, Issuer-Kontext |
 | `audit_events` | append-only (Trigger + DB-Grants), nach Monat partitionierbar ([audit-retention.md](audit-retention.md)) |
 | `enrollment_tokens` | Token-Hashes, Tags, optionale Namensbindung, Ablauf/Verbrauch |

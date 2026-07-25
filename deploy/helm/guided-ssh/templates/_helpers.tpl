@@ -61,6 +61,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{/* CA-Modus (managed|self-managed) inkl. Validierung. Ein Render-Fehler ist
+freundlicher als ein CrashLoop: der Server lehnt eine halb konfigurierte
+Selbstverwaltung beim Start ab. */}}
+{{- define "guided-ssh.caMode" -}}
+{{- $mode := default "managed" .Values.secrets.ca.mode -}}
+{{- if not (has $mode (list "managed" "self-managed")) -}}
+{{- fail (printf "secrets.ca.mode muss \"managed\" oder \"self-managed\" sein (ist: %q)" $mode) -}}
+{{- end -}}
+{{- if and (eq $mode "self-managed") (not .Values.secrets.ca.selfManaged.existingSecret) -}}
+{{- fail "secrets.ca.mode=self-managed erfordert secrets.ca.selfManaged.existingSecret (Secret mit den vier CA-Dateien user-ca/host-ca/mtls-ca.key/mtls-ca.crt, siehe README)" -}}
+{{- end -}}
+{{- $mode -}}
+{{- end }}
+
+{{/* Pfad einer CA-Datei unterhalb des Mount-Verzeichnisses (Key-Name = Dateiname) */}}
+{{- define "guided-ssh.caFile" -}}
+{{- printf "%s/%s" (trimSuffix "/" .mountPath) .key -}}
+{{- end }}
+
 {{/* Env-Eintrag nur setzen, wenn der Wert nicht leer ist */}}
 {{- define "guided-ssh.env" -}}
 {{- if .value }}

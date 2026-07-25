@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/guided-traffic/guided-ssh/internal/ca"
 )
 
 func discardLogger() *slog.Logger {
@@ -33,6 +35,132 @@ func TestHostCertValidityFromEnv(t *testing.T) {
 		if _, err := hostCertValidityFromEnv(); err == nil {
 			t.Errorf("%q: fehler erwartet", invalid)
 		}
+	}
+}
+
+// setCAModeEnv sets every CA-mode variable so a subtest never inherits the
+// developer's environment or the previous case.
+func setCAModeEnv(t *testing.T, mode string, paths ca.ExternalKeyPaths) {
+	t.Helper()
+	t.Setenv(envCAMode, mode)
+	t.Setenv(envCAUserKeyFile, paths.UserKeyFile)
+	t.Setenv(envCAHostKeyFile, paths.HostKeyFile)
+	t.Setenv(envCAMTLSKeyFile, paths.MTLSKeyFile)
+	t.Setenv(envCAMTLSCertFile, paths.MTLSCertFile)
+}
+
+// TestCAModeFromEnv covers the validation matrix of SELF_MANAGED_CA.md (D2):
+// the modes are exclusive, and a half-configured deployment must fail at
+// startup with every offending variable named at once.
+func TestCAModeFromEnv(t *testing.T) {
+	all := ca.ExternalKeyPaths{
+		UserKeyFile:  "/etc/gssh/ca/user-ca",
+		HostKeyFile:  "/etc/gssh/ca/host-ca",
+		MTLSKeyFile:  "/etc/gssh/ca/mtls-ca.key",
+		MTLSCertFile: "/etc/gssh/ca/mtls-ca.crt",
+	}
+	tests := []struct {
+		name  string
+		mode  string
+		paths ca.ExternalKeyPaths
+		// wantMode/wantPaths are checked when no error is expected.
+		wantMode  string
+		wantPaths ca.ExternalKeyPaths
+		// wantVars must appear in the error, skipVars must not.
+		wantVars []string
+		skipVars []string
+	}{
+		{
+			name:     "unset defaults to managed",
+			wantMode: caModeManaged,
+		},
+		{
+			name:     "explicit managed without key files",
+			mode:     caModeManaged,
+			wantMode: caModeManaged,
+		},
+		{
+			name:     "managed with a single key file",
+			mode:     caModeManaged,
+			paths:    ca.ExternalKeyPaths{MTLSKeyFile: all.MTLSKeyFile},
+			wantVars: []string{envCAMTLSKeyFile},
+			skipVars: []string{envCAUserKeyFile, envCAHostKeyFile, envCAMTLSCertFile},
+		},
+		{
+			name:     "managed by default with all key files",
+			paths:    all,
+			wantVars: []string{envCAUserKeyFile, envCAHostKeyFile, envCAMTLSKeyFile, envCAMTLSCertFile},
+		},
+		{
+			name:      "self-managed with all key files",
+			mode:      caModeSelfManaged,
+			paths:     all,
+			wantMode:  caModeSelfManaged,
+			wantPaths: all,
+		},
+		{
+			name: "self-managed without the mtls certificate",
+			mode: caModeSelfManaged,
+			paths: ca.ExternalKeyPaths{
+				UserKeyFile: all.UserKeyFile, HostKeyFile: all.HostKeyFile, MTLSKeyFile: all.MTLSKeyFile,
+			},
+			wantVars: []string{envCAMTLSCertFile},
+			skipVars: []string{envCAUserKeyFile, envCAHostKeyFile, envCAMTLSKeyFile},
+		},
+		{
+			name:     "self-managed with only the user key",
+			mode:     caModeSelfManaged,
+			paths:    ca.ExternalKeyPaths{UserKeyFile: all.UserKeyFile},
+			wantVars: []string{envCAHostKeyFile, envCAMTLSKeyFile, envCAMTLSCertFile},
+			skipVars: []string{envCAUserKeyFile},
+		},
+		{
+			name:     "self-managed without any key file",
+			mode:     caModeSelfManaged,
+			wantVars: []string{envCAUserKeyFile, envCAHostKeyFile, envCAMTLSKeyFile, envCAMTLSCertFile},
+		},
+		{
+			name:     "unknown mode",
+			mode:     "gitops",
+			wantVars: []string{envCAMode, "gitops", caModeManaged, caModeSelfManaged},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setCAModeEnv(t, tc.mode, tc.paths)
+			mode, paths, err := caModeFromEnv()
+
+			if len(tc.wantVars) == 0 {
+				if err != nil {
+					t.Fatalf("caModeFromEnv: %v", err)
+				}
+				if mode != tc.wantMode {
+					t.Errorf("mode = %q, want %q", mode, tc.wantMode)
+				}
+				if paths != tc.wantPaths {
+					t.Errorf("paths = %+v, want %+v", paths, tc.wantPaths)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("expected an error, got mode %q and paths %+v", mode, paths)
+			}
+			if mode != "" || paths != (ca.ExternalKeyPaths{}) {
+				t.Errorf("misconfiguration must not yield a usable config: %q %+v", mode, paths)
+			}
+			for _, want := range tc.wantVars {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not name %s: %v", want, err)
+				}
+			}
+			for _, skip := range tc.skipVars {
+				if strings.Contains(err.Error(), skip) {
+					t.Errorf("error wrongly names %s: %v", skip, err)
+				}
+			}
+		})
 	}
 }
 

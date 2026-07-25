@@ -74,8 +74,94 @@ reviewbar. Die Cluster-Kustomization entschlüsselt beim Apply
 `secrets.yaml` sind Platzhalter-Beispiele; im echten Repo niemals Klartext
 committen. Das Chart selbst erzeugt keine Secrets, es referenziert nur
 existierende Secrets (`secrets.db.existingSecret` mit den einzelnen
-Postgres-Verbindungsdaten, `secrets.ca.existingSecret` mit dem CA-Master-Key)
+Postgres-Verbindungsdaten, `secrets.ca.existingSecret` mit dem CA-Master-Key,
+optional `secrets.ca.selfManaged.existingSecret` mit den CA-Keys)
 — SOPS und external-secrets sind damit gleichwertig austauschbar.
+
+## Self-managed CA-Keys
+
+Im Default-Modus (`secrets.ca.mode: managed`) erzeugt der Server die
+CA-Private-Keys beim ersten Start und legt sie verschlüsselt in der Datenbank
+ab — die Datenbank ist damit der Trust-Anchor und lässt sich nicht per Git
+verwalten. Mit `self-managed` kommen alle drei CAs (Benutzer-CA, Host-CA,
+Agent-mTLS-CA) aus einem gemounteten Secret; die Datenbank hält nur noch die
+öffentlichen Metadaten, und **dieses Repo wird die Quelle der Wahrheit für die
+CA**. Hintergrund, Fehlerbilder und Startup-Fehlermeldungen:
+[docs/self-managed-ca.md](../../docs/self-managed-ca.md).
+
+### Einmalige Erzeugung
+
+```sh
+ssh-keygen -t ed25519 -f user-ca -N '' -C 'guided-ssh user ca'
+ssh-keygen -t ed25519 -f host-ca -N '' -C 'guided-ssh host ca'
+gssh-server gen-mtls-ca -out mtls-ca      # erzeugt mtls-ca.key (0600) + mtls-ca.crt
+```
+
+Ins Secret gehören nur die **privaten** Dateien (`user-ca`, `host-ca`,
+`mtls-ca.key`) plus das Zertifikat `mtls-ca.crt` — **nicht** die
+`.pub`-Dateien; die öffentlichen Schlüssel leitet der Server selbst ab. Die
+Keys müssen unverschlüsselt sein (kein Passphrase-Schutz), sonst verweigert
+der Server den Start.
+
+Die vier Dateien als `stringData` in
+`apps/overlays/<env>/secrets.yaml` eintragen (Vorlage: Secret
+`guided-ssh-ca-keys` in `apps/overlays/production/secrets.yaml` — die dort
+eingetragenen Keys sind öffentlich bekannte Wegwerf-Beispiele und **müssen**
+ersetzt werden) und anschließend verschlüsseln:
+
+```sh
+sops --encrypt --in-place apps/overlays/production/secrets.yaml
+```
+
+### Aktivieren
+
+Der Modus ist eine Chart-Value, gehört also in den HelmRelease-Patch der
+Umgebung (`apps/overlays/<env>/helmrelease-patch.yaml`):
+
+```yaml
+  values:
+    secrets:
+      ca:
+        mode: self-managed
+        # Master-Key bleibt Pflicht: er leitet den Session-Key der Web-UI ab.
+        existingSecret: guided-ssh-ca
+        selfManaged:
+          existingSecret: guided-ssh-ca-keys
+```
+
+Beim Start übernimmt der Server die gemounteten Keys in die Tabelle `ca_keys`
+(ohne Private Key, Zustand `active`) — eine leere Datenbank plus dieses Repo
+reproduziert damit dieselbe CA.
+
+### Rotation
+
+Rotation ist ein Commit, kein Eingriff am laufenden System:
+
+1. Neues Schlüsselpaar erzeugen (Kommandos oben, in ein leeres Verzeichnis).
+2. Den Dateiinhalt im SOPS-verschlüsselten Secret ersetzen (`sops
+   apps/overlays/production/secrets.yaml`), committen, mergen — Flux rollt das
+   Deployment neu aus.
+3. Beim Start übernimmt der Server den neuen Key als `active` und setzt den
+   bisherigen auf `retiring`. Dessen **Public Key bleibt im CA-Bundle**
+   (`GET /v1/ca/bundle/{user|host}`), Hosts vertrauen also weiter den bereits
+   ausgestellten Zertifikaten; die Agenten holen das Bundle stündlich.
+4. Sind alle mit dem alten Key signierten Zertifikate abgelaufen
+   (Benutzer-Zertifikate ≤ 16 h, Host-Zertifikate 30 Tage), den alten Key
+   endgültig zurückziehen — derzeit per SQL, ein Admin-Kommando fehlt noch:
+
+   ```sql
+   UPDATE ca_keys SET state = 'retired', retired_at = now()
+    WHERE purpose = 'user' AND state = 'retiring';
+   ```
+
+Ein bereits auf `retired` gesetzter Key darf nicht erneut gemountet werden —
+der Server bricht dann beim Start mit einer entsprechenden Meldung ab.
+
+Das Übergangsfenster gilt nur für die SSH-CAs: Client-Zertifikate der Agenten
+prüft der Server ausschließlich gegen die **aktive** mTLS-CA. Ein Wechsel von
+`mtls-ca.key`/`mtls-ca.crt` macht alle ausgestellten Agent-Zertifikate
+ungültig und erfordert ein Re-Enrollment der Hosts — die drei Dateien also
+nicht „mitrotieren", wenn nur die Benutzer-CA getauscht werden soll.
 
 ## Grants deklarativ (GitOps)
 
