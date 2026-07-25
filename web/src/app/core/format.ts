@@ -40,6 +40,19 @@ export function formatSeconds(seconds: number): string {
   return `${seconds} s`;
 }
 
+/** formatBytes formatiert eine Byte-Größe kompakt (14,8 MB). */
+export function formatBytes(bytes: number): string {
+  const units = ['B', 'kB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  const rounded = unit === 0 ? value : Math.round(value * 10) / 10;
+  return `${rounded.toLocaleString('de-DE')} ${units[unit]}`;
+}
+
 /** formatTimestamp formatiert einen ISO-Zeitstempel lokal und lesbar. */
 export function formatTimestamp(iso: string | null | undefined): string {
   if (!iso) {

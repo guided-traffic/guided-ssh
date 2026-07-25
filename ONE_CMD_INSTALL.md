@@ -952,9 +952,9 @@ Maßnahmen und bewusst akzeptierte Restrisiken:
 - [x] C2: `POST /v1/admin/enroll-tokens` (roleAdmin, TTL-Default 1 h, Gate-geprüft, `install_command`, Audit `host.enroll_token.created` ohne Token) + Tests
 
 ### Phase D — Frontend
-- [ ] D1: Button „Host hinzufügen“ in `hosts.ts`, disabled + Klartext-Hinweis aus Manifest-`missing`
-- [ ] D2: Dialog (Formular mit TTL/Tags/Hostname/Session-Audit-Erklärtext → Mint; Ergebnis mit Token-Copy, Arch-Dropdown, Agent-Liste, Zwei-Schritt-Alternative)
-- [ ] D3: `api/openapi.yaml` + Client (regeneriert oder handgeschrieben im `fn/`-Muster)
+- [x] D1: Button „Host hinzufügen“ in `hosts.ts`, disabled + Klartext-Hinweis aus Manifest-`missing`
+- [x] D2: Dialog (Formular mit TTL/Tags/Hostname/Session-Audit-Erklärtext → Mint; Ergebnis mit Token-Copy, Arch-Dropdown, Agent-Liste, Zwei-Schritt-Alternative)
+- [x] D3: `api/openapi.yaml` + Client (mit `make web-api` regeneriert: `fn/rollout/*`, Modelle `AgentManifest`/`AgentBinary`/`EnrollToken*`/`RolloutUnavailable`)
 
 ### Phase E — Doku, Helm, E2E
 - [ ] E1: Helm `hostRollout`-Block (`enabled` + `required`-Checks, Pin-Quellen-Rendering, Secret-Volume nur `tls.crt` ohne `subPath`, je Parameter ≤ 2 Zeilen Doku) + README-Tabelle/Snippets
