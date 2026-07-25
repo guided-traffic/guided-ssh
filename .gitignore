@@ -10,6 +10,11 @@ web/dist/*
 !web/dist/.gitkeep
 web/.angular/
 
+# Agent-Binaries für den One-Command-Install: entstehen im Docker-Build (bzw.
+# lokal via `make cross`) und werden per go:embed eingebettet — nie committen.
+internal/agentdist/bin/*
+!internal/agentdist/bin/.gitkeep
+
 # Helm: heruntergeladene Subchart-Archive (Chart.lock bleibt versioniert)
 deploy/helm/guided-ssh/charts/
 

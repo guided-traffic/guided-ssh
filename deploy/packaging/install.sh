@@ -22,7 +22,7 @@ echo "lade ${URL}"
 curl -fsSL -o /usr/bin/gssh-agentd "${URL}"
 chmod 755 /usr/bin/gssh-agentd
 
-UNIT_URL="https://raw.githubusercontent.com/${REPO}/${VERSION}/deploy/packaging/gssh-agentd.service"
+UNIT_URL="https://raw.githubusercontent.com/${REPO}/${VERSION}/internal/agentdist/gssh-agentd.service"
 curl -fsSL -o /lib/systemd/system/gssh-agentd.service "${UNIT_URL}"
 
 mkdir -p /var/lib/guided-ssh
