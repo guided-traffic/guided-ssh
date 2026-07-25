@@ -198,6 +198,32 @@
       ]
     },
     {
+      "description": "npm: automerge minor and patch updates after CI passes",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "npm: require manual review for major updates",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "major-update"
+      ]
+    },
+    {
       "description": "Use 'fix' instead of 'chore' for dependency updates",
       "semanticCommitType": "fix",
       "matchUpdateTypes": [
