@@ -182,6 +182,26 @@ agent:
     port: 8443
     annotations: {}
 
+hostRollout:
+  # One-Command-Host-Install (UI-Button "Host hinzufügen"). Bei true werden
+  # die Pflicht-Envs verlangt (helm scheitert sonst beim Rendern).
+  enabled: false
+  # Externe mTLS-Agent-URL für enrollte Agenten (Pflicht bei enabled).
+  agentPublicUrl: ""
+  # Externe Public-URL (install_command + Pin-Dial); leer = config.oidc.uiBaseURL.
+  publicUrl: ""
+  pin:
+    # Pin-Quelle: dial (Default) | file | static — siehe Tabelle im README.
+    source: dial
+    # source=static: Base64-SPKI-Pin (openssl-Snippet im README).
+    static: ""
+    # source=file: TLS-Secret des Ingress; Chart mountet NUR tls.crt.
+    certSecretName: ""
+    # Refresh-Intervall des Pin-Dials (Go-Duration).
+    refreshInterval: 5m
+  # Binary-Downloads pro Client-IP und Minute (0 = aus).
+  downloadRpm: 10
+
 # Prometheus-Metriken auf eigenem, nicht ingress-exponiertem Port.
 metrics:
   enabled: true

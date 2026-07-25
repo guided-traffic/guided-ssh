@@ -1,9 +1,11 @@
-# Test-Host für die Phase-5/7-Integrationstests: alpine + sshd + zwei lokale
+# Test-Host für die Phase-5/7/E-Integrationstests: alpine + sshd + zwei lokale
 # Benutzer (alice: Principal-Match, deploy: Grant- und CI-Pfad).
 # python3: Ziel-Interpreter für den Ansible-Ping im Phase-7-E2E-Test.
+# curl + ca-certificates: das install.sh des One-Command-Installs verlangt curl
+# (alpine bringt keins mit) und lädt über HTTPS.
 FROM alpine:3.24
 
-RUN apk add --no-cache openssh-server bash python3 \
+RUN apk add --no-cache openssh-server bash python3 curl ca-certificates \
     && ssh-keygen -A \
     && adduser -D -s /bin/sh alice \
     && adduser -D -s /bin/sh deploy \

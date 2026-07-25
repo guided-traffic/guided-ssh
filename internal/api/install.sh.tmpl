@@ -147,7 +147,10 @@ main() {
     chmod 700 "$STATE"
 
     # 6. systemd-Unit. Bewusst /etc/systemd/system (nicht /lib — das gehört den
-    #    Paketen); Script- und deb/rpm-Install nicht mischen.
+    #    Paketen); Script- und deb/rpm-Install nicht mischen. Das Verzeichnis
+    #    fehlt auf Hosts ohne systemd (--no-systemd) — die Unit wird trotzdem
+    #    abgelegt, damit ein späterer systemd-Host sie vorfindet.
+    mkdir -p "$(dirname "$UNIT")"
     cat >"$UNIT" <<'UNIT_EOF'
 {{.Unit}}UNIT_EOF
 

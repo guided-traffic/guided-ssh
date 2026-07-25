@@ -957,10 +957,13 @@ Maßnahmen und bewusst akzeptierte Restrisiken:
 - [x] D3: `api/openapi.yaml` + Client (mit `make web-api` regeneriert: `fn/rollout/*`, Modelle `AgentManifest`/`AgentBinary`/`EnrollToken*`/`RolloutUnavailable`)
 
 ### Phase E — Doku, Helm, E2E
-- [ ] E1: Helm `hostRollout`-Block (`enabled` + `required`-Checks, Pin-Quellen-Rendering, Secret-Volume nur `tls.crt` ohne `subPath`, je Parameter ≤ 2 Zeilen Doku) + README-Tabelle/Snippets
-- [ ] E2: README (en) + DEVELOPER (Install-Weg, Nicht-Mischen-Hinweis, Dual-Cert-Zeile, Dev-Degradation)
-- [ ] E3: Restrisiken dokumentiert (argv/History, Version, systemctl-Lücke)
-- [ ] E4: E2E-Smoke (Fixture + curl, `NewFromFS`, statischer Pin via `FromCertificate`, Mint → `install.sh --no-systemd` → enrolled + Agent läuft)
+- [x] E1: Helm `hostRollout`-Block (`enabled` + `required`-Checks, Pin-Quellen-Rendering, Secret-Volume nur `tls.crt` ohne `subPath`, je Parameter ≤ 2 Zeilen Doku) + README-Tabelle/Snippets
+- [x] E2: README (en) + DEVELOPER (Install-Weg, Nicht-Mischen-Hinweis, Dual-Cert-Zeile, Dev-Degradation)
+- [x] E3: Restrisiken dokumentiert (argv/History, Version, systemctl-Lücke)
+- [x] E4: E2E-Smoke (Fixture + curl, `NewFromFS`, statischer Pin via `FromCertificate`, Mint → `install.sh --no-systemd` → enrolled + Agent läuft)
+  (Nachtrag aus dem E2E: das Script legt `/etc/systemd/system` jetzt selbst an —
+  auf einem Host ohne systemd, also genau der `--no-systemd`-Zielgruppe, fehlt
+  das Verzeichnis und das Schreiben der Unit scheiterte.)
 
 ---
 

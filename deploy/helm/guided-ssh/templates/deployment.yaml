@@ -178,6 +178,9 @@ spec:
             - name: GSSH_RATE_TRUST_PROXY
               value: "true"
             {{- end }}
+            {{- if .Values.hostRollout.enabled }}
+            {{- include "guided-ssh.hostRolloutEnv" . | nindent 12 }}
+            {{- end }}
             {{- with .Values.config.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -209,13 +212,23 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
+          {{- $publicPinFile := and .Values.hostRollout.enabled (eq (default "dial" .Values.hostRollout.pin.source) "file") }}
+          {{- if or (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile }}
           volumeMounts:
+            {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
             - name: ca-keys
               mountPath: {{ .Values.secrets.ca.selfManaged.mountPath }}
               readOnly: true
+            {{- end }}
+            {{- if $publicPinFile }}
+            # Ohne subPath: nur so aktualisiert das Kubelet den Mount nach einer
+            # Cert-Rotation (der Server liest die Datei bei jedem Pin-Abruf neu).
+            - name: public-tls
+              mountPath: {{ include "guided-ssh.publicPinDir" . }}
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if or .Values.internalDatabase.enabled (eq (include "guided-ssh.caMode" .) "self-managed") }}
+      {{- if or .Values.internalDatabase.enabled (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile }}
       volumes:
         {{- if .Values.internalDatabase.enabled }}
         # Ephemeral: Pod-Neustart = leere Datenbank (Test-Umgebung).
@@ -241,6 +254,17 @@ spec:
               - key: {{ .keys.mtlsCert }}
                 path: {{ .keys.mtlsCert }}
         {{- end }}
+        {{- end }}
+        {{- if $publicPinFile }}
+        # Nur tls.crt projizieren — der private Schlüssel des Ingress-Zertifikats
+        # hat im Server-Container nichts zu suchen.
+        - name: public-tls
+          secret:
+            secretName: {{ .Values.hostRollout.pin.certSecretName }}
+            defaultMode: 0444
+            items:
+              - key: tls.crt
+                path: tls.crt
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
