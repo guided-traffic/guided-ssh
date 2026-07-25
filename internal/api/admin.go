@@ -102,6 +102,11 @@ type adminContext struct {
 	auditorGroup  string
 	readonlyGroup string
 	logger        *slog.Logger
+	// rollout gated das Token-Minting genauso wie die öffentlichen
+	// Rollout-Routen; publicBaseURL ist die Basis des install_command
+	// (das Gate garantiert, dass sie gesetzt ist).
+	rollout       rolloutGate
+	publicBaseURL string
 }
 
 // registerAdminRoutes hängt die Admin-API an den Mux. Ohne OIDC oder ohne
@@ -126,6 +131,8 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 		auditorGroup:  deps.AuditorGroup,
 		readonlyGroup: deps.ReadOnlyGroup,
 		logger:        deps.Logger,
+		rollout:       newRolloutGate(deps),
+		publicBaseURL: deps.PublicBaseURL,
 	}
 	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(roleReadOnly, admin.handleListGrants))
 	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(roleAdmin, admin.handleCreateGrant))

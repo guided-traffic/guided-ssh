@@ -5,8 +5,10 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +29,11 @@ type UIStore interface {
 	ListCertificates(ctx context.Context, limit int) ([]store.Certificate, error)
 	ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]store.AuditEvent, error)
 	CountAuditEvents(ctx context.Context, f store.AuditFilter) (int64, error)
+
+	// Enrollment-Token-Minting der UI (Phase C): Record anlegen und das
+	// Ereignis auditieren — der Klartext bleibt außerhalb des Stores.
+	CreateEnrollmentToken(ctx context.Context, t *store.EnrollmentToken) error
+	AppendAuditEvent(ctx context.Context, e *store.AuditEvent) error
 }
 
 // Grenzen der Audit-Abfragen: Seitengröße der UI und Obergrenze des Exports
@@ -51,6 +58,7 @@ func registerUIRoutes(mux *http.ServeMux, admin *adminContext) {
 	mux.HandleFunc("GET /v1/admin/certificates", admin.authorized(roleReadOnly, admin.handleListCertificates))
 	mux.HandleFunc("GET /v1/admin/audit", admin.authorized(roleAuditor, admin.handleListAudit))
 	mux.HandleFunc("GET /v1/admin/audit/export", admin.authorized(roleAuditor, admin.handleExportAudit))
+	mux.HandleFunc("POST /v1/admin/enroll-tokens", admin.authorized(roleAdmin, admin.handleCreateEnrollToken))
 }
 
 // hostJSON ist die API-Repräsentation eines Hosts für die UI.
@@ -196,6 +204,107 @@ func (a *adminContext) handleUpdateServiceAccount(w http.ResponseWriter, r *http
 		return
 	}
 	writeJSON(w, http.StatusOK, toServiceAccountJSON(updated))
+}
+
+// Grenzen der TTL eines über die UI gemünzten Enrollment-Tokens. Der Default
+// ist bewusst kürzer als der 24-h-Default der CLI: UI-Tokens entstehen
+// unmittelbar vor dem Gebrauch, das Leak-Fenster bleibt damit klein.
+const (
+	enrollTokenDefaultTTL = time.Hour
+	enrollTokenMinTTL     = time.Minute
+	enrollTokenMaxTTL     = 24 * time.Hour
+)
+
+// createEnrollTokenRequest ist der Body von POST /v1/admin/enroll-tokens.
+// Alle Felder sind optional.
+type createEnrollTokenRequest struct {
+	// Hostname bindet das Token an genau diesen Host (leer ⇒ ungebunden).
+	Hostname string            `json:"hostname,omitempty"`
+	Tags     map[string]string `json:"tags,omitempty"`
+	// TTLSeconds ist die Gültigkeitsdauer; 0 ⇒ enrollTokenDefaultTTL.
+	TTLSeconds int64 `json:"ttl_seconds,omitempty"`
+	// SessionAudit steuert allein das --session-audit-Flag im
+	// install_command; am Token wird es nicht gespeichert.
+	SessionAudit bool `json:"session_audit,omitempty"`
+}
+
+// createEnrollTokenResponse enthält den Klartext des Tokens — einmalig, er
+// wird weder geloggt noch gespeichert.
+type createEnrollTokenResponse struct {
+	Token          string    `json:"token"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	InstallCommand string    `json:"install_command"`
+}
+
+// handleCreateEnrollToken münzt ein Enrollment-Token für den
+// One-Command-Host-Install und liefert den fertigen Install-Befehl. Gegated
+// wie die übrigen Rollout-Endpunkte: ohne Pin, Binaries, Agent- oder
+// Public-URL gibt es kein Token (ein Token, das zu keinem funktionierenden
+// Install führt, hilft niemandem).
+func (a *adminContext) handleCreateEnrollToken(w http.ResponseWriter, r *http.Request, _ *auth.Claims, actor string) {
+	if !a.rollout.allow(w, r) {
+		return
+	}
+	var req createEnrollTokenRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "request-body ungültig", http.StatusBadRequest)
+		return
+	}
+	ttl := enrollTokenDefaultTTL
+	if req.TTLSeconds != 0 {
+		ttl = time.Duration(req.TTLSeconds) * time.Second
+		if ttl < enrollTokenMinTTL || ttl > enrollTokenMaxTTL {
+			http.Error(w, "ttl_seconds muss zwischen 60 und 86400 liegen", http.StatusBadRequest)
+			return
+		}
+	}
+
+	token, record, err := store.NewEnrollmentToken(req.Hostname, req.Tags, ttl)
+	if err != nil {
+		a.logger.Error("admin: enrollment-token erzeugen fehlgeschlagen", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if err := a.ui.CreateEnrollmentToken(r.Context(), record); err != nil {
+		a.logger.Error("admin: enrollment-token speichern fehlgeschlagen", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Audit ohne Token und ohne Hash (der Klartext verlässt diesen Handler nur
+	// in der Antwort). Schlägt das Schreiben fehl, existiert das Token
+	// bereits — es zurückzuhalten ergäbe nur ein unbenutzbares Token in der
+	// Datenbank; die Lücke wird stattdessen laut geloggt.
+	payload, err := json.Marshal(map[string]any{
+		"hostname": req.Hostname, "tags": record.Tags,
+		"ttl_seconds": int64(ttl / time.Second), "expires_at": record.ExpiresAt,
+	})
+	if err == nil {
+		err = a.ui.AppendAuditEvent(r.Context(), &store.AuditEvent{
+			EventType: store.EventEnrollTokenCreated, Actor: actor, Payload: payload,
+		})
+	}
+	if err != nil {
+		a.logger.Error("admin: audit-event des enrollment-tokens fehlgeschlagen",
+			"actor", actor, "hostname", req.Hostname, "error", err)
+	}
+
+	writeJSON(w, http.StatusCreated, createEnrollTokenResponse{
+		Token:          token,
+		ExpiresAt:      record.ExpiresAt,
+		InstallCommand: installCommand(a.publicBaseURL, token, req.SessionAudit),
+	})
+}
+
+// installCommand baut den Befehl, den der Operator auf dem Host ausführt. Die
+// --arch-Variante ergänzt das Frontend aus dem Manifest; ohne Angabe ermittelt
+// das Script die Architektur selbst.
+func installCommand(baseURL, token string, sessionAudit bool) string {
+	cmd := "curl -fsSL " + strings.TrimRight(baseURL, "/") + "/install.sh | sudo sh -s -- --token " + token
+	if sessionAudit {
+		cmd += " --session-audit"
+	}
+	return cmd
 }
 
 // certificateJSON ist die API-Repräsentation eines ausgestellten Zertifikats

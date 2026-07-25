@@ -8,8 +8,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
@@ -375,21 +373,10 @@ func runEnrollToken(stdout, stderr io.Writer, args []string) int {
 	}
 	defer st.Close()
 
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	token, record, err := store.NewEnrollmentToken(*name, tags, *ttl)
+	if err != nil {
 		fmt.Fprintf(stderr, "gssh-server: token erzeugen: %v\n", err)
 		return 1
-	}
-	token := "gssh-et-" + base64.RawURLEncoding.EncodeToString(buf)
-	hash := sha256.Sum256([]byte(token))
-
-	record := &store.EnrollmentToken{
-		TokenHash: hash[:],
-		Tags:      tags,
-		ExpiresAt: time.Now().Add(*ttl),
-	}
-	if *name != "" {
-		record.HostName = name
 	}
 	if err := st.CreateEnrollmentToken(ctx, record); err != nil {
 		fmt.Fprintf(stderr, "gssh-server: token speichern: %v\n", err)

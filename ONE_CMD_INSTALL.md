@@ -948,8 +948,8 @@ Maßnahmen und bewusst akzeptierte Restrisiken:
 - [x] B3: `GET /install.sh` — Template (Base-URL, Agent-URL, Version, per-Arch-Hash, Pflicht-Pin, Unit-Here-Doc) + Script nach Spezifikation (main()-Wrapper, `set -eu` ohne pipefail, trap, Same-Dir-Tempfile + atomarem `mv`, Enroll-Degradation, restart-vs-enable, Health-Check Socket ≤ 10 s, Flags `--arch`/`--session-audit`/`--no-systemd`) + Handler-/`sh -n`-Tests
 
 ### Phase C — Token-Minting-API
-- [ ] C1: `store.NewEnrollmentToken` extrahieren, `runEnrollToken` umstellen (CLI-Verhalten unverändert)
-- [ ] C2: `POST /v1/admin/enroll-tokens` (roleAdmin, TTL-Default 1 h, Gate-geprüft, `install_command`, Audit `host.enroll_token.created` ohne Token) + Tests
+- [x] C1: `store.NewEnrollmentToken` extrahieren, `runEnrollToken` umstellen (CLI-Verhalten unverändert)
+- [x] C2: `POST /v1/admin/enroll-tokens` (roleAdmin, TTL-Default 1 h, Gate-geprüft, `install_command`, Audit `host.enroll_token.created` ohne Token) + Tests
 
 ### Phase D — Frontend
 - [ ] D1: Button „Host hinzufügen“ in `hosts.ts`, disabled + Klartext-Hinweis aus Manifest-`missing`
