@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/guided-traffic/guided-ssh/internal/api"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 )
 
@@ -304,6 +305,63 @@ func TestSetupRateLimit(t *testing.T) {
 	t.Setenv(envFailPerMinute, "-3")
 	if rl := setupRateLimit(logger); rl == nil {
 		t.Fatal("ungültige werte: default-limiter erwartet")
+	}
+}
+
+// setPinEnv setzt alle Pin-Variablen, damit kein Subtest die Umgebung des
+// Entwicklers oder des vorherigen Falls erbt.
+func setPinEnv(t *testing.T, staticPin, certFile, refresh, publicURL, uiBaseURL string) {
+	t.Helper()
+	t.Setenv(envPublicPin, staticPin)
+	t.Setenv(envPublicPinCert, certFile)
+	t.Setenv(envPublicPinRefresh, refresh)
+	t.Setenv(envPublicURL, publicURL)
+	t.Setenv(envUIBaseURL, uiBaseURL)
+}
+
+// TestPinConfigFromEnv: ein ungültiger statischer Pin oder ein unbrauchbares
+// Refresh-Intervall bricht den Start ab (fail-fast) — still ohne Pin
+// weiterzulaufen wäre die gefährlichere Variante.
+func TestPinConfigFromEnv(t *testing.T) {
+	setPinEnv(t, "", "", "", "", "")
+	cfg, err := pinConfigFromEnv()
+	if err != nil || cfg != (api.PinProviderConfig{}) {
+		t.Fatalf("leer: %+v %v (leere config, nil erwartet)", cfg, err)
+	}
+
+	// GSSH_PUBLIC_URL ist die Dial-Quelle, GSSH_UI_BASE_URL der Fallback;
+	// der abschließende Slash gehört nicht in die Basis-URL.
+	setPinEnv(t, "", "", "", "https://gssh.example.com/", "https://ui.example.com")
+	if cfg, err = pinConfigFromEnv(); err != nil || cfg.DialURL != "https://gssh.example.com" {
+		t.Fatalf("public-url: %+v %v", cfg, err)
+	}
+	setPinEnv(t, "", "", "", "", "https://ui.example.com")
+	if cfg, err = pinConfigFromEnv(); err != nil || cfg.DialURL != "https://ui.example.com" {
+		t.Fatalf("ui-base-url als fallback: %+v %v", cfg, err)
+	}
+
+	validPin := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	setPinEnv(t, validPin, "/etc/gssh/tls.crt", "30s", "", "")
+	cfg, err = pinConfigFromEnv()
+	if err != nil {
+		t.Fatalf("gültige konfiguration: %v", err)
+	}
+	if cfg.StaticPin != validPin || cfg.CertFile != "/etc/gssh/tls.crt" || cfg.Refresh != 30*time.Second {
+		t.Fatalf("config = %+v", cfg)
+	}
+
+	for _, invalid := range []string{"kein-base64!", "AAAA"} {
+		setPinEnv(t, invalid, "", "", "", "")
+		if _, err := pinConfigFromEnv(); err == nil {
+			t.Errorf("pin %q: startfehler erwartet", invalid)
+		}
+	}
+
+	for _, invalid := range []string{"quatsch", "-5m", "0s"} {
+		setPinEnv(t, "", "", invalid, "", "")
+		if _, err := pinConfigFromEnv(); err == nil {
+			t.Errorf("refresh %q: startfehler erwartet", invalid)
+		}
 	}
 }
 

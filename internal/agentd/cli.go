@@ -55,9 +55,11 @@ func usage(w io.Writer) {
 
 kommandos:
   enroll --server url --agent-url url --token t [--hostname n] [--tags k=v,…]
-         [--pin b64] [--state-dir d] [--ssh-dir d] [--ssh-key pfad] [--session-audit]
+         [--pin b64] [--require-pin] [--state-dir d] [--ssh-dir d] [--ssh-key pfad]
+         [--session-audit]
          host registrieren: zertifikate holen, sshd-konfiguration schreiben;
-         --session-audit aktiviert zusätzlich session-/sudo-audit (pam_exec)
+         --session-audit aktiviert zusätzlich session-/sudo-audit (pam_exec);
+         --require-pin bricht ohne --pin ab (bedienfehler-schutz)
   run [--state-dir d]
          daemon: zertifikat erneuern (2/3 laufzeit), ca-bundle pflegen,
          principals-cache + unix-socket für sshd bedienen
@@ -72,6 +74,22 @@ kommandos:
 `)
 }
 
+// envRequirePin ist das Env-Äquivalent zu --require-pin.
+const envRequirePin = "GSSH_ENROLL_REQUIRE_PIN"
+
+// requirePinFromEnv liest GSSH_ENROLL_REQUIRE_PIN als Default für
+// --require-pin. Jeder Wert außer "0"/"false" aktiviert die Prüfung: eine
+// gesetzte, aber unerwartet geschriebene Variable soll nicht still wirkungslos
+// bleiben (fail-closed).
+func requirePinFromEnv() bool {
+	switch strings.ToLower(os.Getenv(envRequirePin)) {
+	case "", "0", "false":
+		return false
+	default:
+		return true
+	}
+}
+
 // runEnrollCmd behandelt gssh-agentd enroll.
 func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh-agentd enroll", flag.ContinueOnError)
@@ -82,6 +100,14 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	hostname := fs.String("hostname", "", "hostname (default: os.Hostname)")
 	tagsFlag := fs.String("tags", "", "host-tags, z. B. env=prod,role=web")
 	pin := fs.String("pin", "", "spki-sha-256-pin des enroll-endpoints (base64)")
+	// --require-pin ist Bedienfehler-Schutz, kein MITM-Schutz: es verhindert,
+	// dass jemand die enroll-Zeile aus dem servierten install.sh kopiert,
+	// --pin weglässt und still ungepinnt enrollt. Wer das gepipte Script
+	// manipulieren kann, entfernt auch dieses Flag — dagegen schützen der
+	// HTTPS-Abruf und die serverseitigen Pin-Quellen, nicht dieses Flag.
+	// Das getemplatete install.sh setzt es immer; der manuelle und der
+	// deb/rpm-Pfad bleiben unverändert (Default aus).
+	requirePin := fs.Bool("require-pin", requirePinFromEnv(), "ohne --pin abbrechen (bedienfehler-schutz, kein mitm-schutz)")
 	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
 	sshDir := fs.String("ssh-dir", DefaultSSHDir, "sshd-konfigurationsverzeichnis")
 	sshKey := fs.String("ssh-key", "", "ssh-host-public-key (default: <ssh-dir>/ssh_host_ed25519_key.pub)")
@@ -92,6 +118,11 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	tags, err := parseTags(*tagsFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "gssh-agentd: %v\n", err)
+		return 2
+	}
+	// Abbruch vor jedem Netzwerk-Call: das Token bleibt unverbraucht.
+	if *requirePin && *pin == "" {
+		fmt.Fprintf(stderr, "gssh-agentd: --require-pin gesetzt (oder %s), aber --pin fehlt — enrollment abgebrochen\n", envRequirePin)
 		return 2
 	}
 	opts := EnrollOptions{

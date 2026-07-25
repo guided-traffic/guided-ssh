@@ -30,11 +30,13 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"github.com/guided-traffic/guided-ssh/internal/agentdist"
 	"github.com/guided-traffic/guided-ssh/internal/api"
 	"github.com/guided-traffic/guided-ssh/internal/auditstream"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
+	"github.com/guided-traffic/guided-ssh/internal/pintls"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
@@ -117,6 +119,14 @@ const (
 	// Laufzeit ausgestellter Host-Zertifikate (Enrollment + Renew); Go-Duration,
 	// leer = 30 Tage. Kurze Werte machen die Rotation testbar (E2E, Phase 13).
 	envHostCertValidity = "GSSH_HOST_CERT_VALIDITY"
+
+	// One-Command-Host-Install: externe URLs und Pin-Quellen. Fehlt eine
+	// Voraussetzung, bleibt der Host-Rollout deaktiviert (503) — nie ungepinnt.
+	envPublicURL        = "GSSH_PUBLIC_URL"           // externe Public-Basis-URL; leer ⇒ Fallback GSSH_UI_BASE_URL
+	envAgentPublicURL   = "GSSH_AGENT_PUBLIC_URL"     // externe mTLS-Agent-URL; wird nie abgeleitet
+	envPublicPin        = "GSSH_PUBLIC_PIN"           // Pin-Quelle 1: statischer Base64-SPKI-Pin
+	envPublicPinCert    = "GSSH_PUBLIC_PIN_CERT_FILE" // Pin-Quelle 2: PEM-Zertifikat (erster Block = Leaf)
+	envPublicPinRefresh = "GSSH_PUBLIC_PIN_REFRESH"   // Refresh-Intervall des Selbst-Dials, Default 5m
 )
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
@@ -145,6 +155,42 @@ func hostCertValidityFromEnv() (time.Duration, error) {
 		return 0, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envHostCertValidity, raw)
 	}
 	return validity, nil
+}
+
+// publicBaseURL liefert die externe Basis-URL des Public-Listeners:
+// GSSH_PUBLIC_URL, ersatzweise die UI-Basis-URL. Leer ⇒ Rollout-Gate zu.
+func publicBaseURL() string {
+	base := os.Getenv(envPublicURL)
+	if base == "" {
+		base = os.Getenv(envUIBaseURL)
+	}
+	return strings.TrimSuffix(base, "/")
+}
+
+// pinConfigFromEnv baut die Pin-Konfiguration des Host-Rollouts. Ein
+// ungültiger statischer Pin oder ein unbrauchbares Refresh-Intervall ist ein
+// Konfigurationsfehler und bricht den Start ab (fail-fast wie bei
+// GSSH_HOST_CERT_VALIDITY) — still ohne Pin weiterzulaufen wäre die
+// gefährlichere Variante.
+func pinConfigFromEnv() (api.PinProviderConfig, error) {
+	cfg := api.PinProviderConfig{
+		StaticPin: os.Getenv(envPublicPin),
+		CertFile:  os.Getenv(envPublicPinCert),
+		DialURL:   publicBaseURL(),
+	}
+	if cfg.StaticPin != "" {
+		if _, err := pintls.DecodePin(cfg.StaticPin); err != nil {
+			return api.PinProviderConfig{}, fmt.Errorf("%s: %w", envPublicPin, err)
+		}
+	}
+	if raw := os.Getenv(envPublicPinRefresh); raw != "" {
+		refresh, err := time.ParseDuration(raw)
+		if err != nil || refresh <= 0 {
+			return api.PinProviderConfig{}, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envPublicPinRefresh, raw)
+		}
+		cfg.Refresh = refresh
+	}
+	return cfg, nil
 }
 
 // Betriebsmodi der CA-Keys (GSSH_CA_MODE).
@@ -450,6 +496,13 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	}
 	startAuditStream(ctx, st, logger)
 
+	pinCfg, err := pinConfigFromEnv()
+	if err != nil {
+		return err
+	}
+	pins := api.NewPinProvider(pinCfg, logger)
+	go pins.Run(ctx)
+
 	server := &http.Server{
 		Addr: listen,
 		Handler: api.New(api.Deps{
@@ -465,6 +518,12 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 				OIDCClientID: uiClientID,
 			},
 			UIAuth: uiAuth,
+			// Host-Rollout (One-Command-Install): Binaries aus dem Image, Pin
+			// und externe URLs. Fehlt etwas, bleibt das Gate zu (503).
+			Agents:         agentdist.New(),
+			Pins:           pins,
+			AgentPublicURL: strings.TrimSuffix(os.Getenv(envAgentPublicURL), "/"),
+			PublicBaseURL:  publicBaseURL(),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

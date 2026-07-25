@@ -931,14 +931,16 @@ Maßnahmen und bewusst akzeptierte Restrisiken:
 ## Fahrplan (abhaken)
 
 ### Phase A — Agent-Binaries im Container
-- [ ] A1: Paket `internal/agentdist` (Embed `all:bin`, `Source` mit `New`/`NewFromFS`/`List`/`Open`, Hex-SHA-256, `.gitkeep`-Filter, `.gitignore`) + Unit-Umzug (`git mv` + `nfpm.yaml`-Pfad) + Tests (fstest.MapFS)
-- [ ] A2: Dockerfile-Stage `agentbuild` (`--platform=$BUILDPLATFORM`, GOOS/GOARCH-Schleife amd64+arm64, identische `-ldflags`) + `COPY` ins Embed-Verzeichnis
+- [x] A1: Paket `internal/agentdist` (Embed `all:bin`, `Source` mit `New`/`NewFromFS`/`List`/`Open`, Hex-SHA-256, `.gitkeep`-Filter, `.gitignore`) + Unit-Umzug (`git mv` + `nfpm.yaml`-Pfad) + Tests (fstest.MapFS)
+- [x] A2: Dockerfile-Stage `agentbuild` (`--platform=$BUILDPLATFORM`, GOOS/GOARCH-Schleife amd64+arm64, identische `-ldflags`) + `COPY` ins Embed-Verzeichnis
 
 ### Phase P — Pflicht-Pinning & Rollout-Gate
-- [ ] P1: `pintls.FromCertificate` + Migration `spkiPin()` in `internal/cli/client_test.go`
-- [ ] P2: Pin-Provider — Präzedenz `GSSH_PUBLIC_PIN` > `GSSH_PUBLIC_PIN_CERT_FILE` (ungecacht) > Auto-Dial (System-Roots, fail-closed, Background- + Lazy-Refresh via `GSSH_PUBLIC_PIN_REFRESH`); aktive Quelle in Log + Manifest; Tests
-- [ ] P3: Rollout-Gate — vier Bedingungen (binaries, pin, agent_public_url, public_url); Download/Script/Mint 503 mit `missing`, Manifest immer 200 mit Diagnose; Tests
-- [ ] P4: `gssh-agentd enroll --require-pin` + `GSSH_ENROLL_REQUIRE_PIN` (fail-closed vor Netz-Call); manueller/deb-Pfad unverändert; Tests
+- [x] P1: `pintls.FromCertificate` + Migration `spkiPin()` in `internal/cli/client_test.go`
+- [x] P2: Pin-Provider — Präzedenz `GSSH_PUBLIC_PIN` > `GSSH_PUBLIC_PIN_CERT_FILE` (ungecacht) > Auto-Dial (System-Roots, fail-closed, Background- + Lazy-Refresh via `GSSH_PUBLIC_PIN_REFRESH`); aktive Quelle in Log + Manifest; Tests
+- [x] P3: Rollout-Gate — vier Bedingungen (binaries, pin, agent_public_url, public_url); Download/Script/Mint 503 mit `missing`, Manifest immer 200 mit Diagnose; Tests
+  (Gate + 503-Antwort implementiert und getestet; die Verdrahtung an
+  Download/Script/Mint und die Manifest-Diagnose folgen mit B1–B3/C2)
+- [x] P4: `gssh-agentd enroll --require-pin` + `GSSH_ENROLL_REQUIRE_PIN` (fail-closed vor Netz-Call); manueller/deb-Pfad unverändert; Tests
 
 ### Phase B — Public-Endpoints
 - [ ] B1: `GET /v1/agents` (Manifest mit version/rollout_ready/missing/pin_source/agents, regulärer Limiter, `no-store`)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/guided-traffic/guided-ssh/internal/agentdist"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
@@ -54,6 +55,24 @@ type Deps struct {
 	// UIAuth aktiviert den server-seitigen OIDC-Login der Web-UI
 	// (/v1/auth/…, BFF); nil ⇒ Endpunkte antworten mit 503.
 	UIAuth *UIAuthConfig
+	// Agents liefert die eingebetteten gssh-agentd-Binaries des
+	// One-Command-Host-Installs; nil oder leer ⇒ Rollout-Gate zu.
+	Agents AgentSource
+	// Pins ermittelt den SPKI-Pin des öffentlichen TLS-Endpunkts; nil oder
+	// „kein Pin ermittelbar" ⇒ Rollout-Gate zu (fail-closed, Regel 3).
+	Pins *PinProvider
+	// AgentPublicURL ist die externe mTLS-Agent-URL (GSSH_AGENT_PUBLIC_URL),
+	// die enrollte Hosts in ihre config.yaml schreiben; leer ⇒ Gate zu.
+	AgentPublicURL string
+	// PublicBaseURL ist die externe Basis-URL des Public-Listeners
+	// (GSSH_PUBLIC_URL, Fallback GSSH_UI_BASE_URL); leer ⇒ Gate zu.
+	PublicBaseURL string
+}
+
+// AgentSource liefert die Metadaten der eingebetteten Agent-Binaries
+// (*agentdist.Source erfüllt es; Tests nutzen agentdist.NewFromFS).
+type AgentSource interface {
+	List() []agentdist.Info
 }
 
 // UIConfig ist die öffentliche Bootstrap-Konfiguration der Web-UI.

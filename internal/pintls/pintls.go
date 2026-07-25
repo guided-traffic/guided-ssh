@@ -7,11 +7,20 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 )
+
+// FromCertificate liefert den Base64-SPKI-SHA-256-Pin eines Zertifikats —
+// exakt der Wert, den DecodePin erwartet und Verifier prüft. Einzige Quelle
+// der Berechnung (Server-Pin-Provider, Tests, Doku-Snippets).
+func FromCertificate(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
 
 // DecodePin dekodiert und validiert einen Base64-SPKI-SHA-256-Pin.
 func DecodePin(encoded string) ([]byte, error) {
