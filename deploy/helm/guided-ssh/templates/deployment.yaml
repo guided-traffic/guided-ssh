@@ -118,6 +118,23 @@ spec:
                 secretKeyRef:
                   name: {{ required "secrets.ca.existingSecret ist Pflicht (Secret mit dem CA-Master-Key, siehe README)" .Values.secrets.ca.existingSecret }}
                   key: {{ .Values.secrets.ca.keys.masterKey }}
+            {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
+            {{- with .Values.secrets.ca.selfManaged }}
+            # Self-managed: alle drei CAs kommen aus dem gemounteten Secret,
+            # die Datenbank hält kein privates Schlüsselmaterial. Rotation =
+            # neuen Key committen (siehe README).
+            - name: GSSH_CA_MODE
+              value: self-managed
+            - name: GSSH_CA_USER_KEY_FILE
+              value: {{ include "guided-ssh.caFile" (dict "mountPath" .mountPath "key" .keys.userKey) | quote }}
+            - name: GSSH_CA_HOST_KEY_FILE
+              value: {{ include "guided-ssh.caFile" (dict "mountPath" .mountPath "key" .keys.hostKey) | quote }}
+            - name: GSSH_CA_MTLS_KEY_FILE
+              value: {{ include "guided-ssh.caFile" (dict "mountPath" .mountPath "key" .keys.mtlsKey) | quote }}
+            - name: GSSH_CA_MTLS_CERT_FILE
+              value: {{ include "guided-ssh.caFile" (dict "mountPath" .mountPath "key" .keys.mtlsCert) | quote }}
+            {{- end }}
+            {{- end }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_ISSUER" "value" .Values.config.oidc.issuer) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_CLIENT_ID" "value" .Values.config.oidc.clientID) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_UI_OIDC_CLIENT_ID" "value" .Values.config.oidc.uiClientID) | nindent 12 }}
@@ -192,11 +209,39 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.internalDatabase.enabled }}
+          {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
+          volumeMounts:
+            - name: ca-keys
+              mountPath: {{ .Values.secrets.ca.selfManaged.mountPath }}
+              readOnly: true
+          {{- end }}
+      {{- if or .Values.internalDatabase.enabled (eq (include "guided-ssh.caMode" .) "self-managed") }}
       volumes:
+        {{- if .Values.internalDatabase.enabled }}
         # Ephemeral: Pod-Neustart = leere Datenbank (Test-Umgebung).
         - name: internal-db-data
           emptyDir: {}
+        {{- end }}
+        {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
+        {{- with .Values.secrets.ca.selfManaged }}
+        # Nur die vier CA-Dateien projizieren (nicht das ganze Secret): der
+        # CA-Master-Key darf im selben Secret liegen, ohne als Datei zu landen.
+        # 0440 + podSecurityContext.fsGroup ⇒ nur der Server-Prozess liest sie.
+        - name: ca-keys
+          secret:
+            secretName: {{ .existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .keys.userKey }}
+                path: {{ .keys.userKey }}
+              - key: {{ .keys.hostKey }}
+                path: {{ .keys.hostKey }}
+              - key: {{ .keys.mtlsKey }}
+                path: {{ .keys.mtlsKey }}
+              - key: {{ .keys.mtlsCert }}
+                path: {{ .keys.mtlsCert }}
+        {{- end }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

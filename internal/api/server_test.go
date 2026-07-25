@@ -53,6 +53,12 @@ func (f *fakeStore) UpdateCAKeyState(context.Context, uuid.UUID, string) (*store
 	return nil, store.ErrNotFound
 }
 
+// AdoptCAKey wird von den API-Tests nicht genutzt (managed mode), erfüllt aber
+// das ca.Store-Interface.
+func (f *fakeStore) AdoptCAKey(context.Context, string, string, string) (*store.CAKey, bool, error) {
+	return nil, false, store.ErrNotFound
+}
+
 func (f *fakeStore) AppendAuditEvent(context.Context, *store.AuditEvent) error { return nil }
 
 func newTestServer(t *testing.T, fs *fakeStore) *httptest.Server {

@@ -4,14 +4,16 @@ Zielgruppe: Betreiber der guided-ssh-Plattform (Kubernetes/GitOps).
 Ergänzende Dokumente: [Architektur](architektur.md),
 [Enrollment-Guide](enrollment-guide.md), [Troubleshooting](troubleshooting.md),
 [GitLab-CI-Integration](gitlab-ci.md), [Audit-Retention](audit-retention.md),
-[ADR-Index](adr/README.md).
+[Self-managed CA-Keys](self-managed-ca.md), [ADR-Index](adr/README.md).
 
 ## Architekturüberblick
 
 Ein Go-Binary (`gssh-server`) bündelt REST-API, Zertifizierungsstelle (CA),
 eingebettete Web-UI, Agent-API (mTLS, eigener Port) und Metrics-Endpoint
 (eigener Port). Persistenz ausschließlich in PostgreSQL; die CA-Private-Keys
-liegen AES-256-GCM-verschlüsselt in der Tabelle `ca_keys` (ADR-014). Drei
+liegen AES-256-GCM-verschlüsselt in der Tabelle `ca_keys` (ADR-014) — außer im
+Modus `self-managed`, in dem sie als Dateien aus einem Secret kommen und gar
+nicht in die Datenbank geschrieben werden ([self-managed-ca.md](self-managed-ca.md)). Drei
 strikt getrennte Auth-Pfade: OIDC für Menschen, GitLab-OIDC für CI, mTLS für
 Host-Agenten (ADR-008). Details und Diagramme: [architektur.md](architektur.md).
 
@@ -43,7 +45,12 @@ Alle Werte aus `cmd/gssh-server/main.go`; im Helm-Chart 1:1 über
 | `GSSH_DB_PASSWORD` | — (Pflicht) | Datenbank-Passwort (Sonderzeichen unkritisch, wird URL-escaped) |
 | `GSSH_DB_NAME` | — (Pflicht) | Datenbank-Name |
 | `GSSH_DB_SSLMODE` | `prefer` | `sslmode` der Verbindung (`disable`, `require`, `verify-full`, …) |
-| `GSSH_CA_MASTER_KEY` | — (Pflicht) | Master-Key der CA-Key-Verschlüsselung: 32 Bytes, Base64 |
+| `GSSH_CA_MASTER_KEY` | — (Pflicht in beiden CA-Modi) | Master-Key der CA-Key-Verschlüsselung: 32 Bytes, Base64 |
+| `GSSH_CA_MODE` | `managed` | `managed` = CA-Keys werden erzeugt und verschlüsselt in `ca_keys` abgelegt; `self-managed` = alle drei CAs kommen als Dateien aus einem Secret ([self-managed-ca.md](self-managed-ca.md)) |
+| `GSSH_CA_USER_KEY_FILE` | leer | Benutzer-CA: OpenSSH-Private-Key-PEM; nur `self-managed` (dort Pflicht, in `managed` verboten) |
+| `GSSH_CA_HOST_KEY_FILE` | leer | Host-CA: OpenSSH-Private-Key-PEM; wie oben |
+| `GSSH_CA_MTLS_KEY_FILE` | leer | Agent-mTLS-CA: PKCS#8-PEM (Ed25519); wie oben |
+| `GSSH_CA_MTLS_CERT_FILE` | leer | Agent-mTLS-CA: X.509-CA-Zertifikat (PEM, `CA:TRUE`, `keyCertSign`); wie oben |
 | `GSSH_OIDC_ISSUER` | leer | Issuer-URL des IdP; leer ⇒ `/v1/sign/user` deaktiviert (503) |
 | `GSSH_OIDC_CLIENT_ID` | leer | erwartete Audience der ID-Tokens; fehlt sie bei gesetztem Issuer ⇒ Startfehler (fail-fast) |
 | `GSSH_CI_ISSUER` | leer | GitLab-Basis-URL (OIDC-Issuer); leer ⇒ `/v1/sign/ci` deaktiviert (503) |
@@ -84,6 +91,13 @@ Key-Namen über `secrets.*.keys` anpassbar, Details im Chart-README):
   wäre ein manueller DB-Eingriff); der vorgesehene Weg bei Kompromittierung
   ist die CA-Rotation (unten) in Kombination mit neuem Master-Key und
   Re-Enrollment.
+
+Die beiden Aussagen zum Master-Key gelten für den Default-Modus `managed`. Mit
+`GSSH_CA_MODE=self-managed` liegen die CA-Private-Keys stattdessen als vier
+Dateien in einem eigenen Secret (`secrets.ca.selfManaged.existingSecret`,
+read-only gemountet); der Master-Key bleibt trotzdem Pflicht, weil der
+Session-Key der Web-UI aus ihm abgeleitet wird. Erzeugung, Rotation per Commit
+und Fehlerbilder: [self-managed-ca.md](self-managed-ca.md).
 
 Optional: `GSSH_KC_CLIENT_SECRET` (Gruppen-Sync) sowie das Client-Secret des
 GitOps-Sync-Service-Accounts (`GSSH_CLIENT_SECRET` für `gssh-admin`, siehe
@@ -158,6 +172,12 @@ als „Nuklearoption" beschrieben: neuen Key ausrollen, Agenten ziehen das
 Bundle binnen einer Stunde, alten Key retiren ⇒ alle Alt-Zertifikate
 ungültig; alle aktiven Nutzer brauchen eine Neuausstellung.
 
+Im Modus `self-managed` ist die In-App-Rotation gesperrt (`CA.Rotate` liefert
+einen Fehler): dort ist Rotation ein Commit im GitOps-Repo — neuen Key
+einspielen, Deployment rollt, der alte Key wandert automatisch auf `retiring`
+und bleibt bis zum manuellen `retired` im Bundle
+([self-managed-ca.md](self-managed-ca.md#rotation)).
+
 Die **mTLS-Client-Zertifikate der Agenten** rotieren dagegen automatisch
 (bei 2/3 von 1 Jahr Laufzeit, `POST /v1/agent/renew-mtls`), ebenso die
 **Host-Zertifikate** (bei 2/3 von 30 Tagen) — kein Betriebseingriff nötig.
@@ -206,6 +226,11 @@ Zusammenfassung von [ADR-022](adr/022-revocation-kurze-laufzeiten.md):
   ohne den zugehörigen `GSSH_CA_MASTER_KEY` ist für die CA wertlos**.
   Master-Key getrennt vom Backup sichern (und getrennt von der DB, das ist
   der Sinn der Verschlüsselung).
+- Im Modus `self-managed` liegt in der Datenbank kein Schlüsselmaterial: die
+  CA hängt dann am GitOps-Repo bzw. dem SOPS-Key, nicht am DB-Backup. Eine
+  leere Datenbank plus dieselben gemounteten Keys ergibt wieder dieselbe CA
+  ([self-managed-ca.md](self-managed-ca.md)) — dafür muss der Offline-Stand
+  der Keydateien und des age-/PGP-Keys gesichert sein.
 - Restore: Datenbank wiederherstellen, Secrets (DSN, Master-Key) unverändert
   bereitstellen, Deployment starten — Migrationen laufen idempotent. Agenten
   und CLIs brauchen nichts Neues, solange `ca_keys` und `hosts` erhalten sind.

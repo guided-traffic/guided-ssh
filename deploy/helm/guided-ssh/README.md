@@ -36,8 +36,10 @@ helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set config.groups.admin=gssh-admins
 ```
 
-> **Warning:** `ca-master-key` encrypts the CA private keys in the database
-> (AES-256). Losing it renders the CA unusable. Store it safely.
+> **Warning:** in the default `managed` mode, `ca-master-key` encrypts the CA
+> private keys in the database (AES-256). Losing it renders the CA unusable.
+> Store it safely. With `secrets.ca.mode=self-managed` the CA keys come from a
+> Secret instead — see [CA mode](#ca-mode-managed-vs-self-managed-secretscamode).
 
 ## Secrets
 
@@ -54,6 +56,7 @@ and rotation cycles) or both to the same secret:
 |---|---|
 | `secrets.db.existingSecret` (required¹) | PostgreSQL connection values |
 | `secrets.ca.existingSecret` (required) | CA master key |
+| `secrets.ca.selfManaged.existingSecret` (required with `secrets.ca.mode=self-managed`) | The four CA key files |
 | `config.keycloak.existingSecret` (optional) | Keycloak service-account client secret |
 | `config.oidc.uiExistingSecret` (optional) | OIDC client secret of the web UI |
 
@@ -164,6 +167,79 @@ The value must be 32 random bytes, Base64-encoded
 (AES-256-GCM); rotation requires re-encrypting the stored CA keys — treat it
 as the most sensitive secret of the installation.
 
+`secrets.ca.existingSecret` is **required in both CA modes**: the master key
+also derives the session key of the web UI, so it is needed even when no CA
+private key is stored in the database.
+
+### CA mode: managed vs. self-managed (`secrets.ca.mode`)
+
+| Mode | CA private keys live in | Source of truth |
+|---|---|---|
+| `managed` (default) | the database, AES-256-GCM-encrypted with the master key; generated on first start | the database |
+| `self-managed` | files mounted from a Secret, read-only; **never** written to the database | your Git repository (SOPS) |
+
+`self-managed` covers all three CAs (SSH user CA, SSH host CA, agent mTLS CA)
+at once — there is no per-purpose mixed mode. Background, failure modes and
+the rotation procedure: [docs/self-managed-ca.md](../../../docs/self-managed-ca.md).
+
+**Generate the key material** (once, on an operator workstation):
+
+```bash
+ssh-keygen -t ed25519 -f user-ca -N '' -C 'guided-ssh user ca'
+ssh-keygen -t ed25519 -f host-ca -N '' -C 'guided-ssh host ca'
+gssh-server gen-mtls-ca -out mtls-ca      # writes mtls-ca.key (0600) + mtls-ca.crt
+```
+
+Only the **private** key files go into the Secret — not the `.pub` files
+(the server derives the public keys itself). The keys must be unencrypted;
+a passphrase-protected key is a startup error.
+
+```bash
+kubectl -n guided-ssh create secret generic guided-ssh-ca-keys \
+  --from-file=user-ca \
+  --from-file=host-ca \
+  --from-file=mtls-ca.key \
+  --from-file=mtls-ca.crt
+```
+
+```yaml
+secrets:
+  ca:
+    mode: self-managed
+    existingSecret: guided-ssh-ca         # master key — still required
+    selfManaged:
+      existingSecret: guided-ssh-ca-keys
+```
+
+The Secret is mounted read-only at `secrets.ca.selfManaged.mountPath`
+(default `/etc/gssh/ca`); each key name is also the file name below that
+path and thus the value of the corresponding env variable:
+
+| `secrets.ca.selfManaged.keys.*` | Default key = file name | Env variable | Format |
+|---|---|---|---|
+| `userKey` | `user-ca` | `GSSH_CA_USER_KEY_FILE` | OpenSSH private key PEM |
+| `hostKey` | `host-ca` | `GSSH_CA_HOST_KEY_FILE` | OpenSSH private key PEM |
+| `mtlsKey` | `mtls-ca.key` | `GSSH_CA_MTLS_KEY_FILE` | PKCS#8 PEM |
+| `mtlsCert` | `mtls-ca.crt` | `GSSH_CA_MTLS_CERT_FILE` | X.509 CA certificate PEM |
+
+Notes:
+
+- All four keys must exist in the Secret — a missing key leaves the pod in
+  `ContainerCreating`.
+- Only these four keys are projected into the volume, so
+  `selfManaged.existingSecret` may point at the same Secret as
+  `secrets.ca.existingSecret` without the master key ending up on disk.
+- Invalid `secrets.ca.mode` or a missing `selfManaged.existingSecret` fails
+  the **render**, not the pod (`helm template` reports it).
+- In `managed` mode none of the `GSSH_CA_*_FILE` variables are rendered — the
+  server rejects them in that mode.
+
+**Rotation** is a Git operation: replace the file content in the Secret and
+roll the Deployment. The server adopts the new key as `active` and demotes
+the previous one to `retiring`, so its public key stays in the CA bundle and
+hosts keep trusting certificates signed by it until they expire. Walkthrough:
+[deploy/flux-example/README.md](../../flux-example/README.md).
+
 ## Internal database (test environments only)
 
 For trying out guided-ssh or short-lived test deployments you can skip
@@ -265,6 +341,10 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `secrets.db.keys.*` | `host`/`port`/`username`/`password`/`database`/`sslmode` | Key names inside the DB secret |
 | `secrets.ca.existingSecret` | `""` (required) | Secret with the CA master key |
 | `secrets.ca.keys.masterKey` | `ca-master-key` | Key name inside the CA secret |
+| `secrets.ca.mode` | `managed` | `managed` (CA keys generated into the DB) or `self-managed` (CA keys mounted from a Secret) |
+| `secrets.ca.selfManaged.existingSecret` | `""` (required with `mode=self-managed`) | Secret with the four CA key files |
+| `secrets.ca.selfManaged.keys.*` | `user-ca`/`host-ca`/`mtls-ca.key`/`mtls-ca.crt` | Key names = file names inside the CA key secret |
+| `secrets.ca.selfManaged.mountPath` | `/etc/gssh/ca` | Read-only mount path of the CA key files |
 | `internalDatabase.enabled` | `false` | **Test only**: ephemeral Postgres sidecar instead of `secrets.db` (mutually exclusive) |
 | `internalDatabase.image` / `pullPolicy` | `postgres:16-alpine` / `IfNotPresent` | Sidecar image; pull policy is independent of `image.pullPolicy` |
 | `config.oidc.issuer` / `clientID` | `""` | User OIDC; empty ⇒ `/v1/sign/user` disabled |

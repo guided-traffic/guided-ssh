@@ -154,6 +154,24 @@ helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set config.oidc.clientID=gssh-cli
 ```
 
+**Bring your own CA keys** — by default the server generates the CA private
+keys on first start and keeps them encrypted in the database. Set
+`secrets.ca.mode=self-managed` and the three CAs (user, host, agent mTLS) come
+from a Secret instead, mounted read-only; nothing secret is written to the
+database, and your Git repository (SOPS) becomes the source of truth for the
+CA — including rotation, disaster recovery, and cloning an environment:
+
+```sh
+ssh-keygen -t ed25519 -f user-ca -N '' -C 'guided-ssh user ca'
+ssh-keygen -t ed25519 -f host-ca -N '' -C 'guided-ssh host ca'
+gssh-server gen-mtls-ca -out mtls-ca
+kubectl -n guided-ssh create secret generic guided-ssh-ca-keys \
+  --from-file=user-ca --from-file=host-ca \
+  --from-file=mtls-ca.key --from-file=mtls-ca.crt
+```
+
+Full walkthrough: [docs/self-managed-ca.md](docs/self-managed-ca.md).
+
 Details (secrets layout, CloudNativePG, ingress, mTLS agent API, metrics):
 [deploy/helm/guided-ssh/README.md](deploy/helm/guided-ssh/README.md).
 GitOps reference (FluxCD, SOPS, declarative grants):
@@ -183,6 +201,7 @@ Reference pipeline and server-side CI grants:
 | Topic | Document |
 |---|---|
 | Operations manual (config, secrets, backup, CA rotation) | [docs/betriebshandbuch.md](docs/betriebshandbuch.md) |
+| Self-managed CA keys (GitOps/SOPS) | [docs/self-managed-ca.md](docs/self-managed-ca.md) |
 | Access rules (grants) | [docs/grants.md](docs/grants.md) |
 | Host enrollment guide | [docs/enrollment-guide.md](docs/enrollment-guide.md) |
 | GitLab CI integration | [docs/gitlab-ci.md](docs/gitlab-ci.md) |

@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -52,6 +53,17 @@ const (
 	envDBSSLMode  = "GSSH_DB_SSLMODE"  // leer ⇒ prefer (Treiber-Default)
 
 	envMasterKey = "GSSH_CA_MASTER_KEY" // Base64, 32 Bytes (AES-256)
+
+	// Source of the CA key material (SELF_MANAGED_CA.md, D2/D3): "managed"
+	// (default) keeps the keys encrypted in the database, "self-managed" takes
+	// all three CAs from mounted files and never writes private key material to
+	// the database. The four key-file variables belong to self-managed mode and
+	// must be unset in managed mode.
+	envCAMode         = "GSSH_CA_MODE"           // managed | self-managed; leer ⇒ managed
+	envCAUserKeyFile  = "GSSH_CA_USER_KEY_FILE"  // OpenSSH private key PEM
+	envCAHostKeyFile  = "GSSH_CA_HOST_KEY_FILE"  // OpenSSH private key PEM
+	envCAMTLSKeyFile  = "GSSH_CA_MTLS_KEY_FILE"  //nolint:gosec // Name der Env-Variable, kein Secret; PKCS#8 PEM
+	envCAMTLSCertFile = "GSSH_CA_MTLS_CERT_FILE" // X.509 CA certificate PEM
 
 	// OIDC (Phase 3); ohne Issuer bleibt der Sign-Endpoint deaktiviert (503).
 	envOIDCIssuer   = "GSSH_OIDC_ISSUER"    // Issuer-URL des IdP
@@ -135,6 +147,60 @@ func hostCertValidityFromEnv() (time.Duration, error) {
 	return validity, nil
 }
 
+// Betriebsmodi der CA-Keys (GSSH_CA_MODE).
+const (
+	caModeManaged     = "managed"
+	caModeSelfManaged = "self-managed"
+)
+
+// caModeFromEnv parses GSSH_CA_MODE and the key-file variables and enforces the
+// validation matrix of SELF_MANAGED_CA.md (D2): the modes are exclusive, so
+// self-managed needs all four key files and managed must have none of them —
+// a half-configured deployment fails at startup instead of silently ignoring
+// mounted keys. Errors name every offending variable at once.
+func caModeFromEnv() (string, ca.ExternalKeyPaths, error) {
+	mode := os.Getenv(envCAMode)
+	if mode == "" {
+		mode = caModeManaged
+	}
+	if mode != caModeManaged && mode != caModeSelfManaged {
+		return "", ca.ExternalKeyPaths{}, fmt.Errorf("%s: unknown mode %q (expected %q or %q)",
+			envCAMode, mode, caModeManaged, caModeSelfManaged)
+	}
+	paths := ca.ExternalKeyPaths{
+		UserKeyFile:  os.Getenv(envCAUserKeyFile),
+		HostKeyFile:  os.Getenv(envCAHostKeyFile),
+		MTLSKeyFile:  os.Getenv(envCAMTLSKeyFile),
+		MTLSCertFile: os.Getenv(envCAMTLSCertFile),
+	}
+	keyFiles := []struct{ env, path string }{
+		{envCAUserKeyFile, paths.UserKeyFile},
+		{envCAHostKeyFile, paths.HostKeyFile},
+		{envCAMTLSKeyFile, paths.MTLSKeyFile},
+		{envCAMTLSCertFile, paths.MTLSCertFile},
+	}
+	var missing, unexpected []string
+	for _, f := range keyFiles {
+		switch {
+		case mode == caModeSelfManaged && f.path == "":
+			missing = append(missing, f.env)
+		case mode == caModeManaged && f.path != "":
+			unexpected = append(unexpected, f.env)
+		}
+	}
+	if len(missing) > 0 {
+		return "", ca.ExternalKeyPaths{}, fmt.Errorf(
+			"%s=%s requires all four ca key files, not set: %s",
+			envCAMode, caModeSelfManaged, strings.Join(missing, ", "))
+	}
+	if len(unexpected) > 0 {
+		return "", ca.ExternalKeyPaths{}, fmt.Errorf(
+			"ca mode %s does not use mounted ca keys, but these are set: %s — unset them or set %s=%s",
+			caModeManaged, strings.Join(unexpected, ", "), envCAMode, caModeSelfManaged)
+	}
+	return mode, paths, nil
+}
+
 func main() {
 	os.Exit(run(os.Stdout, os.Stderr, os.Args[1:]))
 }
@@ -147,6 +213,9 @@ func run(stdout, stderr io.Writer, args []string) int {
 	}
 	if len(args) > 0 && args[0] == "migrate" {
 		return runMigrate(stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "gen-mtls-ca" {
+		return runGenMTLSCA(stdout, stderr, args[1:])
 	}
 
 	fs := flag.NewFlagSet("gssh-server", flag.ContinueOnError)
@@ -276,6 +345,62 @@ func runEnrollToken(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+// runGenMTLSCA generates the agent mTLS CA for self-managed deployments
+// (subcommand `gssh-server gen-mtls-ca`): the operator commits the result
+// SOPS-encrypted and mounts it via GSSH_CA_MTLS_KEY_FILE/GSSH_CA_MTLS_CERT_FILE.
+// No database is involved — the CA never enters this process' store.
+func runGenMTLSCA(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("gssh-server gen-mtls-ca", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("out", "", "output prefix; writes <prefix>.key (PKCS#8, mode 0600) and <prefix>.crt")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *out == "" {
+		fmt.Fprintln(stderr, "gssh-server: gen-mtls-ca: -out is required (e.g. -out mtls-ca)")
+		return 2
+	}
+
+	certPEM, keyPEM, err := ca.GenerateMTLSCA()
+	if err != nil {
+		fmt.Fprintf(stderr, "gssh-server: %v\n", err)
+		return 1
+	}
+	keyPath, certPath := *out+".key", *out+".crt"
+	if err := writeNewFile(keyPath, keyPEM, 0o600); err != nil {
+		fmt.Fprintf(stderr, "gssh-server: %v\n", err)
+		return 1
+	}
+	if err := writeNewFile(certPath, certPEM, 0o644); err != nil {
+		// A private key without its certificate is useless — don't leave it behind.
+		_ = os.Remove(keyPath)
+		fmt.Fprintf(stderr, "gssh-server: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "%s\n%s\n", keyPath, certPath)
+	fmt.Fprintf(stderr, "mtls ca written (%s: %s, %s: %s) — %s is ca private key material, encrypt it before committing\n",
+		envCAMTLSKeyFile, keyPath, envCAMTLSCertFile, certPath, keyPath)
+	return 0
+}
+
+// writeNewFile writes data to path and refuses to overwrite an existing file
+// (O_EXCL): re-running gen-mtls-ca must never silently replace a CA that hosts
+// already trust.
+func writeNewFile(path string, data []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%s already exists — refusing to overwrite ca material", path)
+	}
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return f.Close()
+}
+
 // parseTags parst "k=v,k2=v2" in eine Map.
 func parseTags(raw string) (map[string]string, error) {
 	tags := map[string]string{}
@@ -389,8 +514,12 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 // der eigenen mTLS-CA, Client-Zertifikate werden gegen dieselbe CA verlangt
 // und verifiziert.
 func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, logger *slog.Logger, listen string, hostCertValidity time.Duration) (*http.Server, error) {
-	if err := certAuthority.EnsureMTLSCA(ctx); err != nil {
-		return nil, fmt.Errorf("mtls-ca bootstrappen: %w", err)
+	// In self-managed mode the mTLS CA comes from the mounted files and was
+	// already adopted by setup(); the bootstrap refuses to run there.
+	if !certAuthority.SelfManaged() {
+		if err := certAuthority.EnsureMTLSCA(ctx); err != nil {
+			return nil, fmt.Errorf("mtls-ca bootstrappen: %w", err)
+		}
 	}
 	names := strings.Split(os.Getenv(envAgentTLSNames), ",")
 	if os.Getenv(envAgentTLSNames) == "" {
@@ -658,19 +787,41 @@ func setupStore(ctx context.Context) (*store.Store, error) {
 
 // setup liest die Einstellungen aus der Umgebung, migriert die Datenbank und
 // bootstrapt die CA (inkl. CA-Keys, falls noch keine existieren).
+// In self-managed mode the mounted key files replace the bootstrap: they are
+// loaded before the database is touched and adopted afterwards (D2/D4).
+// GSSH_CA_MASTER_KEY stays mandatory in both modes (D7).
 func setup(ctx context.Context) (*ca.CA, *store.Store, error) {
 	masterKey, err := base64.StdEncoding.DecodeString(os.Getenv(envMasterKey))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s dekodieren: %w", envMasterKey, err)
 	}
+	mode, keyPaths, err := caModeFromEnv()
+	if err != nil {
+		return nil, nil, err
+	}
+	var opts []ca.Option
+	if mode == caModeSelfManaged {
+		keys, err := ca.LoadExternalKeys(keyPaths)
+		if err != nil {
+			return nil, nil, err
+		}
+		opts = append(opts, ca.WithExternalKeys(keys))
+	}
 	st, err := setupStore(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	certAuthority, err := ca.New(st, masterKey, ca.NewPolicyEngine(ca.DefaultPolicies()))
+	certAuthority, err := ca.New(st, masterKey, ca.NewPolicyEngine(ca.DefaultPolicies()), opts...)
 	if err != nil {
 		st.Close()
 		return nil, nil, err
+	}
+	if certAuthority.SelfManaged() {
+		if err := certAuthority.AdoptExternalKeys(ctx); err != nil {
+			st.Close()
+			return nil, nil, fmt.Errorf("adopt external ca keys: %w", err)
+		}
+		return certAuthority, st, nil
 	}
 	if err := certAuthority.EnsureCAKeys(ctx); err != nil {
 		st.Close()

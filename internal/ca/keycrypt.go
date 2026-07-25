@@ -15,6 +15,13 @@ const MasterKeySize = 32
 // Entschlüsselungsfehler (falscher Key oder manipulierte Daten).
 var ErrInvalidMasterKey = errors.New("ca: ungültiger master-key")
 
+// ErrSelfManaged is returned by every path that would create CA key material
+// while the CA runs in self-managed mode. There the key files are the source
+// of truth, so bootstrapping and rotation are Git operations on the mounted
+// secret, not in-app actions (see SELF_MANAGED_CA.md, D5/D6).
+var ErrSelfManaged = errors.New(
+	"ca: self-managed mode: ca keys are managed in git (mounted key files), the application must not create or rotate them")
+
 // newGCM baut eine AES-256-GCM-AEAD aus dem Master-Key.
 func newGCM(masterKey []byte) (cipher.AEAD, error) {
 	if len(masterKey) != MasterKeySize {

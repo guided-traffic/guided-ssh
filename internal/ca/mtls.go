@@ -33,7 +33,11 @@ const (
 // EnsureMTLSCA legt die X.509-CA für Agent-mTLS an, falls noch keine existiert
 // (Bootstrap, analog EnsureCAKeys). Der CA-Key liegt AES-GCM-verschlüsselt in
 // ca_keys (purpose "mtls"), public_key enthält das CA-Zertifikat als PEM.
+// In self-managed mode this bootstrap is refused; use AdoptExternalKeys.
 func (ca *CA) EnsureMTLSCA(ctx context.Context) error {
+	if ca.selfManaged() {
+		return fmt.Errorf("%w: call AdoptExternalKeys instead of EnsureMTLSCA", ErrSelfManaged)
+	}
 	keys, err := ca.store.ListActiveCAKeys(ctx, store.CAPurposeMTLS)
 	if err != nil {
 		return err
@@ -42,41 +46,18 @@ func (ca *CA) EnsureMTLSCA(ctx context.Context) error {
 		return nil
 	}
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return fmt.Errorf("ca: mtls-key erzeugen: %w", err)
-	}
-	serial, err := randomSerial()
+	certPEM, keyPEM, err := GenerateMTLSCA()
 	if err != nil {
 		return err
 	}
-	template := &x509.Certificate{
-		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "guided-ssh agent mTLS CA"},
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(mtlsCAValidity),
-		IsCA:                  true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
-		MaxPathLenZero:        true,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
-	if err != nil {
-		return fmt.Errorf("ca: mtls-ca-zertifikat erstellen: %w", err)
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return fmt.Errorf("ca: mtls-key serialisieren: %w", err)
-	}
-	encrypted, err := encryptPrivateKey(ca.masterKey,
-		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	encrypted, err := encryptPrivateKey(ca.masterKey, keyPEM)
 	if err != nil {
 		return err
 	}
 	key := &store.CAKey{
 		Purpose:             store.CAPurposeMTLS,
 		Algorithm:           "ed25519",
-		PublicKey:           string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		PublicKey:           string(certPEM),
 		EncryptedPrivateKey: encrypted,
 		State:               store.CAKeyStateActive,
 	}
@@ -90,8 +71,48 @@ func (ca *CA) EnsureMTLSCA(ctx context.Context) error {
 	return ca.store.AppendAuditEvent(ctx, &store.AuditEvent{EventType: EventKeyCreated, Payload: payload})
 }
 
+// GenerateMTLSCA creates a fresh agent mTLS CA: an Ed25519 key pair and the
+// self-signed CA certificate for it, returned as PEM (PKCS#8 for the key).
+// EnsureMTLSCA and the `gssh-server gen-mtls-ca` helper share this function, so
+// a self-managed CA has exactly the same shape as a generated one.
+func GenerateMTLSCA() (certPEM, keyPEM []byte, err error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ca: mtls-key erzeugen: %w", err)
+	}
+	serial, err := randomSerial()
+	if err != nil {
+		return nil, nil, err
+	}
+	template := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: "guided-ssh agent mTLS CA"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(mtlsCAValidity),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		MaxPathLenZero:        true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ca: mtls-ca-zertifikat erstellen: %w", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ca: mtls-key serialisieren: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), nil
+}
+
 // mtlsCA lädt CA-Zertifikat und Private Key der aktiven mTLS-CA.
+// In self-managed mode the material comes straight from the mounted files; the
+// ca_keys row is derived state and carries no private key to decrypt.
 func (ca *CA) mtlsCA(ctx context.Context) (*x509.Certificate, ed25519.PrivateKey, string, error) {
+	if ca.selfManaged() {
+		return ca.external.MTLS.Certificate, ca.external.MTLS.PrivateKey, ca.external.MTLS.CertPEM, nil
+	}
 	keys, err := ca.store.ListActiveCAKeys(ctx, store.CAPurposeMTLS)
 	if err != nil {
 		return nil, nil, "", err
