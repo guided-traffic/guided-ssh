@@ -1,720 +1,1009 @@
-# One-Command Host-Install
+# One-Command Host-Install — Umsetzungsplan
 
-Ziel: Auf der Web-Page **Hosts** ein Button „Host hinzufügen“. Klick zeigt ein
-einmaliges Enrollment-Token plus eine **eine Zeile**, die man auf der CLI eines
-Linux-Hosts einfügt und die den Agenten **vollständig installiert** — Binary,
-systemd-Unit, Enrollment, Dienststart. Die passenden Agent-Binaries liegen **im
-Container** (versionsgleich zum laufenden Server), Download läuft rein intern,
-kein Umweg über GitHub-Releases.
+> **Stand 2026-07-25.** Die Review-Kritik vom 2026-07-25 (K1–K17) ist in diese
+> Fassung **vollständig eingearbeitet** — jede Kritik ist an der Stelle
+> aufgelöst, an der sie umzusetzen ist. Die frühere separate Review-Sektion ist
+> damit aufgegangen; die alte Fassung steht in der Git-Historie. Das
+> Entscheidungs-Log am Ende fasst alle Review-Entscheidungen nachvollziehbar
+> zusammen.
+>
+> Dieser Plan ist so geschrieben, dass er ohne Vorwissen über die
+> Review-Diskussion umsetzbar ist. Jedes Arbeitspaket nennt **Dateien**,
+> **Schritte**, **Nicht tun** (bewusst verworfene Wege — bitte wirklich nicht
+> tun, die Gründe stehen dabei) und **Fertig, wenn** (Prüfkriterien).
+
+Ziel: Auf der Web-Seite **Hosts** ein Button „Host hinzufügen“. Klick zeigt ein
+einmaliges Enrollment-Token plus **eine Kommandozeile**, die man auf einem
+Linux-Host einfügt und die den Agenten **vollständig installiert** — Binary,
+systemd-Unit, Enrollment, Dienststart. Die Agent-Binaries liegen **im
+Server-Container** (versionsgleich zum laufenden Server), der Download läuft
+rein intern — kein Umweg über GitHub-Releases, air-gap-tauglich.
+
+---
+
+## Begriffe (für Einsteiger)
+
+| Begriff | Bedeutung |
+|---|---|
+| **Public-Listener** | Der normale HTTP-Listener des Servers (UI, Admin-API, `/v1/enroll`, `/v1/sign/*`). Aufgebaut in `internal/api/server.go` → `New(deps)`. TLS terminiert **davor** am Reverse-Proxy/Ingress, nicht im Server. |
+| **Agent-Listener** | Separater mTLS-Listener für enrollte Agenten (`/v1/agent/…`, Singular!). Aufgebaut via `NewAgent`. **Wird in diesem Plan nicht angefasst.** |
+| **Enrollment-Token** | Einmaliges Bearer-Secret `gssh-et-…` (32 Zufallsbytes, base64url). In der DB liegt nur der SHA-256-Hash (`store.EnrollmentToken`), der Klartext existiert genau einmal in der Antwort. |
+| **SPKI-Pin** | Base64(SHA-256(SubjectPublicKeyInfo)) des TLS-Zertifikats, das der Host beim Enrollment sieht. Der Agent (`gssh-agentd enroll --pin`) verweigert dann jede andere Gegenstelle. Werkzeuge dazu: `internal/pintls`. |
+| **fail-closed** | Bei fehlender Voraussetzung oder Fehler wird **abgebrochen bzw. abgeschaltet** — niemals still mit unsicherem Fallback weitergemacht. Leitprinzip dieses Plans. |
+| **Hairpin** | Der Server ruft seinen **eigenen externen** URL auf (durch den Reverse-Proxy zurück zu sich selbst). Scheitert in manchen Umgebungen (Cloud-LB ohne Hairpin-NAT, NetworkPolicies, Split-Horizon-DNS) — deshalb gibt es alternative Pin-Quellen. |
+| **Split-Horizon-DNS** | Derselbe DNS-Name löst intern anders auf als extern. Folge: der Server sieht beim Selbst-Dial u. U. ein **anderes** Zertifikat als die Hosts von außen. |
 
 ---
 
 ## Machbarkeit: JA
 
-Alle Bausteine existieren bereits, es fehlt Verdrahtung, kein neues Konzept:
+Alle Bausteine existieren, es fehlt Verdrahtung, kein neues Konzept
+(gegen den Code verifiziert):
 
 | Baustein | Status heute | Was fehlt |
 |---|---|---|
-| Web-Bundling ins Server-Binary | `web/embed.go` → `//go:embed all:dist`, Server importiert `web.Dist` | zweites Embed für Agent-Binaries |
-| Cross-Build Agent (linux/amd64+arm64) | `make cross` baut `bin/gssh-agentd-linux-<arch>` mit `-ldflags` Version | im Dockerfile-Build-Stage einhängen |
-| Token-Erzeugung | `gssh-server enroll-token` + `store.CreateEnrollmentToken` (Hash in DB, Klartext nach stdout) | Admin-API-Endpoint statt nur CLI |
-| Host-Enrollment | `gssh-agentd enroll --server --agent-url --token [--pin]` (idempotent) | unverändert nutzbar |
-| Manuelles Install-Script | `deploy/packaging/install.sh` zieht Binary aus GitHub-Release | server-templated Variante, Download vom Server |
-| Getrennte Listener | Public-Mux (UI/Admin/enroll) und mTLS-Agent-Mux (`/v1/agent/…`) getrennt (`New` vs `NewAgent`) | neue Public-Routen unter Prefix `/v1/agents/` (kein Konflikt) |
-| Externe URL | `GSSH_UI_BASE_URL`, sonst aus Request-Host abgeleitet | zusätzlich externe Agent-URL nötig |
+| Web-Bundling ins Server-Binary | `web/embed.go` → `//go:embed all:dist` | zweites Embed für Agent-Binaries |
+| Cross-Build Agent (linux/amd64+arm64) | `make cross` baut `bin/gssh-agentd-linux-<arch>` mit `LDFLAGS` | im Dockerfile als eigene Build-Stage |
+| Token-Erzeugung | `gssh-server enroll-token` (`cmd/gssh-server/main.go: runEnrollToken`) + `store.CreateEnrollmentToken` | Admin-API-Endpoint statt nur CLI |
+| Host-Enrollment | `gssh-agentd enroll --server --agent-url --token [--pin] [--session-audit]` (Flags in `internal/agentd/cli.go`, idempotent) | neues Flag `--require-pin` |
+| Manuelles Install-Script | `deploy/packaging/install.sh` (GitHub-Release-Variante) | server-getemplatete Variante, Download vom Server |
+| Getrennte Listener | Public-Mux (`New`) und mTLS-Agent-Mux (`NewAgent`) getrennt | neue Public-Routen unter `/v1/agents/` (Plural — kein Konflikt mit `/v1/agent/`) |
+| Rate-Limiting | `internal/api/ratelimit.go` (`RateLimiter`, Token-Bucket pro Client-IP, `TrustProxyHeader`) | zweite Instanz für Downloads |
+| Pin-Werkzeuge | `internal/pintls` (`DecodePin`, `Transport`, `Verifier`) | Helper `FromCertificate` |
+| Externe URL | `GSSH_UI_BASE_URL` | zusätzlich `GSSH_PUBLIC_URL`, `GSSH_AGENT_PUBLIC_URL` |
 
-**Versionsgleichheit** ist geschenkt: Agent-Binaries werden im **selben
-Docker-Build** wie der Server erzeugt (gleiche `-ldflags`, gleicher Commit) und
-ins Server-Image gelegt. Der Server serviert exakt das Binary, das zu ihm passt —
-kein Netz nach außen, air-gap-tauglich.
+**Versionsgleichheit ist geschenkt:** Agent-Binaries entstehen im **selben
+Docker-Build** wie der Server (gleiche `-ldflags`, gleicher Commit) und liegen
+im Server-Image. Der Server serviert exakt das Binary, das zu ihm passt.
 
-**Alle Arches, immer, unabhängig von der Server-Arch.** Der Host kann eine andere
-Architektur haben als der Server (amd64-Server, arm64-Host o. u.). Deshalb werden
-die Agent-Binaries **für alle unterstützten Ziel-Arches cross-gebaut und komplett
-eingebettet** — nicht nur für die Arch, auf der der Server-Build läuft. Cross-Build
-ist `CGO_ENABLED=0` statisch, also arch-unabhängig aus jeder Build-Umgebung möglich.
-Ziel-Arches (Agent ist linux-only, systemd): aktuell **linux/amd64, linux/arm64**;
-Liste erweiterbar (386, arm/v7, riscv64) durch einen Eintrag in der Build-Matrix.
+**Alle Arches, immer, unabhängig von der Server-Arch.** Der Zielhost kann eine
+andere Architektur haben als der Server (amd64-Server, arm64-Host o. u.).
+Deshalb werden die Agent-Binaries **für alle unterstützten Ziel-Arches
+cross-gebaut und komplett eingebettet**. Cross-Build ist `CGO_ENABLED=0`
+statisch, also aus jeder Build-Umgebung möglich. Ziel-Arches (Agent ist
+linux-only, systemd): aktuell **linux/amd64, linux/arm64**; erweiterbar durch
+einen Eintrag in der Build-Schleife.
 
 ---
 
 ## Ziel-Ablauf (UX)
 
 1. Admin öffnet **Hosts** → Button **„Host hinzufügen“**.
-2. Dialog: optional Hostname-Bindung, Tags (`env=prod,role=web`), TTL, Session-Audit-Flag.
-3. Klick **„Token erzeugen“** → Server mintet einmaliges Token, Antwort enthält
-   Token-Klartext (einmalig), Server-Version und Liste der verfügbaren Agenten
-   (arch, Größe, SHA-256).
-4. Dialog zeigt eine **Copy-Zeile** plus **Arch-Auswahl** (Dropdown), die die
-   Zeile anpasst:
-   - Default **„auto (Script erkennt)"** — eine Zeile, deckt alle Arches ab, das
+2. Dialog: optional Hostname-Bindung, Tags (`env=prod,role=web`), TTL
+   (Default 1 h), Session-Audit-Checkbox (Default aus).
+3. Klick **„Token erzeugen“** → Server mintet einmaliges Token; Antwort enthält
+   Token-Klartext (einmalig!), `expires_at` und das fertige `install_command`.
+4. Dialog zeigt die **Copy-Zeile** plus **Arch-Auswahl** (Dropdown):
+   - Default **„auto (Script erkennt)“** — eine Zeile für alle Arches, das
      Script macht `uname -m`:
      ```
      curl -fsSL https://gssh.example.com/install.sh | sudo sh -s -- --token gssh-et-XXXXXXXX
      ```
-   - Explizite Wahl **amd64 / arm64** — pinnt die Arch im Kommando (nötig bei
-     Cross-Provisioning oder Pipe ohne TTY, wo `uname` die Ziel-Arch nicht trifft):
+   - Explizite Wahl **amd64 / arm64** — pinnt die Arch (nötig bei
+     Cross-Provisioning, wo `uname` auf der ausführenden Maschine nicht die
+     Ziel-Arch liefert):
      ```
      curl -fsSL https://gssh.example.com/install.sh | sudo sh -s -- --token gssh-et-XXXXXXXX --arch arm64
      ```
-   Copy-Button je Variante. Die Arch-Liste im Dropdown kommt aus dem Manifest
-   (`GET /v1/agents`) — nur tatsächlich eingebettete Arches erscheinen.
-5. Operator fügt Zeile auf dem Linux-Host ein. **Ein Kommando**, Ende: Binary
-   installiert, Unit aktiv, Host enrolled, sshd konfiguriert.
+   Die Arch-Liste im Dropdown kommt aus dem Manifest (`GET /v1/agents`) — nur
+   tatsächlich eingebettete Arches erscheinen.
+5. Operator fügt die Zeile auf dem Linux-Host ein. **Ein Kommando**, Ende:
+   Binary installiert, Unit aktiv, Host enrolled, sshd konfiguriert.
 
-Das server-servierte `install.sh` ist zur Laufzeit getemplatet und kennt bereits
-Server-URL, Agent-URL, Version, SHA-256 und den (Pflicht-)SPKI-Pin. Einzige
-Variable ist das Token.
-
-Was das Script tut (identisch zur heutigen manuellen 3-Schritt-Sequenz, nur
-gebündelt):
-1. root + `sshd` prüfen (`ssh-keygen -A`, falls Host-Keys fehlen)
-2. arch bestimmen: `--arch`-Argument (falls gesetzt) hat Vorrang, sonst `uname -m`
-   → amd64/arm64; unbekannte/nicht eingebettete arch → Abbruch mit Klartext
-3. Binary vom Server laden: `GET /v1/agents/linux/<arch>` → `/usr/bin/gssh-agentd`,
-   SHA-256 gegen den ins Script getemplateten (arch-spezifischen) Hash prüfen
-4. systemd-Unit schreiben (Inhalt aus derselben eingebetteten Quelle wie deb/rpm — `internal/agentdist/gssh-agentd.service`, K12)
-5. Pin-Guard: ist der getemplatete Pin leer → **Abbruch** (Rollout ist ohne Pin
-   nicht erlaubt)
-6. `gssh-agentd enroll --server <base> --agent-url <agent> --token <t> --pin <spki>
-   --require-pin` (Pin immer gesetzt, Agent erzwingt ihn fail-closed)
-7. `systemctl enable --now gssh-agentd`
-8. Erfolgsmeldung
+Das server-servierte `install.sh` ist zur Laufzeit getemplatet und enthält
+bereits Server-URL, Agent-URL, Version, per-Arch-SHA-256, systemd-Unit-Inhalt
+und den (Pflicht-)SPKI-Pin. Einzige Variablen sind Token und optionale Flags.
 
 ---
 
-## Architektur / neue Bausteine
+## Eiserne Regeln (was zu lassen ist)
 
-### Backend (Go)
+Diese Regeln gelten für **alle** Arbeitspakete. Sie sind das Kondensat der
+Review-Entscheidungen — jede einzelne hat einen konkreten Schadensfall hinter
+sich. Im Zweifel: Regel befolgen, nicht „pragmatisch“ abweichen.
 
-**A. Agent-Binaries ins Image**
-- Empfehlung: neues Paket `internal/agentdist` mit `//go:embed all:bin` und einer
-  Zugriffs-API `Open(os, arch) (fs.File, sha256 string, ok bool)`.
-- Dockerfile: neue Build-Stage cross-baut `gssh-agentd` **für alle Ziel-Arches**
-  (linux/amd64 + linux/arm64, Matrix erweiterbar) mit gleichen `-ldflags` wie der
-  Server, legt sie nach `internal/agentdist/bin/gssh-agentd-linux-<arch>`, dann
-  baut `gssh-server` mit eingebettetem Verzeichnis. **Wichtig:** dieser Cross-Build
-  ist von `TARGETARCH` des Server-Images entkoppelt — auch ein arm64-Server-Image
-  bettet das amd64-Agent-Binary mit ein und umgekehrt. Bei Multi-Arch-Server-Image
-  (buildx) baut jede Plattform-Variante denselben vollständigen Agent-Satz ein.
-- Lokaler `go build` ohne Binaries: Embed-Verzeichnis enthält nur `.gitkeep` →
-  Endpoints antworten `503 „agent binaries not bundled in this build"`. Sauber
-  degradiert, keine Test-Brüche.
-- Tradeoff: Server-Binary ~+30–40 MB (zwei statische Agenten). Alternative:
-  Binaries per `COPY` in Image-Pfad `/usr/local/share/gssh-agents/`, Server liest
-  via `os.DirFS`. Behält Binary klein, ist aber zwei Artefakte. **Empfehlung:
-  Embed** (Single-Artifact, garantierter Versions-Lockstep).
-
-**B. Neue Public-Endpoints** (Public-Listener, `internal/api/server.go`)
-- `GET /v1/agents` → Manifest: `{ version, agents: [{os, arch, size, sha256}] }`.
-  **Unauthentifiziert** (kein Geheimnis, nur öffentliche Metadaten); billig, auf
-  dem regulären Limiter.
-- `GET /v1/agents/{os}/{arch}` → Binary-Stream (`application/octet-stream`).
-  **Unauthentifiziert** (Host hat noch keine Credentials). Binary ist öffentliches
-  Artefakt; das Token ist das Gate. **Eigener, enger Download-Rate-Limiter** gegen
-  Bandbreiten-Flooding (Binary 15–40 MB): der bestehende `RateLimiter`
-  (Per-IP-Token-Bucket, `internal/api/ratelimit.go`) als **zweite Instanz** mit
-  eigener Config, **Default 10 Downloads/IP/Minute** (Burst 5), konfigurierbar via
-  Env `GSSH_AGENT_DOWNLOAD_RPM`; erbt `TrustProxyHeader` aus derselben Env wie der
-  reguläre Limiter (`GSSH_RATE_TRUST_XFF`, K5). Der reguläre 60/min-Limiter der
-  Sign-/Enroll-Endpunkte ist dafür zu locker.
-- `GET /install.sh` → getemplatetes POSIX-`sh`-Script mit Base-URL, Agent-URL,
-  Version, SHA-256, optional Pin. Unauthentifiziert.
-- Prefix bewusst `/v1/agents/` (Plural) — `/v1/agent/` (Singular) ist der mTLS-Listener.
-
-**C. Token-Minting-Endpoint** (`internal/api/admin_ui.go`, roleAdmin)
-- `POST /v1/admin/enroll-tokens`, Body `{ hostname?, tags?, ttl_seconds?, session_audit? }`.
-- Logik aus `cmd/gssh-server/main.go:runEnrollToken` extrahieren → gemeinsame
-  Funktion in `internal/store` oder Helper, damit CLI und API identisch minten.
-- Antwort `{ token, expires_at, install_command }` (Klartext **einmalig**).
-- Audit-Event `host.enroll_token.created` (Actor, Tags, TTL, kein Token-Klartext).
-
-**D. Externe Agent-URL konfigurierbar**
-- Enroll braucht `--agent-url` = externe mTLS-Agent-API. Neuer Env
-  `GSSH_AGENT_PUBLIC_URL` (Fallback: aus `GSSH_UI_BASE_URL`-Host + Agent-Port
-  ableiten). Ins Template und in `install_command` einsetzen.
-
-**E. Pflicht-Pinning & Rollout-Gate (fail-closed)**
-- SPKI-Pin ist **verpflichtend**. Kein Codepfad gibt je ein ungepinntes
-  Install-Kommando aus.
-- **Der Server liest das Cert selbst vom eigenen Public-Endpoint.** Der
-  Public-Listener terminiert kein TLS — das läuft am **Reverse-Proxy**. Der
-  Pin ist **nicht statisch** (Cert rotiert). Mechanismus:
-  - Der GSSHS wählt seinen eigenen externen Public-URL per TLS an (`GSSH_PUBLIC_URL`,
-    Fallback `GSSH_UI_BASE_URL`), macht einen Handshake gegen den Reverse-Proxy,
-    liest das **Leaf-Zertifikat** aus (`cs.PeerCertificates[0]`) und berechnet
-    `base64(SHA-256(SubjectPublicKeyInfo))` — exakt der Wert, den ein echter Host
-    beim Enrollment sieht.
-  - **Hintergrund-Refresh-Loop** (Intervall via `GSSH_PUBLIC_PIN_REFRESH`, Default
-    z. B. 5 min) hält den gecachten Pin aktuell → bei Cert-Rotation zieht der Pin
-    automatisch nach, ohne Operator-Eingriff. Neu geminttete Kommandos tragen den
-    frischen Pin.
-  - Voraussetzung: der Server muss seinen eigenen Public-URL erreichen (Hairpin/
-    internes DNS auf den Reverse-Proxy). Dokumentieren.
-- **Rollout-Gate:** Solange **kein Pin gelesen** wurde (Start noch nicht
-  erfolgreich, Endpoint nicht erreichbar), sind Token-Minting, `install.sh` und
-  Binary-Download **deaktiviert** (503), und der UI-Button „Host hinzufügen“ ist
-  ausgegraut mit Klartext-Hinweis („Pin noch nicht ermittelt"). Kein stiller
-  ungepinnter Fallback.
-- **Bedienfehler-Schutz (kein MITM-Schutz):** Das getemplatete `install.sh` bricht
-  ab, wenn der Pin leer ist, und übergibt `--pin` immer. Zusätzlich erzwingt der
-  Agent den Pin in diesem Pfad (`gssh-agentd enroll --require-pin` bzw. Env
-  `GSSH_ENROLL_REQUIRE_PIN=1`, vom Script gesetzt) → eine aus dem Script
-  herauskopierte enroll-Zeile ohne `--pin` scheitert fail-closed statt still
-  ungepinnt zu enrollen. Gegen Script-Manipulation (MITM) schützt das **nicht** —
-  das adressieren HTTPS-Abruf und die Pin-Quellen (K1/K2). Der bestehende
-  manuelle/deb-rpm-Pfad bleibt unverändert (Pin dort weiter optional).
-
-### Frontend (Angular, `web/src/app/features/hosts.ts`)
-- Button „Host hinzufügen“ in `page-header`.
-- Dialog-Komponente: Formular (Hostname, Tags, TTL, Session-Audit) → `POST
-  /v1/admin/enroll-tokens`.
-- Ergebnis-Ansicht: Token (maskiert + Copy), **Arch-Dropdown** (Optionen aus
-  `GET /v1/agents`: „auto" + je eingebettete Arch) das die Copy-Zeile live anpasst
-  (`--arch <x>`), Agent-Liste (arch/Größe/SHA-256), Hinweis „Token einmalig, TTL läuft“.
-- API-Anbindung: OpenAPI (`api/openapi.yaml`) um Pfade erweitern, Client-`fn`
-  regenerieren (oder hand-geschrieben analog `enrollment/enroll-host.ts`).
-
-### OpenAPI / Doku
-- `api/openapi.yaml`: `/v1/admin/enroll-tokens`, `/v1/agents`, `/v1/agents/{os}/{arch}`, `/install.sh`.
-- `deploy/packaging/install.sh` bleibt als GitHub-Fallback; README-Hinweis auf
-  neuen server-internen Weg.
+1. **Niemals `InsecureSkipVerify`** — nirgends, auch nicht „nur um das
+   Zertifikat zu lesen“. Ein unverifizierter Pin-Dial würde einen
+   MITM-Angreifer-Pin in jedes `install.sh` templaten und damit den gesamten
+   Pinning-Mechanismus aushebeln. Es gibt in diesem Feature **keinen**
+   `InsecureSkipVerify`-Codepfad.
+2. **Keine URL-Ableitung.** `GSSH_AGENT_PUBLIC_URL` wird niemals aus anderen
+   Werten „geraten“ (Host + interner Port ≠ externer Port hinter LB/Ingress).
+   Fehlt die Env ⇒ Rollout-Gate zu (503). Eine falsche Agent-URL landet sonst
+   unbemerkt in `config.yaml` von N Hosts und knallt erst beim ersten
+   Zertifikats-Renew — Korrektur hieße N Hosts anfassen.
+3. **Kein ungepinnter Codepfad im Rollout.** Kein Pin ermittelbar ⇒ Endpoints
+   503, UI-Button ausgegraut, Script bricht bei leerem Pin ab. Niemals still
+   ohne Pin enrollen.
+4. **Token-Klartext nie loggen, nie speichern.** In der DB liegt nur der
+   SHA-256-Hash; das Audit-Event enthält Tags/TTL/Actor, **nicht** das Token.
+5. **`install.sh` ist POSIX-`sh`.** Kein bash, kein `set -o pipefail` (in
+   dash/busybox-sh nicht verlässlich) — Pipe-Fehler werden explizit über
+   Exit-Codes geprüft. Gesamtes Script in `main() { … }`, letzte Zeile
+   `main "$@"` (Schutz gegen abgebrochene Übertragung, die sonst ein halbes
+   Script ausführt).
+6. **Binary-Tausch atomar, ohne Stop.** Download in ein Tempfile **im selben
+   Verzeichnis** (`/usr/bin/.gssh-agentd.XXXXXX`, gleiche Partition — nicht
+   `/tmp`!), Hash prüfen, `chmod`, dann `mv -f`. `rename(2)` ersetzt auch
+   laufende Binaries ohne „text file busy“. Kein `systemctl stop` vor dem
+   Kopieren. Und: `systemctl enable --now` startet eine **bereits aktive**
+   Unit nicht neu — bei aktiver Unit stattdessen `systemctl restart`.
+7. **Eine Quelle für die systemd-Unit.** Die Datei zieht per `git mv` nach
+   `internal/agentdist/gssh-agentd.service` und wird von dort eingebettet
+   (`go:embed` kann nicht über das Package-Verzeichnis hinausgreifen — darum
+   Umzug statt Referenz). `nfpm.yaml` zeigt auf den neuen Pfad. **Kein**
+   zweites Here-Doc-Duplikat im Repo — das driftet zwangsläufig.
+8. **`/v1/agents/…` (Plural) nur auf dem Public-Listener.** `/v1/agent/…`
+   (Singular) ist der mTLS-Listener — nicht anfassen, nichts dort einhängen.
+9. **Eine Wahrheit für die Client-IP.** Der neue Download-Limiter übernimmt
+   `TrustProxyHeader` aus derselben Env wie der reguläre Limiter
+   (`GSSH_RATE_TRUST_PROXY`). Keine zweite XFF-Konfiguration erfinden.
+   (Achtung: die Env heißt wirklich `GSSH_RATE_TRUST_PROXY` — nicht
+   `…_TRUST_XFF`, wie eine frühere Planfassung schrieb.)
+10. **`Cache-Control: no-store` auf allen drei Endpoints** — `install.sh`,
+    Manifest **und** Binary-Download. Ein Cache, der nach einem Server-Upgrade
+    das alte Binary zur neuen `install.sh` liefert, erzeugt
+    Phantom-Hash-Mismatches. Eine Regel statt drei; Binary-Caching hätte
+    ohnehin keinen Nutzen (ein Download pro Host-Lebenszeit).
+11. **Agent-Binaries nie committen.** `internal/agentdist/bin/` bleibt im Repo
+    leer (`.gitkeep`), `.gitignore`-Eintrag kommt dazu. Befüllt wird das
+    Verzeichnis nur im Docker-Build (und lokal für Tests).
+12. **Bestehende Install-Pfade unverändert lassen.** deb/rpm und der manuelle
+    Weg behalten ihr Verhalten (Pin dort weiterhin optional, kein
+    `--require-pin`-Default). Dieses Feature ist ein **zusätzlicher** Pfad.
 
 ---
 
-## Sicherheit (bewusst in Klartext, nicht Caveman)
+## Neue Umgebungsvariablen (Überblick)
 
-Dies ist `curl … | sudo sh`, ausgeführt als root — die klassische
-Supply-Chain-Angriffsfläche. Maßnahmen:
+Alle neuen Envs auf einen Blick; Details in den Arbeitspaketen.
 
-- **Nur über HTTPS ausliefern.** Der Ingress-TLS terminiert vor dem Server; das
-  Script muss über `https://` gezogen werden.
-- **SHA-256 des Binaries ins Script templaten.** Selbst bei kompromittiertem
-  Transport des Binary-Downloads erkennt das Script eine Manipulation und bricht ab.
-- **SPKI-Pin ist Pflicht, kein Opt-in.** `gssh-agentd enroll --pin` existiert
-  bereits. Der Server liest das TLS-Leaf-Cert seines eigenen Public-Endpoints
-  (Reverse-Proxy) selbst aus und templatet den Pin immer ins Script →
-  MITM-resistentes Enrollment, auch bei Cert-Rotation (Background-Refresh). Solange
-  kein Pin gelesen wurde, ist der gesamte Host-Rollout deaktiviert (fail-closed)
-  statt ungepinnt weiterzumachen. Client erzwingt den Pin zusätzlich
-  (`--require-pin`) — Schutz gegen versehentlich ungepinnte Enrollments
-  (Bedienfehler), kein Schutz gegen Script-Manipulation.
-- **Zwei-Schritt-Alternative in der UI anbieten** („herunterladen, prüfen, dann
-  ausführen") für Sicherheitsbewusste — kein Zwang zum Pipe-to-shell.
-- **Token = einmaliges, kurzlebiges Bearer-Secret.** TTL-Default kurz (z. B. 1 h),
-  Einmalverbrauch ist bereits serverseitig erzwungen. Copy-Zeile als Geheimnis
-  behandeln, nie loggen. Akzeptierte Restexposition (K14): Token steht in der
-  Operator-Shell-History und während des Laufs in argv/`ps` des Zielhosts —
-  durch Einmalverbrauch + TTL nach Gebrauch wertlos; Env-/stdin-Varianten
-  verschieben die Exposition nur, ohne sie zu beheben.
-- **Binary-Download unauthentifiziert, aber eng rate-limited** (Default 10/IP/min,
-  Burst 5, Env `GSSH_AGENT_DOWNLOAD_RPM`) gegen Bandbreiten-Flooding. Öffentliches Artefakt;
-  das Token gated das Enrollment, nicht der Binary-Zugriff.
-- **Token-Mint nur roleAdmin, audit-geloggt.**
-- **Versions-Disclosure akzeptiert (K13):** `GET /v1/agents` nennt die
-  Server-Version unauthentifiziert. Bewusst — das öffentliche Binary ist
-  ohnehin version-identifizierbar (Hash-Abgleich mit Releases,
-  `gssh-agentd version`); Streichen wäre Scheinschutz.
+| Env | Zweck | Default |
+|---|---|---|
+| `GSSH_PUBLIC_URL` | Externe Public-URL (Basis für `install_command` und Ziel des Pin-Selbst-Dials) | leer → Fallback `GSSH_UI_BASE_URL` |
+| `GSSH_PUBLIC_PIN` | Pin-Quelle 1: statischer Base64-SPKI-Pin (Operator-verwaltet) | leer |
+| `GSSH_PUBLIC_PIN_CERT_FILE` | Pin-Quelle 2: Pfad zu PEM-Zertifikat (erster Block = Leaf) | leer |
+| `GSSH_PUBLIC_PIN_REFRESH` | Refresh-Intervall des Pin-Selbst-Dials (Go-Duration) | `5m` |
+| `GSSH_AGENT_PUBLIC_URL` | Externe mTLS-Agent-URL für `enroll --agent-url` | leer ⇒ **Gate zu** |
+| `GSSH_AGENT_DOWNLOAD_RPM` | Download-Limit pro Client-IP und Minute (`0` = aus) | `10` (Burst 5) |
+
+Bestehende, hier relevante Envs: `GSSH_UI_BASE_URL` (externe UI-Basis),
+`GSSH_RATE_TRUST_PROXY` (Client-IP aus `X-Forwarded-For` — gilt für **beide**
+Limiter).
 
 ---
 
-## Phasen (abhaken)
+## Umsetzungsreihenfolge
+
+**A → P → B → C → D → E.** A (Binaries) und P (Pin/Gate) sind unabhängig
+voneinander und können parallel laufen. B (Endpoints) braucht A **und** P.
+C (Mint-API) braucht P (Gate). D (Frontend) braucht B + C. E (Doku, Helm, E2E)
+zum Schluss.
+
+---
+
+## Phase A — Agent-Binaries im Container
+
+### A1 — Paket `internal/agentdist`
+
+**Dateien:** `internal/agentdist/agentdist.go` (neu),
+`internal/agentdist/bin/.gitkeep` (neu), `.gitignore`.
+
+**Schritte:**
+
+1. Verzeichnis `internal/agentdist/bin/` mit leerer `.gitkeep` anlegen.
+   `.gitignore` ergänzen:
+   ```
+   internal/agentdist/bin/*
+   !internal/agentdist/bin/.gitkeep
+   ```
+2. `agentdist.go` mit Embed und Zugriffs-API:
+   ```go
+   //go:embed all:bin
+   var binFS embed.FS
+   ```
+   Das `all:`-Präfix ist Pflicht: ohne Binaries enthält `bin/` nur die
+   versteckte `.gitkeep`, und ein normales `//go:embed bin` schlägt bei
+   „keine einbettbaren Dateien“ fehl. `.gitkeep` wird in der API
+   herausgefiltert.
+3. Öffentliche API (wird in Phase B vom `api`-Package als Interface
+   konsumiert — **nicht** direkt auf `embed.FS` zugreifen, sonst sind die
+   Handler nicht testbar):
+   ```go
+   type Info struct {
+       OS     string // "linux"
+       Arch   string // "amd64" | "arm64"
+       Size   int64
+       SHA256 string // Hex, sha256sum-kompatibel
+   }
+
+   type Source struct { /* fs.FS + einmal berechnete Infos */ }
+
+   func New() *Source                       // über das Embed
+   func NewFromFS(fsys fs.FS) *Source       // für Tests/E2E (fstest.MapFS, os.DirFS)
+   func (s *Source) List() []Info           // stabil sortiert; leer im Dev-Build
+   func (s *Source) Open(osName, arch string) (io.ReadCloser, Info, error)
+   ```
+   Dateinamens-Konvention im Embed: `bin/gssh-agentd-linux-<arch>` — exakt
+   die Namen, die `make cross` erzeugt. `List()` parst die Namen, ignoriert
+   alles andere (insbesondere `.gitkeep`). SHA-256 (Hex!) und Größe werden
+   **einmal** beim ersten Zugriff berechnet (`sync.Once`) und gecacht.
+4. Die systemd-Unit zieht um (eine Quelle, Regel 7):
+   ```
+   git mv deploy/packaging/gssh-agentd.service internal/agentdist/gssh-agentd.service
+   ```
+   In `agentdist.go`: `//go:embed gssh-agentd.service` → `var UnitFile string`.
+   In `deploy/packaging/nfpm.yaml` den `src:`-Pfad des Unit-Eintrags auf
+   `internal/agentdist/gssh-agentd.service` ändern (deb/rpm-Ziel
+   `/lib/systemd/system/…` bleibt unverändert).
+
+**Nicht tun:**
+- Binaries per `COPY` in einen Image-Pfad legen und via `os.DirFS` lesen
+  (zwei Artefakte, Version-Lockstep nicht mehr garantiert). Entscheidung:
+  **Embed**, Tradeoff ~+30–40 MB Server-Binary akzeptiert.
+- Die Unit-Datei per `go:generate` kopieren (committetes Duplikat = Drift)
+  oder als eigenen Download-Endpoint anbieten (Round-Trip ohne Gewinn).
+
+**Fertig, wenn:** Unit-Tests (mit `NewFromFS` + `fstest.MapFS`) belegen:
+`List()` liefert je Fake-Binary korrekte Arch/Größe/Hex-Hash; `Open()` streamt
+den Inhalt; unbekannte Arch ⇒ Fehler; leeres FS ⇒ `List()` leer. `make build`
+läuft ohne Binaries durch (Dev-Build degradiert sauber). deb/rpm-Build
+(`make packages`) funktioniert mit dem neuen Unit-Pfad.
+
+### A2 — Dockerfile: Cross-Build-Stage
+
+**Dateien:** `Dockerfile`.
+
+**Schritte:**
+
+1. Neue Stage **vor** der Server-Build-Stage, zwingend mit
+   `--platform=$BUILDPLATFORM`:
+   ```dockerfile
+   FROM --platform=$BUILDPLATFORM golang:1.26 AS agentbuild
+   WORKDIR /src
+   COPY go.* ./
+   RUN go mod download
+   COPY . .
+   ARG VERSION=dev
+   ARG COMMIT=none
+   ARG DATE=unknown
+   RUN for arch in amd64 arm64; do \
+         CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+           -ldflags "-s -w \
+             -X github.com/guided-traffic/guided-ssh/internal/version.version=${VERSION} \
+             -X github.com/guided-traffic/guided-ssh/internal/version.commit=${COMMIT} \
+             -X github.com/guided-traffic/guided-ssh/internal/version.date=${DATE}" \
+           -o /out/gssh-agentd-linux-$arch ./cmd/gssh-agentd || exit 1; \
+       done
+   ```
+   Warum `--platform=$BUILDPLATFORM`: Bei buildx-Multi-Arch liefe die Stage
+   sonst je Ziel-Plattform unter QEMU-Emulation — Go-Compile wird um ein
+   Vielfaches langsamer. So läuft der Compiler nativ und crosst via
+   GOOS/GOARCH; die Stage ist plattform-invariant, BuildKit dedupliziert sie,
+   die Agenten werden pro Multi-Arch-Build effektiv **einmal** gebaut. Jede
+   Server-Plattform-Variante bettet den **vollständigen** Agent-Satz ein
+   (amd64-Server enthält auch das arm64-Agent-Binary und umgekehrt).
+2. In der bestehenden `build`-Stage vor dem `go build` des Servers:
+   ```dockerfile
+   COPY --from=agentbuild /out/ ./internal/agentdist/bin/
+   ```
+   Die `-ldflags` der Agent-Stage sind **identisch** zu denen der
+   Server-Stage (gleiche `ARG`s durchreichen) — das ist der Versions-Lockstep.
+
+**Nicht tun:**
+- Agent-Binaries als CI-Artefakt bauen und ins Image `COPY`en — bricht den
+  Single-Build-Lockstep (Server und Agent könnten aus verschiedenen Commits
+  stammen).
+- Die bestehende Server-Build-Stage jetzt ebenfalls auf `$BUILDPLATFORM`
+  umstellen — sinnvoll, aber **separates Thema**, nicht Teil dieses Plans
+  (siehe Future-Notes).
+
+**Fertig, wenn:** `docker build` produziert ein Image, in dem
+`GET /v1/agents` (nach Phase B) beide Arches mit korrekten Hashes listet.
+Bis dahin reicht als Zwischenprüfung: im Build-Log erscheinen beide
+`go build`-Läufe, und ein `docker run --entrypoint=`-Blick bestätigt das
+Server-Binary wuchs um ~30–40 MB.
+
+---
+
+## Phase P — Pflicht-Pinning & Rollout-Gate
+
+Der einzige Teil, der neu erfunden wird statt Vorhandenes zu verdrahten —
+entsprechend präzise umsetzen. Grundsatz: Der SPKI-Pin ist **verpflichtend**;
+kein Codepfad gibt je ein ungepinntes Install-Kommando aus. Ist kein Pin
+ermittelbar, ist der gesamte Host-Rollout **deaktiviert** (fail-closed) statt
+ungepinnt weiterzumachen.
+
+### P1 — `pintls.FromCertificate`
+
+**Dateien:** `internal/pintls/pintls.go`, `internal/cli/client_test.go`.
+
+**Schritte:**
+
+1. Helper ergänzen (das Paket hat `DecodePin`/`Transport`/`Verifier`, aber
+   keinen Berechnungs-Helper):
+   ```go
+   // FromCertificate liefert den Base64-SPKI-SHA-256-Pin eines Zertifikats.
+   func FromCertificate(cert *x509.Certificate) string {
+       sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+       return base64.StdEncoding.EncodeToString(sum[:])
+   }
+   ```
+2. Den handgestrickten Test-Helper `spkiPin()` in
+   `internal/cli/client_test.go:16` auf `pintls.FromCertificate` migrieren.
+
+**Nicht tun:** Die Berechnung an drei Stellen inline duplizieren (Dial-Quelle,
+Datei-Quelle, Tests) — genau dafür ist der Helper da.
+
+**Fertig, wenn:** Unit-Test mit bekanntem Zertifikat → erwarteter Pin;
+`internal/cli`-Tests laufen unverändert grün.
+
+### P2 — Pin-Provider mit drei Quellen
+
+**Dateien:** `internal/api/pinprovider.go` (neu) + Test,
+`cmd/gssh-server/main.go` (Env-Parsing, Konstruktion).
+
+Drei Quellen mit fester Präzedenz, **alle fail-closed**; die aktive Quelle
+wird geloggt und im Manifest ausgewiesen. Sind mehrere gesetzt, gewinnt die
+höchste Präzedenz, mit Warnung im Log.
+
+**Quelle 1 — `GSSH_PUBLIC_PIN` (statisch, höchste Präzedenz).**
+Operator liefert den Pin selbst; Auto-Dial und Refresh sind aus, Rotation
+liegt in Operator-Hand. Letzter Ausweg für Fälle, in denen weder Datei noch
+Dial funktionieren (z. B. Zertifikat liegt am CDN). Beim Start mit
+`pintls.DecodePin` validieren; ungültiger Wert ⇒ **Startabbruch mit klarer
+Fehlermeldung** (fail-fast wie bei `GSSH_HOST_CERT_VALIDITY`).
+Doku-Snippet für Operatoren (kommt in Phase E ins README/Helm):
+```
+openssl s_client -connect gssh.example.com:443 </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -binary | base64
+```
+
+**Quelle 2 — `GSSH_PUBLIC_PIN_CERT_FILE` (Datei).**
+Pfad zu einem PEM-Zertifikat; **erster** `CERTIFICATE`-Block = Leaf
+(cert-manager-Konvention bei `tls.crt`). Die Datei wird bei **jedem**
+Servieren frisch gelesen — **kein Caching** (Parse kostet Mikrosekunden;
+Stale-Fenster reduziert sich damit auf den Kubelet-Sync des Secret-Mounts,
+≤ ~1 min). Lese-/Parse-Fehler ⇒ kein Pin ⇒ Gate zu, Grund loggen.
+Löst Hairpin- und Split-Horizon-Deployments ohne manuellen Rotationsaufwand:
+In K8s wird das TLS-Secret des Ingress als **Volume** gemountet — kein
+K8s-API-Zugriff, kein RBAC; Kubelet aktualisiert den Mount bei
+Secret-Rotation. Funktioniert auch ohne K8s (bind-mount von `fullchain.pem`).
+
+**Quelle 3 — Auto-Dial (Default).**
+Der Server wählt seinen eigenen externen Public-URL per TLS an
+(`GSSH_PUBLIC_URL`, Fallback `GSSH_UI_BASE_URL`), liest das Leaf-Zertifikat
+(`ConnectionState().PeerCertificates[0]`) und berechnet den Pin via
+`pintls.FromCertificate` — exakt der Wert, den ein echter Host beim
+Enrollment sieht. **Zwingend:** Der Dial verifiziert die Zertifikatskette
+fail-closed mit **Standard-`tls.Config` gegen System-Roots** — keinerlei
+Sonderbehandlung, kein `InsecureSkipVerify`-Codepfad (Regel 1).
+Verifikationsfehler ⇒ kein Pin ⇒ Gate zu; Grund in Log und Manifest.
+Das Runtime-Image `distroless/static` enthält das CA-Bundle — kein
+Image-Umbau. Unternehmens-/Private-CA: CA-Bundle mounten und
+`SSL_CERT_FILE`/`SSL_CERT_DIR` setzen (Go liest beide; Achtung:
+`SSL_CERT_FILE` **ersetzt** das Standard-Bundle — bei Mischbetrieb
+konkatenieren). Self-signed ohne CA ⇒ Quelle 1 oder 2 verwenden.
+
+**Refresh-Verhalten (nur Dial-Quelle):**
+- Hintergrund-Loop, Intervall `GSSH_PUBLIC_PIN_REFRESH` (Go-Duration,
+  Default `5m`; ungültiger Wert ⇒ Startabbruch).
+- **Plus Lazy-Refresh beim Servieren:** Ist der Cache beim Ausliefern von
+  `install.sh` oder beim Token-Mint älter als das Intervall, wird synchron
+  nachgezogen. Grund: Let’s-Encrypt-Renewals erzeugen standardmäßig neue
+  Keys — ohne Lazy-Refresh trüge ein Script im Rotationsfenster planmäßig
+  alle ~60–90 Tage einen alten Pin.
+- Schlägt ein Refresh fehl, bleibt der **letzte erfolgreich gelesene** Pin
+  aktiv (mit Warn-Log). Nur „noch nie ein Pin gelesen“ hält das Gate zu.
+- Entschärfung, die man wissen muss: Ein Pin-Mismatch scheitert beim Agenten
+  im TLS-Handshake **vor** dem Request — das Token wird dabei **nicht**
+  verbraucht, ein Retry ist gratis (zusammen mit B3 ohnehin abgesichert).
+
+**API-Skizze:**
+```go
+type PinStatus struct {
+    Pin    string // leer = kein Pin
+    Source string // "static" | "file" | "dial" | ""
+    Err    string // letzter Fehler, für Log/Manifest
+}
+func NewPinProvider(cfg PinProviderConfig, logger *slog.Logger) *PinProvider
+func (p *PinProvider) Status(ctx context.Context) PinStatus // wendet Lazy-Refresh an
+```
+Konstruktion und Env-Parsing in `cmd/gssh-server/main.go` analog zu den
+bestehenden Envs; Übergabe an `api.New` via neuem `Deps`-Feld.
+
+**Nicht tun:**
+- Multi-Pin (`--pin a,b` während Rotation) — verschoben, YAGNI: Restfenster
+  ist Sekunden bis ~1 min alle ~60–90 Tage; später abwärtskompatibel als
+  Komma-Liste nachrüstbar (Future-Note).
+- Die Datei-Quelle cachen — bewusst ungecacht (s. o.).
+- Bei Dial-Fehlern einen ungepinnten Zustand „durchlassen“.
+
+**Fertig, wenn:** Tests belegen: Präzedenz (statisch schlägt Datei schlägt
+Dial, Warnung bei Mehrfach-Setzung); Datei-Quelle liest Änderungen sofort;
+Dial gegen `httptest`-Server mit nicht vertrauter CA ⇒ kein Pin (kein
+Insecure-Fallback); ungültiger statischer Pin ⇒ Startfehler.
+
+### P3 — Rollout-Gate (Server, autoritativ)
+
+**Dateien:** `internal/api/server.go` (+ neue Handler-Dateien Phase B/C).
+
+Das Gate prüft **vier** Bedingungen; solange eine fehlt, antworten
+Binary-Download, `install.sh` und Token-Mint mit **503** und die UI graut den
+Button aus. Das Manifest (`GET /v1/agents`) bleibt dabei **erreichbar (200)**
+und weist die fehlenden Bedingungen **einzeln** aus — eindeutige Diagnose
+statt Rätselraten:
+
+| Bedingung | `missing`-Eintrag |
+|---|---|
+| Agent-Binaries eingebettet (`Source.List()` nicht leer) | `"binaries"` |
+| Pin verfügbar (`PinStatus.Pin != ""`) | `"pin"` |
+| `GSSH_AGENT_PUBLIC_URL` gesetzt | `"agent_public_url"` |
+| Public-Basis-URL bekannt (`GSSH_PUBLIC_URL` oder `GSSH_UI_BASE_URL`) | `"public_url"` |
+
+Die 503-Antworten nennen die fehlenden Bedingungen im Body (gleiche Liste).
+Kein eigenes Server-Feature-Flag: **die Gate-Bedingungen sind der Schalter.**
+
+**Nicht tun:** Ein zusätzliches `GSSH_HOST_ROLLOUT_ENABLED`-Flag einführen —
+doppelter Zustand, der mit den realen Bedingungen driften kann.
+
+**Fertig, wenn:** Handler-Tests: jede fehlende Einzelbedingung erzeugt 503
+mit korrektem `missing`-Eintrag auf Download/Script/Mint, Manifest bleibt 200
+und listet dieselben Einträge.
+
+### P4 — Client: `--require-pin`
+
+**Dateien:** `internal/agentd/cli.go` (Enroll-Flagset, Z. 77 ff.),
+`internal/agentd/enroll.go` (nur falls nötig), Tests.
+
+**Schritte:**
+
+1. Neues Flag `--require-pin` (bool) im `gssh-agentd enroll`-Flagset plus
+   Env-Äquivalent `GSSH_ENROLL_REQUIRE_PIN=1` (Env gesetzt wirkt wie Flag).
+2. Verhalten: Ist require-pin aktiv und `--pin` leer/fehlend ⇒ Abbruch mit
+   klarer Meldung **vor** jedem Netzwerk-Call.
+3. Das getemplatete `install.sh` setzt das Flag **immer** (Phase B3).
+   Der manuelle und der deb/rpm-Pfad bleiben unverändert (Default false).
+
+**Ehrliche Einordnung (so auch in Doku und Code-Kommentar formulieren):**
+Das ist **Bedienfehler-Schutz, kein MITM-Schutz.** Es verhindert, dass ein
+Operator die enroll-Zeile aus dem Script herauskopiert, `--pin` weglässt und
+still ungepinnt enrollt. Wer das gepipte Script manipulieren kann, entfernt
+auch dieses Flag — dagegen schützen HTTPS-Abruf und die Pin-Quellen (P2),
+nicht dieses Flag. Formulierungen wie „Client-Zwang“ oder „erzwingt Pinning“
+sind falsch und werden nicht verwendet.
+
+**Fertig, wenn:** Test: `enroll --require-pin` ohne `--pin` bricht ab (kein
+Request abgesetzt); mit `--pin` läuft es wie bisher; Env-Variante gleich.
+
+---
+
+## Phase B — Public-Endpoints
+
+Alle neuen Routen liegen im Public-Mux (`internal/api/server.go`, Funktion
+`New`), registriert im Go-1.22-Muster (`mux.HandleFunc("GET /v1/agents", …)`).
+`Deps` wird erweitert um: `Agents` (Interface über `agentdist.Source`),
+`Pins *PinProvider`, `AgentPublicURL string`, `PublicBaseURL string`,
+`DownloadRateLimit *RateLimiter`.
+
+### B1 — Manifest `GET /v1/agents`
+
+**Verhalten:** Immer 200 (auch bei geschlossenem Gate — Diagnosefunktion,
+siehe P3), `Cache-Control: no-store`, auf dem **regulären** Limiter
+(`deps.RateLimit.limit(…)`), unauthentifiziert. Antwort:
+
+```json
+{
+  "version": "v2.1.1",
+  "rollout_ready": false,
+  "missing": ["pin"],
+  "pin_source": "",
+  "agents": [
+    { "os": "linux", "arch": "amd64", "size": 15728640, "sha256": "<hex>" },
+    { "os": "linux", "arch": "arm64", "size": 14680064, "sha256": "<hex>" }
+  ]
+}
+```
+
+`version` kommt aus `internal/version.String()`. **Bewusste Entscheidung —
+Version bleibt im öffentlichen Manifest:** Das öffentliche Binary ist ohnehin
+version-identifizierbar (SHA-256-Abgleich mit Release-Checksums,
+`gssh-agentd version` nach Download); Streichen wäre Scheinschutz gegen
+gezielte Angreifer und nähme nur Massen-Scannern einen JSON-Read ab.
+Gegenwert: Operator-Diagnose per `curl`, UI-Anzeige ohne Zusatz-Call.
+
+### B2 — Binary-Download `GET /v1/agents/{os}/{arch}`
+
+**Verhalten:** Unauthentifiziert (der Host hat noch keine Credentials; das
+Binary ist ein öffentliches Artefakt — **das Token gated das Enrollment,
+nicht den Binary-Zugriff**). Gate geschlossen ⇒ 503. Unbekannte oder nicht
+eingebettete os/arch ⇒ 404 mit Klartext. Sonst Stream mit
+`Content-Type: application/octet-stream`, `Content-Length`,
+`Cache-Control: no-store`.
+
+**Eigener, engerer Rate-Limiter** (Binary ist 15–40 MB — der reguläre
+60/min-Limiter der Sign-/Enroll-Endpunkte ist als Flood-Schutz zu locker):
+
+- Zweite `RateLimiter`-Instanz (`api.NewRateLimiter`), nur für diese Route.
+- Env `GSSH_AGENT_DOWNLOAD_RPM`, **Default 10/min, Burst 5**, `0` = aus
+  (gleiche Semantik wie `GSSH_SIGN_RATE_PER_MINUTE`). Begründung der 10:
+  Per-IP-Limits stoppen ohnehin nur Einzelquellen; 10/min leistet das genauso
+  wie ein engerer Wert, würgt aber Bulk-Rollouts hinter Firmen-NAT (eine IP,
+  Ansible-Loop über 50 Hosts) nicht ab. Worst-Case-Bandbreite pro IP bei
+  15–20 MB Binary ≈ 25–35 Mbit/s — als Flood-Schutz ausreichend.
+- `TrustProxyHeader` **erbt** aus `GSSH_RATE_TRUST_PROXY` (Regel 9). Sonst
+  sähen hinter dem Ingress alle Requests wie die Proxy-IP aus ⇒ 10/min
+  **global** — ein Parallel-Rollout wäre ab Host 6 gedrosselt und schwer zu
+  diagnostizieren.
+- Das Failure-Budget der Instanz bleibt ungenutzt (öffentlicher Endpoint,
+  keine 401/403) — Defaults einfach stehen lassen.
+
+### B3 — Install-Script `GET /install.sh`
+
+**Verhalten:** Unauthentifiziert, Gate geschlossen ⇒ 503,
+`Cache-Control: no-store`, `Content-Type: text/x-shellscript`. Serverseitig
+per `text/template` getemplatet; Template-Werte: Public-Basis-URL,
+`GSSH_AGENT_PUBLIC_URL`, Version, per-Arch-SHA-256 (Hex), Pin (Base64),
+verfügbare Arch-Liste, Unit-Inhalt (`agentdist.UnitFile`, eingebettet als
+quoted Here-Doc `<<'UNIT_EOF'` — keine Shell-Expansion; die Datei ist
+statisch, es gibt **kein** Unit-Templating).
+
+**Script-Spezifikation** (POSIX-`sh`; Regeln 5 und 6 gelten vollständig):
+
+Struktur: `set -eu` (kein `pipefail`!), alles in `main() { … }`, letzte Zeile
+`main "$@"`; `trap 'rm -f "$tmp"' EXIT` fürs Tempfile.
+
+Flags: `--token <t>` (Pflicht), `--arch <amd64|arm64>` (optional, hat Vorrang
+vor `uname -m`), `--session-audit` (optional, Passthrough an enroll),
+`--no-systemd` (optional, s. u.).
+
+Ablauf:
+
+1. **Vorbedingungen:** `id -u` = 0, sonst Abbruch („mit sudo ausführen“).
+   `command -v curl`, sonst Abbruch („curl installieren“). `command -v sshd`,
+   sonst Abbruch („openssh-server installieren“). Fehlt
+   `/etc/ssh/ssh_host_ed25519_key.pub` ⇒ `ssh-keygen -A`.
+2. **Pin-Guard:** Ist der getemplatete Pin leer ⇒ Abbruch. (Darf durch das
+   Server-Gate nie vorkommen — doppelter Boden, Regel 3.)
+3. **Arch bestimmen:** `--arch` falls gesetzt, sonst `uname -m` mappen
+   (`x86_64`→amd64, `aarch64`→arm64). Unbekannte oder nicht eingebettete
+   Arch ⇒ Abbruch, Meldung nennt die verfügbaren Arches (getemplatete Liste).
+4. **Binary laden (atomar):** Tempfile im Zielverzeichnis anlegen
+   (`mktemp /usr/bin/.gssh-agentd.XXXXXX` — gleiche Partition, **nicht**
+   `/tmp`, sonst wird das spätere `mv` ein nicht-atomarer Cross-Device-Copy).
+   `curl -fsSL "<base>/v1/agents/linux/$arch" -o "$tmp"`. Hash prüfen:
+   `echo "<sha256-hex>  $tmp" | sha256sum -c -` (zwei Leerzeichen!);
+   Mismatch ⇒ Abbruch. `chmod 0755 "$tmp"`, dann `mv -f "$tmp"
+   /usr/bin/gssh-agentd`. Kein `systemctl stop` vorher — `rename(2)` ersetzt
+   auch das Binary eines laufenden Daemons ohne ETXTBSY; der Daemon behält
+   sein altes Inode, keine Downtime.
+5. **State-Verzeichnis:** `mkdir -p /var/lib/guided-ssh`, `chmod 700`.
+6. **Unit schreiben:** Inhalt aus dem Here-Doc nach
+   `/etc/systemd/system/gssh-agentd.service` (bewusst `/etc/…`, nicht
+   `/lib/…` — `/lib` gehört den Paketen; Script- und deb/rpm-Install dürfen
+   ohnehin nicht gemischt werden, README-Hinweis in Phase E). Wird auch bei
+   `--no-systemd` geschrieben.
+7. **Enroll (mit Degradation statt Skip):**
+   ```
+   gssh-agentd enroll --server <base> --agent-url <agent-url> \
+     --token "$token" --pin <pin> --require-pin [--session-audit]
+   ```
+   Enroll läuft **immer** (kein „skip wenn schon enrolled“). Schlägt er fehl
+   **und** `/var/lib/guided-ssh/config.yaml` existiert ⇒ deutliche Warnung
+   „bestehendes Enrollment wird weiterverwendet“, Merker setzen,
+   **weitermachen**. Ohne `config.yaml` ⇒ harter Abbruch. Das deckt beides
+   ab: Re-Run derselben Zeile nach Teilfehler (Token schon verbraucht ⇒
+   Enroll scheitert, altes Enrollment trägt) und echtes Re-Enroll mit
+   frischem Token (Enroll gelingt, idempotentes Überschreiben) — ohne
+   zusätzliches Flag. Bewusste Kante: Ein gewolltes Re-Enroll, das aus
+   anderem Grund scheitert, läuft mit dem alten Enrollment weiter — darum
+   muss die Warnung unübersehbar sein (auch in der Abschlussmeldung
+   wiederholen); der Host endet immer funktionsfähig.
+8. **systemd (zustandsabhängig):** Bei `--no-systemd`: alle
+   `systemctl`-Schritte und den Health-Check überspringen; am Ende explizit
+   auflisten, was übersprungen wurde, plus manuelles Aktivierungskommando
+   (`systemctl daemon-reload && systemctl enable --now gssh-agentd`).
+   Sonst: `systemctl daemon-reload`; ist die Unit bereits aktiv
+   (`systemctl is-active --quiet gssh-agentd`) ⇒ `systemctl restart
+   gssh-agentd` (Upgrade lädt das neue Binary — `enable --now` würde eine
+   aktive Unit **nicht** neu starten), sonst ⇒ `systemctl enable --now
+   gssh-agentd`.
+9. **Health-Check (entfällt bei `--no-systemd`):** Bis zu 10 s warten auf
+   **beides**: `systemctl is-active --quiet gssh-agentd` **und** Existenz von
+   `/var/lib/guided-ssh/agentd.sock` — der Daemon legt den Socket erst bei
+   Bereitschaft an (dasselbe Signal nutzt die Testfixture); das ist bei
+   `Type=simple` stärker als `is-active` allein. Fehlschlag ⇒ Meldung mit
+   Hinweis `journalctl -u gssh-agentd -n 20`, Exit ≠ 0. Dokumentierte
+   Grenze: Eine falsche Agent-URL fällt hier nicht zwingend auf (der Agent
+   dialt sie ggf. erst zur Zertifikats-Erneuerung) — dagegen schützt das
+   Gate aus P3/Regel 2, nicht dieser Check.
+10. **Erfolgsmeldung** — inklusive Wiederholung der
+    „Enrollment weiterverwendet“-Warnung, falls Schritt 7 degradiert hat.
+
+**Warum `--no-systemd` existiert:** Die E2E-Fixture
+(`internal/agentd/testdata/sshd`, alpine) hat kein systemd — ohne das Flag
+wäre der Smoke-Test nicht ausführbar (Phase E4). Nebeneffekt: nützt echten
+Hosts ohne systemd-PID-1 (Container-Hosts mit eigenem Supervisor).
+
+**Nicht tun:**
+- `set -o pipefail` (Regel 5), bash-Syntax, `mktemp` unter `/tmp`.
+- Selbst-Hash-Prüfung des Scripts (Bootstrap-Zirkel — wer das Script
+  manipuliert, manipuliert den Prüfwert mit).
+- Ein `--force-reenroll`-Flag oder „Enroll skippen wenn config existiert“ —
+  die Degradations-Logik aus Schritt 7 deckt beide Fälle ohne Flag ab.
+- Mehrfach nutzbare Tokens oder ein Token-Reissue-Endpoint als
+  Re-Run-Lösung — Sicherheits-Rückschritt bzw. API-Surface für einen
+  Randfall; der Einmalverbrauch ist tragende Sicherheitskontrolle.
+- systemctl-Stub in der Fixture (täuscht Verhalten vor, schluckt echte
+  Fehler) oder privilegierter systemd-Container im CI (flaky/verboten).
+
+**Fertig, wenn:** Handler-Tests: korrekte Content-Types, `no-store` auf allen
+drei Routen, 503-Pfade je Gate-Bedingung, 404 bei unbekannter Arch,
+Script-Inhalt enthält Pin/Hashes/URLs/Unit; `sh -n` (Syntax-Check) über das
+gerenderte Script läuft in einem Test. Die Ablauf-Logik selbst deckt Phase E4
+ab.
+
+---
+
+## Phase C — Token-Minting-API
+
+### C1 — Mint-Logik teilen (CLI + API identisch)
+
+**Dateien:** `internal/store/enrollment.go`, `cmd/gssh-server/main.go`.
+
+Die Token-Erzeugung aus `runEnrollToken` (`cmd/gssh-server/main.go:296`) in
+einen gemeinsamen, netz­freien Helper extrahieren, damit CLI und API garantiert
+identisch minten:
+
+```go
+// in internal/store:
+// NewEnrollmentToken erzeugt Klartext ("gssh-et-" + 32 Byte base64url) und
+// den zugehörigen Record (nur Hash). Der Aufrufer persistiert via
+// CreateEnrollmentToken und zeigt den Klartext genau einmal an.
+func NewEnrollmentToken(hostname string, tags map[string]string, ttl time.Duration) (plaintext string, rec *EnrollmentToken, err error)
+```
+
+`runEnrollToken` auf den Helper umstellen — Verhalten der CLI (Defaults,
+Ausgabeformat, TTL-Default **24 h**) bleibt unverändert.
+
+### C2 — `POST /v1/admin/enroll-tokens`
+
+**Dateien:** `internal/api/admin_ui.go` (Route + Handler), `internal/store`
+(Audit-Konstante).
+
+**Schritte:**
+
+1. Route im Admin-Muster registrieren:
+   `mux.HandleFunc("POST /v1/admin/enroll-tokens", admin.authorized(roleAdmin, admin.handleCreateEnrollToken))`.
+2. Request-Body:
+   ```json
+   { "hostname": "web-01", "tags": {"env":"prod"}, "ttl_seconds": 3600, "session_audit": false }
+   ```
+   Alle Felder optional. `ttl_seconds`: Default **3600** (bewusst kürzer als
+   der 24-h-CLI-Default — UI-Tokens entstehen unmittelbar vor Gebrauch);
+   validiert auf 60 ≤ ttl ≤ 86400, sonst 400. `session_audit` wird **nicht**
+   am Token gespeichert (das Token-Schema kennt es nicht) — es steuert nur
+   das `--session-audit`-Flag im `install_command`.
+3. Gate-Prüfung wie in P3 (fehlende Bedingung ⇒ 503 mit `missing`).
+4. Antwort (Klartext **einmalig** — wird nirgends geloggt oder gespeichert):
+   ```json
+   {
+     "token": "gssh-et-…",
+     "expires_at": "2026-07-25T13:37:00Z",
+     "install_command": "curl -fsSL https://gssh.example.com/install.sh | sudo sh -s -- --token gssh-et-… [--session-audit]"
+   }
+   ```
+   Basis-URL des Kommandos: `GSSH_PUBLIC_URL`, Fallback `GSSH_UI_BASE_URL`
+   (durch das Gate garantiert vorhanden). Die `--arch`-Varianten baut das
+   Frontend selbst aus dem Manifest (D2).
+5. Audit-Event: Konstante `EventEnrollTokenCreated = "host.enroll_token.created"`
+   in `internal/store` (analog `EventHostEnrolled`); schreiben via
+   `AppendAuditEvent` mit Actor (Session-User), Payload
+   `{hostname, tags, ttl_seconds, expires_at}` — **ohne** Token, ohne Hash
+   (Regel 4).
+
+**Fertig, wenn:** Handler-Tests: Nicht-Admin ⇒ 403; Gate zu ⇒ 503; Erfolg ⇒
+Token-Prefix `gssh-et-`, `expires_at` ≈ jetzt+TTL, `install_command` enthält
+Token und (nur bei `session_audit: true`) das Flag; Tags/Hostname landen im
+Record; Audit-Event vorhanden und token-frei; CLI-Test von `enroll-token`
+weiterhin grün.
+
+---
+
+## Phase D — Frontend
+
+**Dateien:** `web/src/app/features/hosts.ts`,
+`web/src/app/features/host-add-dialog.ts` (neu), `api/openapi.yaml`,
+`web/src/app/api/…` (generierter Client).
+
+### D1 — Button + Gate-Anzeige
+
+In den `page-header` von `hosts.ts` (neben „Aktualisieren“) ein
+`mat-flat-button` **„Host hinzufügen“**. Beim Laden der Seite zusätzlich
+`GET /v1/agents` abrufen: `rollout_ready: false` ⇒ Button **disabled** mit
+Hinweistext, der die `missing`-Einträge menschenlesbar aufzählt (z. B.
+„Pin noch nicht ermittelt“, „GSSH_AGENT_PUBLIC_URL fehlt“, „Server-Build ohne
+Agent-Binaries“). Kein stilles Verstecken des Buttons — der Operator soll
+sehen, **warum** es nicht geht.
+
+### D2 — Dialog
+
+Neue Standalone-Dialog-Komponente im Muster von `grants.ts` (MatDialog).
+
+**Formular-Ansicht:** Hostname (optional, Text), Tags (Text,
+`env=prod,role=web`), TTL (Select: 15 min / **1 h Default** / 4 h / 24 h),
+Session-Audit-Checkbox (Default **aus**) mit Erklärtext:
+> Aktiviert Host-Session-/sudo-Audit: Der Agent hängt `pam_exec`-Hooks an die
+> PAM-Stacks von sshd und sudo (`/etc/pam.d/*`) und korreliert Sessions mit
+> Zertifikaten (sshd `LogLevel VERBOSE`). Meldet Session-Start/-Ende und
+> sudo-Aktionen an die Plattform. Ändert die PAM-Konfiguration des Hosts —
+> deshalb Opt-in.
+
+Submit → `POST /v1/admin/enroll-tokens`.
+
+**Ergebnis-Ansicht:**
+- Token maskiert + Copy-Button; Hinweis „Token wird nur einmal angezeigt,
+  TTL läuft bereits“.
+- **Arch-Dropdown**: „auto (Script erkennt)“ + je eine Option pro Arch aus
+  dem Manifest. Auswahl passt die Copy-Zeile live an (hängt `--arch <x>` an);
+  Copy-Button für die Zeile.
+- Agent-Liste (arch, Größe human-readable, SHA-256) aus dem Manifest.
+- **Zwei-Schritt-Alternative** ausklappbar, für alle, die kein `curl | sh`
+  ausführen wollen (kein Zwang zum Pipe-to-shell):
+  ```
+  curl -fsSLO https://gssh.example.com/install.sh
+  less install.sh          # prüfen
+  sudo sh install.sh --token gssh-et-…
+  ```
+
+### D3 — OpenAPI + Client
+
+`api/openapi.yaml` (Single Source of Truth der REST-API) um
+`/v1/admin/enroll-tokens`, `/v1/agents`, `/v1/agents/{os}/{arch}` und
+`/install.sh` erweitern. Client regenerieren wie gehabt (ng-openapi-gen,
+devDependency in `web/package.json`; erzeugt `web/src/app/api/fn/…`). Falls
+die Generator-Invokation unklar ist: die neuen Request-Funktionen
+handschreiben, exakt im Muster der bestehenden Dateien unter
+`web/src/app/api/fn/` — nicht die generierten Dateien von Hand editieren.
+
+**Fertig, wenn:** `npm test` grün; manueller Durchstich im Dev-Setup: Button
+disabled ohne Pin (Server ohne Envs starten), enabled mit; Dialog mintet,
+Copy-Zeile wechselt mit Arch-Auswahl; `ng build` läuft.
+
+---
+
+## Phase E — Doku, Helm, E2E
+
+### E1 — Helm-Chart (Deployzeit-Validierung, fail-fast)
+
+**Dateien:** `deploy/helm/guided-ssh/values.yaml`,
+`deploy/helm/guided-ssh/templates/…`, Chart-README.
+
+Neuer Values-Block (jeder Parameter mit **maximal 2 Zeilen** on-point
+Kommentar — keine Prosa-Absätze):
+
+```yaml
+hostRollout:
+  # One-Command-Host-Install (UI-Button "Host hinzufügen"). Bei true werden
+  # die Pflicht-Envs verlangt (helm scheitert sonst beim Rendern).
+  enabled: false
+  # Externe mTLS-Agent-URL für enrollte Agenten (Pflicht bei enabled).
+  agentPublicUrl: ""
+  # Externe Public-URL (install_command + Pin-Dial); leer = ui.baseUrl.
+  publicUrl: ""
+  pin:
+    # Pin-Quelle: dial (Default) | file | static — siehe Tabelle im README.
+    source: dial
+    # source=static: Base64-SPKI-Pin (openssl-Snippet im README).
+    static: ""
+    # source=file: TLS-Secret des Ingress; Chart mountet NUR tls.crt.
+    certSecretName: ""
+    # Refresh-Intervall des Pin-Dials (Go-Duration).
+    refreshInterval: 5m
+  # Binary-Downloads pro Client-IP und Minute (0 = aus).
+  downloadRpm: 10
+```
+
+Template-Logik:
+- `enabled: false` ⇒ es wird **nichts** gerendert und nichts verlangt
+  (Feature strikt optional).
+- `enabled: true` ⇒ `required`-Checks im Template für `agentPublicUrl` und —
+  je nach `pin.source` — für `pin.static` bzw. `pin.certSecretName`;
+  `helm install/upgrade/lint` scheitert beim Rendern mit Klartext-Meldung.
+  Misconfig knallt beim Setup, nicht auf der Flotte. (Zweite Schicht: das
+  Server-Gate aus P3 bleibt autoritativ — es deckt Nicht-Helm-Deployments
+  und Drift ab. Der Helm-Toggle steuert **nur** das Rendern der Envs, kein
+  doppelter Server-Zustand.)
+- `pin.source: file` ⇒ Volume aus `certSecretName` mounten. Regeln
+  (Begründung: Kubelet aktualisiert Secret-Mounts nur ohne subPath):
+  **kein `subPath`**; nur `tls.crt` projizieren (`items:`-Auswahl —
+  `tls.key` bleibt draußen, der Server braucht ihn nicht); Secret muss im
+  Server-Namespace liegen (Wildcard-Cert in fremdem Namespace: reflector/
+  kubed oder eigenes `Certificate`). Env `GSSH_PUBLIC_PIN_CERT_FILE` auf den
+  Mount-Pfad setzen.
+- Gerenderte Envs: `GSSH_AGENT_PUBLIC_URL`, `GSSH_PUBLIC_URL`,
+  `GSSH_PUBLIC_PIN` | `GSSH_PUBLIC_PIN_CERT_FILE`,
+  `GSSH_PUBLIC_PIN_REFRESH`, `GSSH_AGENT_DOWNLOAD_RPM`.
+
+Chart-README ergänzt: Mini-Entscheidungstabelle „welche Pin-Quelle wann“
+(dial = Default, wenn der Server seinen externen URL erreichen kann; file =
+Hairpin/Split-Horizon/cert-manager; static = letzter Ausweg, z. B. CDN),
+Volume-Snippet, openssl-Snippet, Hairpin-Hinweis **nur** beim dial-Abschnitt.
+
+### E2 — README / DEVELOPER
+
+- README (englisch — Konvention: neue User-Docs auf Englisch): neuer
+  interner Install-Weg mit UI-Flow, Sicherheitsmodell-Kurzfassung,
+  Pflicht-Pinning und Pin-Quellen, Zwei-Schritt-Alternative.
+- Deutliche Zeile: **Script-Install und deb/rpm nicht mischen** (das Script
+  legt eine paketfremde Datei in `/usr/bin` und eine Unit in
+  `/etc/systemd/system` ab; `deploy/packaging/install.sh` bleibt als
+  GitHub-Fallback bestehen).
+- Dual-Cert-Proxies (RSA+ECDSA je nach Client): eine Doku-Zeile — beide
+  Pin-Konsumenten (Server-Dial und Agent) sind Go-TLS mit praktisch gleicher
+  Cipher-Auswahl; bei der Datei-Quelle gegenstandslos.
+- DEVELOPER.md: `internal/agentdist`-Konzept, Dev-Build-Degradation (503),
+  wie man lokal Binaries einbettet (`make cross` + Kopie nach
+  `internal/agentdist/bin/`), E2E-Aufruf.
+
+### E3 — Sicherheits-Restpunkte dokumentieren
+
+In die Sicherheits-Sektion (unten) aufgenommen und im README zu spiegeln:
+- **Token in argv/History (akzeptiert):** `--token` steht kurz in
+  `ps`/`/proc/*/cmdline` des Zielhosts und dauerhaft in der Shell-History des
+  Operators. Alternativen geprüft und verworfen: Env-Variante steht genauso
+  in der History und `sudo` strippt Envs; stdin geht bei `curl | sh` nicht
+  (stdin ist die Pipe); `sh -c "$(curl …)"` verschlechtert die Copy-UX ohne
+  die History-Exposition zu beheben. Tragende Kontrolle: Einmalverbrauch +
+  kurze TTL — nach Gebrauch ist das Token wertlos.
+- **Versions-Disclosure (akzeptiert):** siehe B1.
+- **systemctl-Pfad im CI ungetestet (bewusste Restlücke):** siehe E4.
+
+### E4 — E2E-Smoke
+
+**Dateien:** neuer Integrationstest (Muster:
+`internal/agentd/enroll_integration_test.go` — Build-Tag `integration`,
+testcontainers-go), `internal/agentd/testdata/sshd/Dockerfile`.
+
+**Schritte:**
+
+1. Fixture-Dockerfile: `curl` in die `apk add`-Liste aufnehmen (das
+   alpine-Image hat keins; das Script verlangt curl).
+2. Testablauf: Postgres + API-Server wie im bestehenden Test hochziehen;
+   `agentdist.NewFromFS(os.DirFS(<tmpdir>))` mit einem für linux gebauten
+   agentd-Binary befüllen (das Embed ist zur Testzeit leer — deshalb existiert
+   `NewFromFS`); Pin-Quelle: statisch, berechnet via
+   `pintls.FromCertificate` aus dem Test-TLS-Zertifikat (dogfoodet P1);
+   Token über die Mint-API (C2) erzeugen; im sshd-Fixture-Container
+   `install.sh` per curl holen und mit `--token … --no-systemd` ausführen.
+3. Asserts: Script-Exit 0; Binary installiert; `config.yaml` entstanden
+   (worauf der Fixture-Entrypoint den Agenten selbst startet und
+   `agentd.sock` erscheint — dasselbe Readiness-Signal wie im Script);
+   Host-Row enrolled. Damit ist die Kette **Token → Script → Download →
+   Hash-Check → Enroll → laufender Agent** abgedeckt.
+4. Restlücke explizit dokumentieren (E2/E3): der `systemctl`-Zweig
+   (enable/restart/Health-Check) bleibt CI-ungetestet — die Fixture hat kein
+   systemd, ein systemd-Container im CI wäre flaky/privilegiert, ein
+   systemctl-Stub würde Verhalten vortäuschen.
+
+**Fertig, wenn:** `go test -tags integration ./internal/agentd/ -run
+InstallScript` (Name analog Bestand) lokal grün; CI-Job führt ihn aus.
+
+---
+
+## Sicherheitsmodell (Zusammenfassung)
+
+Dies ist `curl … | sudo sh` — die klassische Supply-Chain-Angriffsfläche.
+Maßnahmen und bewusst akzeptierte Restrisiken:
+
+- **Nur über HTTPS ausliefern.** TLS terminiert am Ingress/Reverse-Proxy vor
+  dem Server; das Script wird über `https://` gezogen.
+- **SHA-256 des Binaries ins Script getemplatet.** Manipulation des
+  Binary-Downloads fliegt beim Hash-Check auf, Script bricht ab.
+- **SPKI-Pin ist Pflicht, kein Opt-in.** Drei fail-closed-Quellen
+  (statisch > Datei > verifizierter Selbst-Dial, Phase P2); ohne Pin ist der
+  gesamte Rollout deaktiviert (Gate P3). Cert-Rotation wird von Datei-Quelle
+  (ungecacht) und Dial-Quelle (Background- + Lazy-Refresh) automatisch
+  nachgezogen; ein Pin-Mismatch scheitert im TLS-Handshake **bevor** das
+  Token verbraucht ist.
+- **`--require-pin` = Bedienfehler-Schutz.** Verhindert versehentlich
+  ungepinnte Enrollments (herauskopierte enroll-Zeile). **Kein**
+  MITM-Schutz — den leisten HTTPS + Pin-Quellen.
+- **Zwei-Schritt-Alternative in der UI** (herunterladen, prüfen, ausführen) —
+  kein Zwang zum Pipe-to-shell.
+- **Token = einmaliges, kurzlebiges Bearer-Secret.** UI-Default 1 h,
+  Einmalverbrauch serverseitig erzwungen (bestehend). Klartext genau einmal
+  in der Mint-Antwort; nie in Logs, nie im Audit-Payload. Akzeptierte
+  Restexposition: argv/`ps` auf dem Zielhost + Shell-History des Operators
+  (Begründung und verworfene Alternativen: E3).
+- **Binary-Download öffentlich, aber eng rate-limited** (10/IP/min, Burst 5,
+  `GSSH_AGENT_DOWNLOAD_RPM`, XFF-Verhalten geerbt). Das Token gated das
+  Enrollment, nicht den Binary-Zugriff.
+- **Token-Mint nur roleAdmin, audit-geloggt** (`host.enroll_token.created`).
+- **Versions-Disclosure im Manifest akzeptiert** (Begründung: B1).
+- **`Cache-Control: no-store` auf Script, Manifest und Binary** — keine
+  stale Pins/Hashes/Binaries aus Zwischencaches.
+
+---
+
+## Fahrplan (abhaken)
 
 ### Phase A — Agent-Binaries im Container
-- [ ] Paket `internal/agentdist` mit `//go:embed all:bin` + `.gitkeep`, Zugriffs-API `Open(os, arch)` + `List()` inkl. SHA-256
-- [ ] `503`-Degradation bei leerem Embed (Dev-Build)
-- [ ] Dockerfile: Cross-Build-Stage `gssh-agentd` für **alle** Ziel-Arches (linux/amd64+arm64) via `FROM --platform=$BUILDPLATFORM` + GOOS/GOARCH-Schleife (K8), Binaries nach `internal/agentdist/bin/`
-- [ ] `gssh-agentd.service` per `git mv` nach `internal/agentdist/`, dort `go:embed`; `nfpm.yaml`-src-Pfad anpassen (K12)
-- [ ] Unit-Test: Embed liefert je Arch Binary + korrekten Hash, `List()` vollständig
-
-### Phase B — Public-Endpoints
-- [ ] `GET /v1/agents` (Manifest, regulärer Limiter), `GET /v1/agents/{os}/{arch}` (Binary)
-- [ ] Zweite `RateLimiter`-Instanz für Downloads, Env `GSSH_AGENT_DOWNLOAD_RPM`, Default 10/IP/min (Burst 5), erbt `GSSH_RATE_TRUST_XFF` (K5)
-- [ ] `GET /install.sh` getemplatet (Base-URL, Agent-URL, Version, per-arch SHA-256, Pflicht-Pin); Script akzeptiert `--arch` (Vorrang vor `uname -m`), `--session-audit` (Passthrough) und `--no-systemd` (K6: alles außer `systemctl`, Ausgabe nennt übersprungene Schritte), bricht bei leerem Pin ab, ruft `enroll --pin … --require-pin`
-- [ ] Env `GSSH_AGENT_PUBLIC_URL` als Gate-Bedingung (K4 — keine Fallback-Ableitung)
-- [ ] Script-Robustheit (K7): Enroll-Fehler bei vorhandener `config.yaml` ⇒ Warnung + weiter; Binary via Same-Dir-Tempfile + atomarem `mv` (kein ETXTBSY); Unit aktiv ⇒ `systemctl restart` statt `enable --now`
-- [ ] Script-Härtung (K11): `main()`-Wrapper gegen Truncation, `set -eu` (kein `pipefail`, Exit-Codes explizit), `trap`-Cleanup fürs Tempfile
-- [ ] Health-Check (K17): `systemctl is-active` + Warten auf `agentd.sock` (≤ 10 s); Fehlschlag ⇒ `journalctl`-Hinweis + Exit ≠ 0; entfällt bei `--no-systemd`
-- [ ] `Cache-Control: no-store` auf `install.sh`, Manifest und Binary-Download (K10)
-- [ ] Handler-Tests (Content-Type, `no-store`-Header, 503-Pfad, unbekannte/nicht eingebettete arch → 404)
+- [ ] A1: Paket `internal/agentdist` (Embed `all:bin`, `Source` mit `New`/`NewFromFS`/`List`/`Open`, Hex-SHA-256, `.gitkeep`-Filter, `.gitignore`) + Unit-Umzug (`git mv` + `nfpm.yaml`-Pfad) + Tests (fstest.MapFS)
+- [ ] A2: Dockerfile-Stage `agentbuild` (`--platform=$BUILDPLATFORM`, GOOS/GOARCH-Schleife amd64+arm64, identische `-ldflags`) + `COPY` ins Embed-Verzeichnis
 
 ### Phase P — Pflicht-Pinning & Rollout-Gate
-- [ ] Pin-Provider mit drei Quellen (K2, Präzedenz absteigend): `GSSH_PUBLIC_PIN` (statisch) → `GSSH_PUBLIC_PIN_CERT_FILE` (PEM, erster Block, **ungecacht** gelesen, K9) → TLS-Dial gegen `GSSH_PUBLIC_URL` (Fallback `GSSH_UI_BASE_URL`) mit Chain-Verify fail-closed (K1); Berechnung via neuem Helper `pintls.FromCertificate` (K15, migriert auch Test-Helper `spkiPin`)
-- [ ] Background-Refresh-Loop nur für Dial-Quelle, Intervall `GSSH_PUBLIC_PIN_REFRESH` (Default 5 min) **plus** Lazy-Refresh beim Servieren, wenn Cache älter als Intervall (K9)
-- [ ] Rollout-Gate: kein Pin → `/v1/agents/*`, `/install.sh`, Token-Mint = 503; Zustand im Manifest/`ui/config` sichtbar für UI-Button
-- [ ] Client: `gssh-agentd enroll --require-pin` (bzw. `GSSH_ENROLL_REQUIRE_PIN`) — leerer/fehlender Pin ⇒ fail-closed; manueller/deb-Pfad unverändert
-- [ ] Tests: Pin-Berechnung, Gate 503 ohne Pin, `--require-pin` bricht ohne Pin ab
+- [ ] P1: `pintls.FromCertificate` + Migration `spkiPin()` in `internal/cli/client_test.go`
+- [ ] P2: Pin-Provider — Präzedenz `GSSH_PUBLIC_PIN` > `GSSH_PUBLIC_PIN_CERT_FILE` (ungecacht) > Auto-Dial (System-Roots, fail-closed, Background- + Lazy-Refresh via `GSSH_PUBLIC_PIN_REFRESH`); aktive Quelle in Log + Manifest; Tests
+- [ ] P3: Rollout-Gate — vier Bedingungen (binaries, pin, agent_public_url, public_url); Download/Script/Mint 503 mit `missing`, Manifest immer 200 mit Diagnose; Tests
+- [ ] P4: `gssh-agentd enroll --require-pin` + `GSSH_ENROLL_REQUIRE_PIN` (fail-closed vor Netz-Call); manueller/deb-Pfad unverändert; Tests
+
+### Phase B — Public-Endpoints
+- [ ] B1: `GET /v1/agents` (Manifest mit version/rollout_ready/missing/pin_source/agents, regulärer Limiter, `no-store`)
+- [ ] B2: `GET /v1/agents/{os}/{arch}` (Stream, 404/503-Pfade, `no-store`) + zweite `RateLimiter`-Instanz (`GSSH_AGENT_DOWNLOAD_RPM` Default 10, Burst 5, `TrustProxyHeader` aus `GSSH_RATE_TRUST_PROXY`)
+- [ ] B3: `GET /install.sh` — Template (Base-URL, Agent-URL, Version, per-Arch-Hash, Pflicht-Pin, Unit-Here-Doc) + Script nach Spezifikation (main()-Wrapper, `set -eu` ohne pipefail, trap, Same-Dir-Tempfile + atomarem `mv`, Enroll-Degradation, restart-vs-enable, Health-Check Socket ≤ 10 s, Flags `--arch`/`--session-audit`/`--no-systemd`) + Handler-/`sh -n`-Tests
 
 ### Phase C — Token-Minting-API
-- [ ] Mint-Logik aus `runEnrollToken` in gemeinsamen Helper extrahieren
-- [ ] `POST /v1/admin/enroll-tokens` (roleAdmin), Antwort mit `install_command`
-- [ ] Audit-Event `host.enroll_token.created`
-- [ ] Handler-Test (Rolle, Einmal-Klartext, Tag/TTL-Weitergabe)
+- [ ] C1: `store.NewEnrollmentToken` extrahieren, `runEnrollToken` umstellen (CLI-Verhalten unverändert)
+- [ ] C2: `POST /v1/admin/enroll-tokens` (roleAdmin, TTL-Default 1 h, Gate-geprüft, `install_command`, Audit `host.enroll_token.created` ohne Token) + Tests
 
 ### Phase D — Frontend
-- [ ] Button „Host hinzufügen“ + Dialog in `hosts.ts`; Button **ausgegraut** wenn Rollout ungated (kein Pin), mit Hinweistext
-- [ ] Formular → Mint-Call, Ergebnis-Ansicht mit Arch-Dropdown (aus `/v1/agents`), live-angepasster Copy-Zeile + Agent-Liste
-- [ ] Session-Audit-Checkbox (Default aus) mit Erklärtext (PAM-Hooks sshd/sudo, Session-/sudo-Audit) → setzt `--session-audit` im Kommando
-- [ ] Zwei-Schritt-Alternative (Download + Prüfen) anzeigen
-- [ ] `api/openapi.yaml` erweitern, Client-`fn` (regeneriert oder hand-geschrieben)
+- [ ] D1: Button „Host hinzufügen“ in `hosts.ts`, disabled + Klartext-Hinweis aus Manifest-`missing`
+- [ ] D2: Dialog (Formular mit TTL/Tags/Hostname/Session-Audit-Erklärtext → Mint; Ergebnis mit Token-Copy, Arch-Dropdown, Agent-Liste, Zwei-Schritt-Alternative)
+- [ ] D3: `api/openapi.yaml` + Client (regeneriert oder handgeschrieben im `fn/`-Muster)
 
-### Phase E — Doku & Integration
-- [ ] README/DEVELOPER: neuer interner Install-Weg, Sicherheitshinweise, Pflicht-Pinning
-- [ ] Envs in Helm-`values.yaml`: `GSSH_PUBLIC_URL`, `GSSH_PUBLIC_PIN`, `GSSH_PUBLIC_PIN_CERT_FILE`, `GSSH_PUBLIC_PIN_REFRESH`, `GSSH_AGENT_PUBLIC_URL`, `GSSH_AGENT_DOWNLOAD_RPM` — **je Parameter max. 2 Zeilen on-point Doku**; Entscheidungstabelle Pin-Quellen; Volume-Snippet Cert-File (nur `tls.crt`, kein `subPath`); Hairpin-Hinweis nur für Pin-Quelle Auto-Dial (K2)
-- [ ] E2E/Smoke: Token minten → `install.sh --no-systemd` in Container-sshd-Testfixture (`internal/agentd/testdata/sshd`) ausführen → Host enrolled, Agent von Fixture gestartet (K6); Restlücke systemctl-Pfad dokumentieren
-
----
-
-## Entschieden
-
-- **Embed** (`go:embed`) für Agent-Binaries — Single-Artifact, harter Version-Lockstep,
-  konsistent zur Web-UI. Tradeoff Binary +30–40 MB akzeptiert. (2026-07-25)
-- **Manifest + Download öffentlich** (kein Geheimnis). Download gegen Flooding
-  rate-limited: Default 10/IP/min (Burst 5), erbt das XFF-Vertrauen des regulären
-  Limiters; konfigurierbar via `GSSH_AGENT_DOWNLOAD_RPM` (angepasst per K5).
-  Manifest auf dem regulären Limiter. (2026-07-25)
-- **SPKI-Pin Pflicht, fail-closed, nicht statisch.** Der Server liest das
-  TLS-Leaf-Cert seines eigenen Public-Endpoints (Reverse-Proxy) selbst per TLS-Dial
-  aus und berechnet den Pin; Background-Refresh zieht bei Cert-Rotation nach.
-  Solange kein Pin gelesen wurde, ist der Host-Rollout deaktiviert (UI-Button
-  ausgegraut, Endpoints 503). Kein ungepinnter Fallback. (2026-07-25)
-
-- **Session-Audit** — Pflicht-Element der „Host hinzufügen"-Maske: Checkbox,
-  Default **aus**, wahlfrei, mit Erklärtext im Dialog. An → `enroll --session-audit`.
-  Erklärung für den Anwender: aktiviert Host-Session-/sudo-Audit; der Agent hängt
-  `pam_exec`-Hooks an die PAM-Stacks von sshd und sudo (`/etc/pam.d/*`) und
-  korreliert Sessions mit Zertifikaten (sshd `LogLevel VERBOSE`). Meldet
-  Session-Start/-Ende und sudo-Aktionen an die Plattform. Ändert PAM-Konfiguration
-  des Hosts → bewusst opt-in. (2026-07-25)
-
-## Offene Entscheidungen
-
-_(keine)_ — Review-Kritik K1–K17 vollständig entschieden (2026-07-25);
-Ergebnisse stehen je Punkt unter **Entscheidung** in der Review-Sektion,
-Phasen-Checkboxen sind entsprechend nachgezogen.
+### Phase E — Doku, Helm, E2E
+- [ ] E1: Helm `hostRollout`-Block (`enabled` + `required`-Checks, Pin-Quellen-Rendering, Secret-Volume nur `tls.crt` ohne `subPath`, je Parameter ≤ 2 Zeilen Doku) + README-Tabelle/Snippets
+- [ ] E2: README (en) + DEVELOPER (Install-Weg, Nicht-Mischen-Hinweis, Dual-Cert-Zeile, Dev-Degradation)
+- [ ] E3: Restrisiken dokumentiert (argv/History, Version, systemctl-Lücke)
+- [ ] E4: E2E-Smoke (Fixture + curl, `NewFromFS`, statischer Pin via `FromCertificate`, Mint → `install.sh --no-systemd` → enrolled + Agent läuft)
 
 ---
 
-## Review-Kritik (2026-07-25)
-
-Kritische Durchsicht des Plans gegen den Code-Stand (`feat/host-rollout`).
-Bausteine-Tabelle verifiziert und korrekt: `web/embed.go`, `make cross`
-(agentd amd64+arm64), `runEnrollToken`/`CreateEnrollmentToken`,
-`gssh-agentd enroll --pin/--session-audit/--agent-url`, `New`/`NewAgent`-Split,
-`RateLimiter` (per-IP-Token-Bucket), `internal/pintls`, `deploy/packaging/`.
-Gesamturteil: **Plan tragfähig, Machbarkeit „JA“ bestätigt.** Die kritischen
-Punkte konzentrieren sich auf Phase P — den einzigen Teil, der neu erfunden
-wird statt Vorhandenes zu verdrahten.
-
-Severity: 🔴 kritisch (Designlücke Sicherheit) · 🟠 wichtig (bricht
-Funktion/UX in realen Deployments) · 🟡 klein (Härtung, Doku, Polish).
-Jeder Punkt wird einzeln besprochen; Ergebnis unter **Entscheidung**.
-
-### K1 🔴 Pin-Selbst-Dial: Chain-Verifikation nicht spezifiziert
-
-**Befund.** Phase P: Server dialt eigenen Public-URL, liest
-`cs.PeerCertificates[0]`, berechnet den Pin. Nicht festgelegt, ob dieser Dial
-die Zertifikatskette verifiziert. Die naheliegende Implementierung („nur das
-Cert lesen“) wäre `InsecureSkipVerify: true`.
-
-**Risiko.** Verifiziert der Dial nicht, kann ein MITM zwischen Server und
-Reverse-Proxy (oder DNS-Poisoning aus Sicht des Server-Pods) ein eigenes
-Zertifikat präsentieren. Der Server berechnet dann den **Angreifer-Pin** und
-templatet ihn in jedes `install.sh` — das verpflichtende Pinning
-authentifiziert ab da den Angreifer gegenüber allen neu enrollten Hosts. Die
-eine unverifizierte Stelle hebelt den gesamten Mechanismus aus.
-
-**Vorschlag.** Der Pin-Dial verifiziert fail-closed gegen System-Roots
-(Standard-`tls.Config`, keinerlei Sonderbehandlung). Verifikationsfehler ⇒
-kein Pin ⇒ Rollout-Gate bleibt zu, Grund wird geloggt und im Manifest/UI
-sichtbar. Trust-Basis damit: „das WebPKI-gültige Zertifikat, das mein eigener
-URL serviert“. Selbstsignierte/Private-CA-Proxies laufen über den
-K2-Override. distroless/static enthält das CA-Bundle — kein Image-Umbau.
-
-**Entscheidung.** (2026-07-25) Pin-Dial verifiziert fail-closed mit
-Standard-`tls.Config` gegen System-Roots; es gibt keinen
-`InsecureSkipVerify`-Codepfad. Verifikationsfehler ⇒ kein Pin, Gate zu, Grund
-in Log + Manifest/UI. Unternehmens-/Private-CA: CA-Bundle mounten und
-`SSL_CERT_FILE`/`SSL_CERT_DIR` setzen (Go liest beide, distroless unverändert;
-Achtung: `SSL_CERT_FILE` **ersetzt** das Standard-Bundle — bei Mischbetrieb
-konkatenieren) → auch dieser Fall bleibt auf dem verifizierten Pfad.
-Self-signed ohne CA läuft über die alternativen Pin-Quellen aus K2.
-
-### K2 🔴 Hairpin-Pflicht ohne Escape-Hatch
-
-**Befund.** Das Rollout-Gate setzt voraus, dass der Server seinen eigenen
-Public-URL erreicht. Der Plan sagt dazu nur: „Dokumentieren“.
-
-**Risiko.** Genau das scheitert in realen Deployments regelmäßig: Cloud-LBs
-ohne Hairpin-NAT, Egress-NetworkPolicies, vor allem Split-Horizon-DNS — der
-Server dialt intern, sieht ein **anderes** Zertifikat als die Hosts von
-außen, jedes Enrollment scheitert fail-closed mit verwirrender Meldung. Ohne
-Ausweichpfad ist das Feature dort dauerhaft gebrickt (503).
-
-**Vorschlag.** Drei Pin-Quellen mit fester Präzedenz, alle fail-closed;
-aktive Quelle wird geloggt und im Manifest ausgewiesen:
-
-1. **`GSSH_PUBLIC_PIN`** (statisch, höchste Präzedenz): Operator liefert den
-   Pin selbst (Doku-Snippet: `openssl s_client … | openssl x509 -pubkey … |
-   openssl dgst -sha256 -binary | base64`). Auto-Dial + Refresh aus. Rotation
-   in Operator-Hand (bei Key-Reuse im Renewal bleibt der Pin stabil).
-   Letzter Ausweg, z. B. Cert liegt am CDN.
-2. **`GSSH_PUBLIC_PIN_CERT_FILE`** (Datei): Pfad zu einem PEM-Zertifikat
-   (erster Block = Leaf, cert-manager-Konvention); Server liest die Datei im
-   bestehenden Refresh-Loop neu → Rotation automatisch. K8s: TLS-Secret des
-   Ingress als **Volume** mounten — kein K8s-API-Zugriff/RBAC nötig, Kubelet
-   aktualisiert den Mount bei Secret-Rotation (≤ ~1 min). Regeln: kein
-   `subPath` (bekommt keine Updates); nur `tls.crt` projizieren
-   (`items:`-Auswahl — `tls.key` bleibt draußen, Server braucht ihn nicht);
-   Secret muss im Server-Namespace liegen (Wildcard-Cert in fremdem
-   Namespace: reflector/kubed oder eigenes `Certificate`). Funktioniert auch
-   ohne K8s (bind-mount von `fullchain.pem`). Löst Hairpin- und
-   Split-Horizon-Fälle ohne manuellen Rotations-Aufwand.
-3. **Auto-Dial** (Default, Mechanik + Verifikation aus K1).
-
-Mehrere Quellen gesetzt ⇒ höchste Präzedenz gewinnt, Warnung im Log. Pin
-bleibt in allen Fällen Pflicht und fail-closed — nur die Quelle variiert.
-
-**Entscheidung.** (2026-07-25) Drei-Quellen-Modell angenommen: Präzedenz
-`GSSH_PUBLIC_PIN` (statisch) > `GSSH_PUBLIC_PIN_CERT_FILE` (Datei,
-rotationsfähig via Secret-Volume-Mount, kein K8s-API-Zugriff) > Auto-Dial
-(Default, Verifikation aus K1). Alle Quellen fail-closed; aktive Quelle in
-Log + Manifest; mehrere gesetzt ⇒ höchste gewinnt + Warnung.
-Hairpin-Voraussetzung gilt nur noch für den Dial-Default. Alle Pin-Envs
-kommen in die Helm-`values.yaml`, **je Parameter max. 2 Zeilen on-point
-dokumentiert**; dazu Mini-Entscheidungstabelle „welche Quelle wann“ und
-Volume-Snippet (nur `tls.crt` via `items:` projizieren, kein `subPath`).
-
-### K3 🟠 `--require-pin`: Begründung ist schief
-
-**Befund.** Der Plan rahmt `--require-pin` als „Client-Zwang“ gegen ein
-manipuliertes Kommando („ein manuell entferntes `--pin` scheitert“).
-
-**Risiko.** Falsches Sicherheitsversprechen: Wer das gepipte Script
-manipulieren kann, entfernt auch `--require-pin`/die Env — und könnte ohnehin
-das Token exfiltrieren oder gleich ein eigenes Binary installieren. Gegen
-MITM ist das Flag wirkungslos.
-
-**Vorschlag.** Flag behalten (billig, sinnvoll), aber ehrlich begründen:
-Schutz gegen **Bedienfehler** — Operator kopiert die enroll-Zeile aus dem
-Script heraus und lässt `--pin` weg. Nicht mehr, nicht weniger. Plan- und
-README-Text entsprechend formulieren.
-
-**Entscheidung.** (2026-07-25) Angenommen: `--require-pin` +
-`GSSH_ENROLL_REQUIRE_PIN` bleiben unverändert; Begründung überall auf
-Bedienfehler-Schutz umformuliert (versehentlich ungepinnte Enrollments, z. B.
-herauskopierte enroll-Zeile), „Client-Zwang“-Wording entfernt. Explizit
-dokumentiert: kein Schutz gegen Script-Manipulation — die adressieren
-HTTPS-Abruf + K1/K2. Plantext (Abschnitt E, Security-Sektion) angepasst.
-
-### K4 🟠 `GSSH_AGENT_PUBLIC_URL`: stille Fallback-Ableitung ist eine Falle
-
-**Befund.** Plan: Fallback „aus `GSSH_UI_BASE_URL`-Host + Agent-Port
-ableiten“.
-
-**Risiko.** Hinter LB/Ingress stimmt der externe Port praktisch nie mit dem
-internen Listen-Port überein. `enroll` schreibt die Agent-URL ungeprüft nach
-`config.yaml` (`internal/agentd/enroll.go`, `writeState`); das Enrollment
-gelingt, der Daemon scheitert erst später beim ersten Renew. Auf N Hosts
-ausgerollt = N kaputte Configs, Korrektur = N Hosts anfassen.
-
-**Vorschlag.** Keine stille Ableitung. `GSSH_AGENT_PUBLIC_URL` wird dritte
-Gate-Bedingung: fehlt sie ⇒ Token-Mint/`install.sh`/Download 503 + UI-Hinweis
-(analog Pin). Misconfig knallt beim Setup, nicht auf der Flotte.
-
-**Entscheidung.** (2026-07-25) Angenommen, zweischichtig:
-
-1. **Helm (Deployzeit, fail-fast):** Values-Block `hostRollout` mit
-   `enabled`-Toggle in `deploy/helm/guided-ssh/values.yaml`. Bei
-   `enabled: true` erzwingt `required` im Template `agentPublicUrl` sowie die
-   Werte der gewählten Pin-Quelle (K2) — `helm install/upgrade/lint`
-   scheitert beim Rendern mit Klartext-Meldung. Bei `enabled: false` wird
-   nichts gerendert und nichts verlangt (Feature optional).
-2. **Server (Laufzeit, autoritativ):** `GSSH_AGENT_PUBLIC_URL` ist dritte
-   Gate-Bedingung neben eingebetteten Binaries und Pin; fehlt sie ⇒ 503 +
-   UI-Button aus. Manifest weist fehlende Bedingungen **einzeln** aus
-   (eindeutige Diagnose). Deckt Nicht-Helm-Deployments und Drift ab.
-
-Kein eigenes Server-Feature-Flag: die Gate-Bedingungen sind der Schalter;
-der Helm-Toggle steuert nur das Rendern der Envs — kein doppelter Zustand.
-Keine URL-Ableitung in keinem Codepfad.
-
-### K5 🟠 Download-Limiter: XFF-Verhalten und 3/min-Default
-
-**Befund.** Zweite `RateLimiter`-Instanz, Default 3 Downloads/IP/min
-(Burst 3). Nicht spezifiziert: `TrustProxyHeader` der neuen Instanz.
-
-**Risiko.** (a) Hinter Ingress ohne `GSSH_RATE_TRUST_XFF=true` sehen alle
-Requests wie die Proxy-IP aus ⇒ 3/min **global** — Parallel-Rollout ab Host 4
-gedrosselt, schwer diagnostizierbar. (b) Umgekehrt: 50 Hosts hinter
-Firmen-NAT (eine IP, Ansible-Loop) sind legitim und werden ausgebremst —
-3/min ist dafür zu eng.
-
-**Vorschlag.** Download-Limiter erbt dieselbe `TrustProxyHeader`-Config
-(gleiche Env wie der reguläre Limiter). Default anheben auf **10/min,
-Burst 5** — bei 15–20 MB Binary ≈ 25–35 Mbit/s Worst-Case pro IP, als
-Flood-Schutz weiter ausreichend, Bulk-Rollouts laufen durch.
-`GSSH_AGENT_DOWNLOAD_RPM` bleibt.
-
-**Entscheidung.** (2026-07-25) Angenommen: Download-Limiter erbt
-`TrustProxyHeader` aus `GSSH_RATE_TRUST_XFF` — eine Wahrheit für die
-Client-IP-Ermittlung, keine zweite Config. Default 10/min, Burst 5
-(Per-IP-Limits stoppen ohnehin nur Einzelquellen; 10/min leistet das genauso
-wie 3/min, ohne NAT-Bulk-Rollouts zu würgen). Failure-Budget der zweiten
-Instanz bleibt ungenutzt (keine 401/403 auf öffentlichen Downloads).
-Token-gebundener Download verworfen (kollidiert mit „Download
-öffentlich“-Entscheidung, Token in Logs/URLs). Plantext (Abschnitt B,
-Security, Entschieden, Phase B) auf 10/5 aktualisiert.
-
-### K6 🟠 E2E-Smoke: Fixture hat kein systemd
-
-**Befund.** Phase E will `install.sh` in der sshd-Testfixture
-(`internal/agentd/testdata/sshd`) ausführen. Deren `entrypoint.sh` startet
-sshd direkt, kein systemd — `systemctl enable --now` schlägt fehl; die
-Checkbox ist so nicht ausführbar.
-
-**Vorschlag.** Script-Flag `--no-systemd`: Binary + Enroll + Unit-Datei
-schreiben, Start überspringen (Ausgabe nennt die übersprungenen Schritte).
-E2E nutzt das Flag und startet den Agenten wie bisher selbst. Nützt zudem
-echten Hosts ohne systemd-PID-1 (Container-Hosts mit eigenem Supervisor).
-Alternative systemctl-Stub im Fixture-PATH: mehr Magie, weniger realistisch.
-
-**Entscheidung.** (2026-07-25) Angenommen: `install.sh` bekommt
-`--no-systemd` — alles außer `systemctl enable --now` läuft (inkl.
-Unit-Datei schreiben); Ausgabe benennt übersprungene Schritte + manuelles
-Aktivierungskommando. E2E nutzt das Flag, Fixture startet den Agenten selbst
-→ Smoke-Test deckt Token → Script → Download → Hash → Enroll → laufender
-Agent ab. Verworfen: systemctl-Stub (täuscht Verhalten vor, schluckt echte
-Fehler), privilegierter systemd-Container (CI-flaky/verboten). Restlücke
-bewusst: systemctl-Pfad selbst bleibt CI-ungetestet, wird dokumentiert.
-Nebeneffekt: Flag nützt Hosts mit eigenem Supervisor.
-
-### K7 🟠 Teilfehler nach Token-Verbrauch: Re-Run bricht
-
-**Befund.** Token ist einmalig. Scheitert das Script **nach** Schritt 6
-(Enroll ok, Token verbraucht), z. B. bei `systemctl`, schlägt der Re-Run
-derselben Zeile mit „Token ungültig“ fehl — das „Ein Kommando“-Versprechen
-bricht genau im Fehlerfall.
-
-**Vorschlag.** Script resümierbar machen: existiert ein Enrollment
-(`/var/lib/guided-ssh/config.yaml`), Enroll überspringen (Hinweis ausgeben)
-und mit Unit/Start fortfahren. Zusätzlich vor dem Binary-Kopieren: läuft die
-Unit bereits (Upgrade/Re-Enroll), `systemctl stop` — sonst „text file busy“
-beim Überschreiben von `/usr/bin/gssh-agentd`.
-
-**Entscheidung.** (2026-07-25) Angenommen in verfeinerter Fassung (ersetzt
-den Vorschlag oben in zwei Details):
-
-1. **Enroll-Fehler-Degradation statt Skip:** Enroll läuft immer; schlägt er
-   fehl *und* `config.yaml` existiert ⇒ Warnung „bestehendes Enrollment
-   weiterverwendet“ + weitermachen (Abschlussmeldung nennt es unübersehbar);
-   ohne `config.yaml` ⇒ harter Abbruch. Deckt Re-Run nach Teilfehler
-   (verbrauchtes Token) und echtes Re-Enroll (frisches Token, idempotentes
-   Überschreiben) ohne neues Flag ab. Skip-Variante verworfen (bräuchte
-   `--force-reenroll`-Flag, blockiert Re-Enroll-Default).
-2. **Kein `systemctl stop` vor dem Kopieren:** Binary nach
-   Same-Dir-Tempfile (`/usr/bin/.gssh-agentd.tmp.XXXX`, gleiche Partition —
-   nicht `/tmp`, sonst Cross-Device-Copy) + Hash-Check + `chmod` + atomarem
-   `mv -f`. `rename(2)` ersetzt auch laufende Binaries ohne ETXTBSY; Daemon
-   behält altes Inode, keine Downtime.
-3. **systemd zustandsabhängig:** Unit aktiv ⇒ `systemctl restart` (Upgrade
-   lädt neues Binary — `enable --now` auf aktiver Unit startet nicht neu),
-   sonst `enable --now`.
-
-Verworfen: Mehrfach-Token (Sicherheits-Rückschritt, Einmalverbrauch trägt
-K14), Reissue-Endpoint (API-Surface für seltenen Fall). Bewusste Kante:
-gewolltes Re-Enroll, das aus anderem Grund scheitert, läuft mit altem
-Enrollment weiter — Warnung muss prominent sein; Host endet immer
-funktionsfähig.
-
-### K8 🟠 Dockerfile: Cross-Build-Stage braucht `--platform=$BUILDPLATFORM`
-
-**Befund.** Plan sagt „von TARGETARCH entkoppelt“, nennt aber den Mechanismus
-nicht; das aktuelle Dockerfile nutzt kein `$BUILDPLATFORM`.
-
-**Risiko.** Bei buildx-Multi-Arch läuft die Agent-Build-Stage je
-Ziel-Plattform unter QEMU — emuliertes Go-Compile ist um ein Vielfaches
-langsamer, Build-Zeit explodiert.
-
-**Vorschlag.** `FROM --platform=$BUILDPLATFORM golang:1.26 AS agentbuild` +
-GOOS/GOARCH-Schleife (nativer Compiler, Cross via Go, `CGO_ENABLED=0`).
-Dasselbe wäre für die bestehende Server-Build-Stage sinnvoll (separates
-Thema, nicht Teil dieses Plans).
-
-**Entscheidung.** (2026-07-25) Angenommen: Agent-Cross-Build-Stage als
-`FROM --platform=$BUILDPLATFORM golang:1.26 AS agentbuild` mit
-GOOS/GOARCH-Schleife (`CGO_ENABLED=0`, gleiche `-ldflags` wie Server).
-Nativer Compiler, Cross via Go; Stage ist plattform-invariant ⇒ BuildKit
-dedupliziert, Agenten werden pro Multi-Arch-Build effektiv einmal gebaut.
-CI-Artefakt-`COPY` verworfen (bricht Single-Build-Lockstep). Optimierung der
-bestehenden Server-Build-Stage als separates Thema notiert, nicht Teil
-dieses Plans.
-
-### K9 🟡 Cert-Rotation: Stale-Fenster und Dual-Cert-Proxies
-
-**Befund.** Pin-Cache bis `GSSH_PUBLIC_PIN_REFRESH` (5 min) stale. Rotiert
-der Proxy im Fenster zwischen `install.sh`-Abruf und Enroll-Dial, trägt das
-Script einen alten Pin ⇒ Enroll scheitert einmalig (fail-closed; Retry nach
-Refresh hilft). Let’s-Encrypt-Renewals erzeugen standardmäßig neue Keys, das
-Fenster tritt also planmäßig alle ~60–90 Tage auf. Dual-Cert-Proxies
-(RSA+ECDSA) liefern je nach Client ein anderes Leaf — hier sind beide Seiten
-Go-TLS, praktisch dieselbe Auswahl.
-
-**Vorschlag.** (a) Lazy-Refresh: beim Servieren von `install.sh` und beim
-Token-Mint Pin synchron nachziehen, wenn der Cache älter als das Intervall
-ist. (b) Nur falls nötig: Multi-Pin `--pin a,b` (Verifier prüft Menge —
-alte+neue Pins während Rotation gültig). Dual-Cert: eine Doku-Zeile, kein
-Code.
-
-**Entscheidung.** (2026-07-25) Angenommen, differenziert nach K2-Quelle:
-Datei-Quelle **ungecacht** (bei jedem Servieren frisch gelesen — Parse kostet
-Mikrosekunden, Stale-Fenster = nur Kubelet-Sync); Dial-Quelle behält
-Background-Loop **plus** Lazy-Refresh beim Servieren, wenn der Cache älter
-als das Intervall ist; statische Quelle Operator-Sache. Multi-Pin
-verschoben (YAGNI: Restfenster Sekunden–1 min alle ~60–90 Tage; später
-abwärtskompatibel als Komma-Liste nachrüstbar — Future-Note). Dual-Cert
-bleibt Doku-Zeile (beide Pin-Konsumenten Go-TLS, gleiche Auswahl; bei
-Datei-Quelle gegenstandslos). Entschärfend festgehalten: Pin-Mismatch
-scheitert im TLS-Handshake **vor** dem Request ⇒ Token wird nicht
-verbraucht, Retry gratis (mit K7 sicher).
-
-### K10 🟡 `Cache-Control: no-store` für `install.sh` + Manifest
-
-**Befund.** Das getemplatete Script enthält Pin + Hashes; zwischengeschaltete
-Caches (CDN, Corporate-Proxy) könnten stale Kopien servieren — stale Pin ⇒
-fehlschlagende Enrollments, schwer zu debuggen.
-
-**Vorschlag.** `Cache-Control: no-store` auf `/install.sh` und `/v1/agents`.
-Binary-Downloads dürfen cachen.
-
-**Entscheidung.** (2026-07-25) Angenommen, verschärft: `no-store` auf
-**allen drei** Endpoint-Typen — `install.sh`, Manifest **und**
-Binary-Download. Begründung der Verschärfung: Binary-Caching hat keinen
-Nutzen (ein Download pro Host-Lebenszeit), aber reales Schadpotenzial —
-nach Server-Upgrade liefert ein Cache das alte Binary zur neuen
-`install.sh` ⇒ Hash-Mismatch als Phantom-Fehler. Eine Regel statt drei.
-ETag/`no-cache`-Revalidierung verworfen (Maschinerie ohne
-Wiederholungs-Traffic).
-
-### K11 🟡 Script-Härtung gegen Truncation/Teilzustände
-
-**Befund.** curl|sh führt bei abgebrochener Übertragung ein halbes Script aus.
-
-**Vorschlag.** (a) Gesamtes Script als `main() { … }; main "$@"` — Truncation
-führt nichts aus. (b) Binary nach `mktemp` laden, Hash prüfen, dann atomisch
-`mv` + `chmod 0755`. (c) `trap`-Cleanup für tmp-Dateien. (d) `set -eu`.
-Standard-Praxis, kostet nichts.
-
-**Entscheidung.** (2026-07-25) Angenommen: (a) `main()`-Wrapper, letzte
-Zeile `main "$@"` — Truncation führt nichts aus statt die Hälfte (einziger
-struktureller Baustein, Rest Hygiene). (b) präzisiert durch K7:
-Same-Dir-Tempfile in `/usr/bin`, nicht `/tmp`-mktemp. (c) `trap`-Cleanup
-(EXIT) für das Tempfile. (d) `set -eu`; **kein** `pipefail` (in POSIX-sh/dash
-nicht verlässlich) — Pipe-Fehler werden explizit über Exit-Codes geprüft.
-Selbst-Hash-Prüfung des Scripts verworfen (Bootstrap-Zirkel).
-
-### K12 🟡 systemd-Unit: eine Quelle statt Here-Doc-Duplikat
-
-**Befund.** `deploy/packaging/gssh-agentd.service` existiert bereits
-(deb/rpm-Pfad). Plan lässt „Server serviert Unit oder Here-Doc“ offen — ein
-Duplikat driftet zwangsläufig.
-
-**Vorschlag.** Dieselbe Datei via `go:embed` einbetten und vom Script
-beziehen (im getemplateten Script inline oder als eigener Endpoint). Eine
-Quelle für beide Installationswege. Dazu README-Zeile: Script-Install und
-deb/rpm nicht mischen (dpkg-fremde Datei in `/usr/bin`).
-
-**Entscheidung.** (2026-07-25) Angenommen: kanonische Datei zieht um nach
-`internal/agentdist/gssh-agentd.service` (`go:embed` kann nicht über das
-Package-Verzeichnis hinausgreifen — deshalb Umzug statt Referenz);
-`nfpm.yaml`-src zeigt auf den neuen Pfad, deb/rpm unverändert. Server inlined
-den Inhalt beim Templaten als quoted Here-Doc (`<<'EOF'`, keine Expansion);
-Datei ist statisch, kein Unit-Templating. Verworfen: `go:generate`-Kopie
-(committetes Duplikat = Drift), eigener Endpoint (Round-Trip ohne Gewinn),
-Go-Package in `deploy/packaging` (Konzeptvermischung). Plus README-Zeile:
-Script- und deb/rpm-Install nicht mischen.
-
-### K13 🟡 Manifest verrät Server-Version unauthentifiziert
-
-**Befund.** `GET /v1/agents` (öffentlich) enthält `version` ⇒ exaktes
-CVE-Targeting für Angreifer bequem.
-
-**Vorschlag.** Bewusst entscheiden: akzeptieren (Version ggf. ohnehin über
-UI-Assets ableitbar) **oder** `version` aus dem öffentlichen Manifest
-streichen und nur in der Admin-Antwort (`install_command`-Response) führen.
-Das Script braucht die Version nicht — der SHA-256 gate’t das Binary.
-
-**Entscheidung.** (2026-07-25) **Behalten + Risiko akzeptieren.** Das
-öffentliche Binary ist ohnehin version-identifizierbar (SHA-256-Abgleich mit
-Release-Checksums, `gssh-agentd version` nach Download) — Streichen wäre
-Scheinschutz gegen gezielte Angreifer und nähme nur Massen-Scannern einen
-JSON-Read ab. Gegenwert des Felds: Operator-Diagnose per `curl`, UI-Anzeige
-ohne Zusatz-Call. Als bewusste Entscheidung in Security-Sektion vermerkt.
-
-### K14 🟡 Token in argv/Shell-History: Residualrisiko dokumentieren
-
-**Befund.** `--token` steht kurzzeitig in `ps`/`/proc/*/cmdline` des
-Zielhosts und dauerhaft in der Shell-History des Operators.
-
-**Vorschlag.** Akzeptieren — Einmalverbrauch + kurze TTL entwerten das Token
-nach Gebrauch; auf dem Zielhost ist ein Angreifer mit ps-Zugriff vor dem
-Enrollment ohnehin Game-over. Als bewusstes Residualrisiko in die
-Sicherheits-Sektion aufnehmen, kein Umbau.
-
-**Entscheidung.** (2026-07-25) Akzeptiert, nur Doku: Security-Sektion nennt
-argv/History-Exposition als bewusstes Residualrisiko. Alternativen geprüft
-und verworfen: Env-Prefix steht genauso in der History, `sudo` strippt Envs
-(Friktion), Gewinn nur root-lesbares `/proc/environ` statt argv — marginal
-auf frisch provisionierten Hosts; stdin-Prompt geht bei `curl | sh` nicht
-(stdin = Pipe), `sh -c "$(curl …)"`-Variante verschlechtert Copy-UX ohne die
-History-Exposition zu beheben. Tragende Kontrolle: Einmalverbrauch + kurze
-TTL (in K7 bewusst verteidigt); Rest deckt K16 (Revoke, Future) ab.
-
-### K15 🟡 `pintls`: Berechnungs-Helper fehlt
-
-**Befund.** Plan sagt „Wiederverwendung `internal/pintls`“ — das Paket bietet
-`DecodePin`/`Transport`/`Verifier`, aber keinen Helper zur Pin-Berechnung aus
-einem Zertifikat.
-
-**Vorschlag.** Kleiner Neuzugang `pintls.FromCertificate(*x509.Certificate)
-string` (SHA-256 über `RawSubjectPublicKeyInfo`, Base64) — nutzen
-Pin-Provider und Tests gemeinsam. Plan-Formulierung anpassen.
-
-**Entscheidung.** (2026-07-25) Angenommen: `pintls.FromCertificate` kommt
-als Helper ins Paket; Nutzer sind Pin-Provider (Dial- und Datei-Quelle,
-K2/K9) sowie der bestehende handgestrickte Test-Helper `spkiPin()` in
-`internal/cli/client_test.go`, der auf den Helper migriert.
-Inline-Berechnung an drei Stellen verworfen.
-
-### K16 🟡 Offene Enroll-Tokens: Liste/Revoke fehlt (Future)
-
-**Befund.** UI-Mint erzeugt Tokens mit 1 h TTL; es gibt keinen UI-Weg, ein
-vor Gebrauch geleaktes Token zu widerrufen.
-
-**Vorschlag.** Nicht in diesem Scope (kurze TTL, Einmalverbrauch). Als
-Future-Note: `GET/DELETE /v1/admin/enroll-tokens` + UI-Liste offener Tokens.
-
-**Entscheidung.** (2026-07-25) Bewusst **außerhalb** dieses Scopes:
-Leak-Fenster durch 1-h-TTL + Einmalverbrauch klein (K14), Liste+Revoke wäre
-eigener Feature-Block (API, UI-Tabelle, Audit-Events) für einen Randfall
-ohne Bedarf. Future-Note bleibt hier dokumentiert; gebaut bei Bedarf.
-
-### K17 🟡 Erfolgsmeldung ohne Health-Check
-
-**Befund.** Script meldet Erfolg direkt nach `systemctl enable --now` — ob
-der Daemon wirklich läuft (z. B. falsche Agent-URL, siehe K4), sieht der
-Operator nicht.
-
-**Vorschlag.** Schritt 8 erweitern: kurz warten, `systemctl is-active`
-prüfen; bei Fehlschlag klare Meldung + Hinweis auf
-`journalctl -u gssh-agentd`, Exit ≠ 0. Erst dann Erfolgsmeldung.
-
-**Entscheidung.** (2026-07-25) Angenommen, verstärkt um Readiness-Signal:
-(1) `systemctl is-active --quiet` nach kurzer Wartezeit (fängt
-Crash-on-Start); (2) Warten auf `/var/lib/guided-ssh/agentd.sock` (≤ 10 s) —
-der Daemon legt den Socket erst bei Bereitschaft an (dasselbe Signal nutzt
-die Testfixture), stärker als `is-active` bei `Type=simple`. Fehlschlag ⇒
-Meldung + `journalctl -u gssh-agentd -n 20`-Hinweis, Exit ≠ 0; entfällt bei
-`--no-systemd`. Dokumentierte Grenze: falsche Agent-URL fällt hier nicht
-zwingend auf (Dial ggf. erst bei Zertifikats-Erneuerung) — dagegen schützt
-das K4-Gate, nicht dieser Check.
+## Entscheidungs-Log
+
+Kernentscheidungen (alle 2026-07-25, Review K1–K17 vollständig aufgelöst und
+oben eingearbeitet):
+
+| # | Thema | Entscheidung |
+|---|---|---|
+| — | Bundling | **Embed** (`go:embed`) statt Image-Pfad — Single-Artifact, harter Version-Lockstep; +30–40 MB akzeptiert |
+| — | Download-Zugriff | Manifest + Binary **öffentlich**; Token gated das Enrollment; Download eng rate-limited |
+| — | Session-Audit | Checkbox im Dialog, Default aus, Opt-in mit Erklärtext (ändert PAM-Konfig) |
+| K1 | Pin-Selbst-Dial | Verifiziert fail-closed gegen System-Roots; **kein** `InsecureSkipVerify`-Codepfad; Private-CA via `SSL_CERT_FILE`/`SSL_CERT_DIR` |
+| K2 | Hairpin-Escape | Drei Pin-Quellen: statisch > Datei (Secret-Volume, rotationsfähig) > Dial; alle fail-closed, aktive Quelle sichtbar |
+| K3 | `--require-pin` | Behalten, aber ehrlich als **Bedienfehler-Schutz** deklariert (kein MITM-Schutz) |
+| K4 | Agent-URL | **Keine** Ableitung; Helm-`required` (fail-fast) + Server-Gate (autoritativ); Manifest nennt fehlende Bedingungen einzeln; kein Feature-Flag |
+| K5 | Download-Limiter | Erbt `TrustProxyHeader` aus `GSSH_RATE_TRUST_PROXY`; Default 10/min Burst 5; token-gebundener Download verworfen |
+| K6 | E2E ohne systemd | Script-Flag `--no-systemd`; systemctl-Stub und systemd-Container verworfen; systemctl-Pfad bleibt dokumentierte CI-Lücke |
+| K7 | Re-Run nach Teilfehler | Enroll-Degradation (Warnung + weiter, wenn `config.yaml` existiert); Same-Dir-Tempfile + atomarer `mv` statt `systemctl stop`; restart-vs-enable zustandsabhängig; Mehrfach-Token/Reissue verworfen |
+| K8 | Dockerfile | Agent-Stage mit `--platform=$BUILDPLATFORM` + GOOS/GOARCH-Schleife; CI-Artefakt-COPY verworfen; Server-Stage-Optimierung = Future |
+| K9 | Cert-Rotation | Datei-Quelle ungecacht; Dial mit Background- + Lazy-Refresh; Multi-Pin = Future (YAGNI); Pin-Mismatch verbraucht kein Token |
+| K10 | Caching | `no-store` auf **allen drei** Endpoints (auch Binary); ETag-Revalidierung verworfen |
+| K11 | Script-Härtung | `main()`-Wrapper, `set -eu` ohne `pipefail`, `trap`-Cleanup; Selbst-Hash verworfen (Bootstrap-Zirkel) |
+| K12 | Unit-Quelle | `git mv` nach `internal/agentdist/`, dort embedded, im Script als quoted Here-Doc; `nfpm.yaml` folgt; Duplikat-Varianten verworfen |
+| K13 | Version im Manifest | Behalten + Risiko akzeptiert (Binary ohnehin identifizierbar; Streichen = Scheinschutz) |
+| K14 | Token in argv/History | Akzeptiert (Einmalverbrauch + TTL tragen); Env-/stdin-Varianten verschieben die Exposition nur |
+| K15 | Pin-Berechnung | Neuer Helper `pintls.FromCertificate`; Test-Helper `spkiPin` migriert; Inline-Duplikate verworfen |
+| K16 | Token-Liste/Revoke | Bewusst außerhalb des Scopes (Future-Note) |
+| K17 | Health-Check | `is-active` **plus** Warten auf `agentd.sock` (≤ 10 s), `journalctl`-Hinweis, Exit ≠ 0; entfällt bei `--no-systemd`; falsche Agent-URL fängt das K4-Gate |
+
+Korrektur gegenüber früherer Planfassung: Die XFF-Vertrauens-Env heißt im
+Code `GSSH_RATE_TRUST_PROXY` (nicht `GSSH_RATE_TRUST_XFF`); die
+Frontend-Referenz `enrollment/enroll-host.ts` existiert nicht — Dialog-Muster
+ist `grants.ts`, Client-Muster `web/src/app/api/fn/`.
+
+## Future-Notes (bewusst nicht in diesem Scope)
+
+- **Token-Verwaltung:** `GET/DELETE /v1/admin/enroll-tokens` + UI-Liste
+  offener Tokens (Revoke vor Gebrauch). Leak-Fenster ist durch 1-h-TTL +
+  Einmalverbrauch klein; bauen bei Bedarf.
+- **Multi-Pin während Rotation:** `--pin a,b` als Komma-Liste,
+  abwärtskompatibel nachrüstbar, falls das Sekunden-Restfenster je stört.
+- **Server-Build-Stage** ebenfalls auf `--platform=$BUILDPLATFORM` heben
+  (Build-Zeit-Optimierung, unabhängig von diesem Feature).
+- **Weitere Arches** (386, arm/v7, riscv64): je ein Eintrag in der
+  Dockerfile-Schleife (A2) — Manifest, Script-Dropdown und UI ziehen
+  automatisch nach.
