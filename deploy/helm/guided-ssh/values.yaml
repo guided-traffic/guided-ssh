@@ -65,7 +65,7 @@ secrets:
 # versehentlicher Nutzung) und erfordert replicaCount=1 ohne Autoscaling.
 internalDatabase:
   enabled: false
-  image: docker.io/library/postgres:16-alpine
+  image: docker.io/library/postgres:18-alpine
   # Eigene Pull-Policy: image.pullPolicy des Servers (z. B. Never bei lokal
   # gebauten Images) passt für das öffentliche Postgres-Image nicht.
   pullPolicy: IfNotPresent
