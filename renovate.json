@@ -224,6 +224,16 @@
       ]
     },
     {
+      "description": "TypeScript is pinned by the Angular toolchain: @angular/compiler-cli and @angular/build declare peerDependency 'typescript >=6.0 <6.1'. Newer TS (e.g. v7) breaks the Angular build, so cap it at Angular's supported upper bound. Widen this when the Angular peerDependency range widens.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<6.1"
+    },
+    {
       "description": "Use 'fix' instead of 'chore' for dependency updates",
       "semanticCommitType": "fix",
       "matchUpdateTypes": [
