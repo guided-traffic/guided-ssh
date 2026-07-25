@@ -194,14 +194,213 @@ optional when the mode is self-managed.
 
 ## Success criteria
 
+All four are met; how each one is verified:
+
 - In self-managed mode, `ca_keys.encrypted_private_key IS NULL` for every
-  row — asserted in the integration test.
+  row — asserted as `SELECT count(*) … WHERE encrypted_private_key IS NOT NULL`
+  = 0 at the end of `TestSelfManagedCAFullIssuePath`.
 - A fresh DB plus the same mounted keys reproduces identical bundles and can
   verify previously issued certificates (DB is derived state, Git is the
-  source of truth).
-- Managed mode behaves exactly as today (default unchanged).
+  source of truth) — `TestSelfManagedCADatabaseIsDerivedState` wipes `ca_keys`,
+  re-adopts the same files and asserts byte-identical bundles.
+- Managed mode behaves exactly as today (default unchanged) — the unit and
+  integration suites pass unchanged, and `helm template` output for managed
+  mode is byte-identical to `HEAD` (defaults, full feature set, and an
+  explicit `secrets.ca.mode=managed`).
 - Misconfiguration (missing file, key files set in managed mode, retired key
-  re-mounted) fails at startup with an actionable message.
+  re-mounted) fails at startup with an actionable message — `TestCAModeFromEnv`
+  (9 cases), `TestLoadExternalKeysRejectsBrokenMaterial` (18 cases),
+  `TestAdoptExternalKeysRetiredKeyRefused`. **Exception:** an expired mounted
+  mTLS CA certificate is not caught at startup — see O2.
+
+## Implementation decisions (as built)
+
+Decisions taken while implementing that refine or deviate from D1–D7. The
+design above is unchanged in substance; these are the concrete choices.
+
+### I1 — `AdoptCAKey` reports whether it created the row
+
+Signature is `AdoptCAKey(ctx, purpose, algorithm, publicKey) (*CAKey, bool, error)`.
+The bool is needed for "audit event `ca.key_adopted` **on first adoption**"
+— without it, every restart would re-emit the event.
+
+### I2 — A `retiring` row is adopted as-is, never promoted back to `active`
+
+D4 only specified the error-on-`retired` case. Decision: if the mounted key
+matches a `retiring` row, return it unchanged. Promoting it would let a stale
+mount silently reverse a completed rotation, and with two replicas mounting
+different keys the state would flap.
+
+**Consequence:** in self-managed mode signer selection keys off the *adopted
+CA key ID*, never off `state = 'active'`. A replica that still has the
+superseded key file mounted keeps signing with it until it is restarted —
+that is the intended rolling-update behavior. Regression-guarded by
+`TestSelfManagedRetiringKeyStillSigns`.
+
+### I3 — API shape: `WithExternalKeys` + explicit `AdoptExternalKeys`
+
+Named `WithExternalKeys` rather than the plan's `WithExternalSigners`, since
+the option carries the whole loaded material (including the mTLS certificate),
+not just signers. Adoption is an explicit startup step
+(`AdoptExternalKeys(ctx)`) that replaces `EnsureCAKeys` and covers **all
+three** purposes including mTLS.
+
+`CA.SelfManaged()` exists so `serve()` can skip its `EnsureMTLSCA` bootstrap
+call — that path now returns `ErrSelfManaged` and would otherwise abort startup.
+
+### I4 — `invalidateSigner` is a no-op in self-managed mode
+
+Found during testing: `RetireKey` evicts the cached signer, but in
+self-managed mode the cache holds signers built from the mounted **files**,
+which cannot be rebuilt from the DB. Retiring the old row — D6 step 3, the
+documented cleanup — therefore left the purpose unsignable until restart,
+with the misleading error `no external ca key adopted for purpose …`.
+External signers are the source of truth, so no DB state change invalidates
+them. See O3 for the remaining sharp edge.
+
+### I5 — `ca_keys.algorithm` is derived from the mounted material
+
+Not hardcoded to `ed25519`. `strings.TrimPrefix(pub.Type(), "ssh-")`, so an
+ed25519 key records `ed25519` in both modes and stays comparable with what
+managed mode's `NewCAKey` writes. The mTLS loader enforces ed25519 outright;
+the SSH loaders accept whatever `ssh.ParsePrivateKey` understands (see O6).
+
+### I6 — One x509 template for both mTLS CA producers
+
+`GenerateMTLSCA()` was extracted from `EnsureMTLSCA`; the `gen-mtls-ca`
+subcommand uses the same function. Operators and the bootstrap path cannot
+drift apart.
+
+### I7 — The helper flag is `-out`, not `--out`
+
+Go's `flag` package accepts both, but `-out` matches the binary's own usage
+text and the existing `gssh-server enroll-token -tags … -ttl …` style. The
+plan's `--out` spelling was not adopted; docs use `-out`.
+
+### I8 — The Secret is projected item-by-item, not mounted whole
+
+The volume lists the four keys explicitly, so `selfManaged.existingSecret`
+may point at the *same* Secret as `secrets.ca.existingSecret` without
+`ca-master-key` landing on disk. `defaultMode: 0440` plus the chart's default
+`podSecurityContext.fsGroup` (65532) makes the files readable only by the
+server process. Side effect: a missing key leaves the pod in
+`ContainerCreating` instead of crash-looping.
+
+Chart-level `fail` guards reject an invalid `secrets.ca.mode` and a
+self-managed mode without `selfManaged.existingSecret` — a render error is
+friendlier than a CrashLoop.
+
+### I9 — The Flux example ships plaintext placeholder keys, not SOPS ciphertext
+
+Phase 4 asked for a SOPS-encrypted example Secret. It cannot be encrypted
+here without a real cluster age key, and the other example secrets in that
+file already use plaintext `REPLACE_ME` values. The example therefore carries
+real but disposable keys labelled `EXAMPLE — DO NOT USE`, with a banner
+stating that the material is public and must be replaced and re-encrypted.
+The production overlay deliberately stays on `managed`, so a copied template
+never runs on keys whose private material is in this repo.
+
+### I10 — New code is English, existing German code stays German
+
+Explicit decision for this PR: new Go comments, error messages and tests are
+English; existing German comments are not translated. New user-facing docs
+are English (`docs/self-managed-ca.md`); sections added to the existing German
+docs keep those files' language.
+
+### I11 — Integration tests live in `internal/store`
+
+`internal/store` owns the only testcontainers harness. The self-managed
+end-to-end tests drive a real `httptest` server built from `internal/api`
+against a real `*store.Store` from there, rather than building a second
+container bootstrap path under `internal/api`.
+
+## Open points
+
+Findings from implementation and testing that are **not** fixed in this PR,
+each with a proposal. None of them block the feature.
+
+### O1 — D4's claim about the bootstrap race is wrong (doc correction)
+
+D4 states the unique index "also mitigates the existing bootstrap race in
+`EnsureCAKeys`". It does not. Two replicas bootstrapping managed mode
+concurrently each *generate a fresh random key*, so their `public_key` values
+differ and both inserts succeed — the index only collides on identical key
+material, which is exactly the self-managed case it was added for.
+
+*Proposal:* keep the index as is (it does its job for adoption), and fix the
+managed-mode race separately with a Postgres advisory lock around
+`EnsureCAKeys`. Small, independent, worth its own issue.
+
+### O2 — No validity-window check on the mounted mTLS CA certificate
+
+`LoadExternalKeys` checks `IsCA`, `KeyUsageCertSign` and key/cert match, but
+not `NotBefore`/`NotAfter`. An expired mounted CA starts cleanly and only
+fails later at agent enrollment — the one gap against the "misconfiguration
+fails at startup" success criterion.
+
+*Proposal:* reject an expired or not-yet-valid certificate in the loader, and
+log a warning when it expires within, say, 90 days. Cheap; a good candidate to
+still add to this PR if wanted.
+
+### O3 — `RetireKey` does not protect the currently mounted key
+
+After I4, retiring a superseded row is safe. Retiring the row of the key that
+is *currently mounted* still succeeds: the running process keeps signing (its
+signer is file-based), but the next start fails with the retired-key error.
+
+*Proposal:* have `RetireKey` refuse when the ID equals an adopted key ID in
+self-managed mode. Naturally belongs with the Phase 5 admin retire surface,
+which is when a caller first exists.
+
+### O4 — The adoption audit event is written outside the adopt transaction
+
+If `AppendAuditEvent` fails after `AdoptCAKey` committed, the row exists but
+the adoption is never audited — and never will be, since the next start
+reports `created == false`. Same shape as the existing `createKey`, so this
+is a carry-over rather than a regression.
+
+*Proposal:* extend `AdoptCAKey` to take the audit event and write both in one
+transaction, mirroring `CreateCertificateWithAudit`. Fixes `createKey` too.
+
+### O5 — `AdoptExternalKeys` is not atomic across the three purposes
+
+A failure on the host key after the user key was adopted leaves a rotation
+half-applied (user key B already active, A already demoted). Startup aborts
+and a retry converges, so the window is short and self-healing.
+
+*Proposal:* accept it, or adopt all three purposes in one store-level
+transaction if the half-applied state ever proves confusing in practice.
+
+### O6 — Non-ed25519 SSH CA keys are accepted
+
+The loader takes anything `ssh.ParsePrivateKey` understands. Since I5 the
+recorded algorithm is truthful, so nothing lies anymore — but the project
+otherwise only ever produces ed25519 CAs.
+
+*Proposal:* decide explicitly. Either keep it permissive (an operator with an
+existing RSA CA can migrate onto guided-ssh) or reject non-ed25519 in the
+loader for one uniform key type. Leaning permissive; no code change needed.
+
+### O7 — mTLS CA rotation has no transition window
+
+D6's rollover reasoning covers the SSH CAs: the old public key stays in the
+bundle via its `retiring` row. The mTLS CA has no such bundle —
+`MTLSCAPool` builds the pool from the active certificate only — so swapping
+the mTLS files invalidates every agent certificate at once and forces
+re-enrollment. Documented as a caveat in `docs/self-managed-ca.md`.
+
+*Proposal:* make `MTLSCAPool` include `retiring` mTLS rows so agents keep
+authenticating across a rollover. That is the same trust-window shape the SSH
+bundle already has, and it is a prerequisite for calling mTLS rotation
+operationally safe.
+
+### O8 — The Flux example was not rendered in this environment
+
+`kubectl`/`kustomize` are unavailable here, so the added example Secret was
+verified by reading and by key material round-trip, not by an actual
+`kubectl kustomize` build.
+
+*Proposal:* render it once in CI or locally before merging.
 
 ## Out of scope
 
