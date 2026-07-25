@@ -4,6 +4,7 @@
 package api
 
 import (
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -36,6 +37,11 @@ type Deps struct {
 	// RateLimit drosselt die unauthentifizierten Endpunkte (Sign, Enroll)
 	// pro Client-IP (Phase 10); nil ⇒ kein Rate-Limiting (Tests).
 	RateLimit *RateLimiter
+	// DownloadRateLimit drosselt allein den Binary-Download
+	// (GET /v1/agents/{os}/{arch}). Eigene, engere Instanz: das Binary ist
+	// 15–40 MB groß, der reguläre 60/min-Limiter wäre als Flood-Schutz zu
+	// locker. nil ⇒ kein Rate-Limiting (Tests).
+	DownloadRateLimit *RateLimiter
 	// HostCertValidity ist die Laufzeit ausgestellter Host-Zertifikate;
 	// 0 ⇒ Default (30 Tage). Das Policy-Maximum greift immer.
 	HostCertValidity time.Duration
@@ -69,10 +75,13 @@ type Deps struct {
 	PublicBaseURL string
 }
 
-// AgentSource liefert die Metadaten der eingebetteten Agent-Binaries
+// AgentSource liefert Metadaten und Inhalt der eingebetteten Agent-Binaries
 // (*agentdist.Source erfüllt es; Tests nutzen agentdist.NewFromFS).
 type AgentSource interface {
 	List() []agentdist.Info
+	// Open streamt das Binary für os/arch; ist keines eingebettet, ist der
+	// Fehler agentdist.ErrNotFound.
+	Open(osName, arch string) (io.ReadCloser, agentdist.Info, error)
 }
 
 // UIConfig ist die öffentliche Bootstrap-Konfiguration der Web-UI.
@@ -93,6 +102,9 @@ type UIConfig struct {
 //	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
 //	POST /v1/sign/ci               – GitLab-Job-Token gegen CI-Zertifikat tauschen
 //	POST /v1/enroll                – Host-Enrollment gegen einmaliges Token
+//	GET  /v1/agents                – Manifest der Agent-Binaries + Rollout-Status
+//	GET  /v1/agents/{os}/{arch}    – Agent-Binary (One-Command-Host-Install)
+//	GET  /install.sh               – getemplatetes Install-Script für Hosts
 //	/v1/admin/grants…              – Grant-Verwaltung (CRUD + deklaratives Apply),
 //	                                 nur für Mitglieder der Admin-Gruppe
 //	/v1/admin/ci-grants…           – CI-Grant-Verwaltung (analog)
@@ -154,6 +166,7 @@ func New(deps Deps) http.Handler {
 		})
 	}
 
+	registerRolloutRoutes(mux, deps)
 	registerUIAuthRoutes(mux, deps)
 	registerAdminRoutes(mux, deps)
 

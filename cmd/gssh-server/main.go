@@ -127,6 +127,16 @@ const (
 	envPublicPin        = "GSSH_PUBLIC_PIN"           // Pin-Quelle 1: statischer Base64-SPKI-Pin
 	envPublicPinCert    = "GSSH_PUBLIC_PIN_CERT_FILE" // Pin-Quelle 2: PEM-Zertifikat (erster Block = Leaf)
 	envPublicPinRefresh = "GSSH_PUBLIC_PIN_REFRESH"   // Refresh-Intervall des Selbst-Dials, Default 5m
+	envAgentDownloadRPM = "GSSH_AGENT_DOWNLOAD_RPM"   // Binary-Downloads pro Client-IP und Minute, Default 10 ("0" = aus)
+)
+
+// defaultAgentDownloadRPM/Burst drosseln den Binary-Download deutlich enger als
+// die Sign-/Enroll-Endpunkte (15–40 MB je Abruf). 10/min stoppt eine
+// Einzelquelle genauso wie ein engerer Wert, würgt aber Bulk-Rollouts hinter
+// Firmen-NAT (eine IP, Ansible-Loop über viele Hosts) nicht ab.
+const (
+	defaultAgentDownloadRPM   = 10
+	defaultAgentDownloadBurst = 5
 )
 
 // defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
@@ -508,9 +518,10 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 		Handler: api.New(api.Deps{
 			CA: certAuthority, Store: st, Hosts: st, Grants: st, Admin: st, UI: st,
 			Verifier: verifier, CIVerifier: ciVerifier, CIStore: st,
-			RateLimit:        setupRateLimit(logger),
-			HostCertValidity: hostCertValidity,
-			Logger:           logger, AdminGroup: adminGroup,
+			RateLimit:         setupRateLimit(logger),
+			DownloadRateLimit: setupDownloadRateLimit(logger),
+			HostCertValidity:  hostCertValidity,
+			Logger:            logger, AdminGroup: adminGroup,
 			AuditorGroup:  os.Getenv(envAuditorGroup),
 			ReadOnlyGroup: os.Getenv(envReadOnlyGroup),
 			UIConfig: api.UIConfig{
@@ -742,6 +753,33 @@ func setupRateLimit(logger *slog.Logger) *api.RateLimiter {
 		}
 	}
 	cfg.TrustProxyHeader = os.Getenv(envRateTrustXFF) == "true"
+	return api.NewRateLimiter(cfg)
+}
+
+// setupDownloadRateLimit baut den engeren Limiter des Agent-Binary-Downloads;
+// GSSH_AGENT_DOWNLOAD_RPM=0 schaltet ihn ab. TrustProxyHeader kommt aus
+// derselben Env wie beim regulären Limiter — eine Wahrheit für die Client-IP,
+// sonst sähen hinter dem Ingress alle Requests wie die Proxy-IP aus und das
+// Limit wirkte global statt pro Host.
+func setupDownloadRateLimit(logger *slog.Logger) *api.RateLimiter {
+	cfg := api.RateLimiterConfig{
+		RequestsPerMinute: defaultAgentDownloadRPM,
+		Burst:             defaultAgentDownloadBurst,
+		TrustProxyHeader:  os.Getenv(envRateTrustXFF) == "true",
+	}
+	if raw := os.Getenv(envAgentDownloadRPM); raw != "" {
+		parsed, err := strconv.ParseFloat(raw, 64)
+		switch {
+		case err != nil || parsed < 0:
+			logger.Warn("ungültige download-rate, nutze default", "env", envAgentDownloadRPM, "value", raw)
+		case parsed == 0:
+			logger.Warn("rate-limiting des agent-downloads deaktiviert", "env", envAgentDownloadRPM)
+			return nil
+		default:
+			cfg.RequestsPerMinute = parsed
+			cfg.Burst = max(1, parsed/2)
+		}
+	}
 	return api.NewRateLimiter(cfg)
 }
 

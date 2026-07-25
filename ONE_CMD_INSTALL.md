@@ -943,9 +943,9 @@ Maßnahmen und bewusst akzeptierte Restrisiken:
 - [x] P4: `gssh-agentd enroll --require-pin` + `GSSH_ENROLL_REQUIRE_PIN` (fail-closed vor Netz-Call); manueller/deb-Pfad unverändert; Tests
 
 ### Phase B — Public-Endpoints
-- [ ] B1: `GET /v1/agents` (Manifest mit version/rollout_ready/missing/pin_source/agents, regulärer Limiter, `no-store`)
-- [ ] B2: `GET /v1/agents/{os}/{arch}` (Stream, 404/503-Pfade, `no-store`) + zweite `RateLimiter`-Instanz (`GSSH_AGENT_DOWNLOAD_RPM` Default 10, Burst 5, `TrustProxyHeader` aus `GSSH_RATE_TRUST_PROXY`)
-- [ ] B3: `GET /install.sh` — Template (Base-URL, Agent-URL, Version, per-Arch-Hash, Pflicht-Pin, Unit-Here-Doc) + Script nach Spezifikation (main()-Wrapper, `set -eu` ohne pipefail, trap, Same-Dir-Tempfile + atomarem `mv`, Enroll-Degradation, restart-vs-enable, Health-Check Socket ≤ 10 s, Flags `--arch`/`--session-audit`/`--no-systemd`) + Handler-/`sh -n`-Tests
+- [x] B1: `GET /v1/agents` (Manifest mit version/rollout_ready/missing/pin_source/agents, regulärer Limiter, `no-store`)
+- [x] B2: `GET /v1/agents/{os}/{arch}` (Stream, 404/503-Pfade, `no-store`) + zweite `RateLimiter`-Instanz (`GSSH_AGENT_DOWNLOAD_RPM` Default 10, Burst 5, `TrustProxyHeader` aus `GSSH_RATE_TRUST_PROXY`)
+- [x] B3: `GET /install.sh` — Template (Base-URL, Agent-URL, Version, per-Arch-Hash, Pflicht-Pin, Unit-Here-Doc) + Script nach Spezifikation (main()-Wrapper, `set -eu` ohne pipefail, trap, Same-Dir-Tempfile + atomarem `mv`, Enroll-Degradation, restart-vs-enable, Health-Check Socket ≤ 10 s, Flags `--arch`/`--session-audit`/`--no-systemd`) + Handler-/`sh -n`-Tests
 
 ### Phase C — Token-Minting-API
 - [ ] C1: `store.NewEnrollmentToken` extrahieren, `runEnrollToken` umstellen (CLI-Verhalten unverändert)

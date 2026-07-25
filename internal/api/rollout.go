@@ -70,6 +70,22 @@ func (g rolloutGate) status(ctx context.Context) rolloutStatus {
 	return st
 }
 
+// registerRolloutRoutes hängt die drei öffentlichen Rollout-Routen in den
+// Public-Mux (Plural /v1/agents/… — der mTLS-Listener mit /v1/agent/… bleibt
+// unangetastet). Alle drei sind unauthentifiziert: der Host hat vor dem
+// Enrollment keine Credentials.
+func registerRolloutRoutes(mux *http.ServeMux, deps Deps) {
+	gate := newRolloutGate(deps)
+
+	// Das Manifest bleibt auch bei geschlossenem Gate erreichbar (200) — es ist
+	// die Diagnosequelle dafür, welche Bedingung fehlt.
+	mux.HandleFunc("GET /v1/agents", deps.RateLimit.limit(handleAgentManifest(gate, deps.Agents)))
+	mux.HandleFunc("GET /v1/agents/{os}/{arch}",
+		deps.DownloadRateLimit.limit(handleAgentDownload(gate, deps.Agents, deps.Logger)))
+	mux.HandleFunc("GET /install.sh",
+		deps.RateLimit.limit(handleInstallScript(gate, deps.Agents, deps.AgentPublicURL, deps.PublicBaseURL, deps.Logger)))
+}
+
 // rolloutUnavailable ist der 503-Body der gateten Endpunkte.
 type rolloutUnavailable struct {
 	Error   string   `json:"error"`

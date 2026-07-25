@@ -2,18 +2,31 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/guided-traffic/guided-ssh/internal/agentdist"
 )
 
-// fakeAgents ist eine AgentSource mit fest vorgegebener Liste.
+// fakeAgents ist eine AgentSource mit fest vorgegebener Liste; Open liefert den
+// Arch-Namen als Inhalt (genügt, um den Stream zu prüfen).
 type fakeAgents []agentdist.Info
 
 func (f fakeAgents) List() []agentdist.Info { return f }
+
+func (f fakeAgents) Open(osName, arch string) (io.ReadCloser, agentdist.Info, error) {
+	for _, info := range f {
+		if info.OS == osName && info.Arch == arch {
+			return io.NopCloser(strings.NewReader(arch)), info, nil
+		}
+	}
+	return nil, agentdist.Info{}, fmt.Errorf("%w: %s/%s", agentdist.ErrNotFound, osName, arch)
+}
 
 // testPinPin ist ein gültiger (nie echt vergebener) Base64-SPKI-Pin.
 const testPinPin = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
