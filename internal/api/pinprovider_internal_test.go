@@ -11,11 +11,13 @@ import (
 	"encoding/pem"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,14 +147,14 @@ func TestPinProviderDateiQuelle(t *testing.T) {
 			t.Fatal(err)
 		}
 		st := p.Status(context.Background())
-		if st.Pin != "" || st.Err == "" {
-			t.Errorf("%s: status = %+v, erwartet kein pin mit fehlergrund", name, st)
+		if st.Pin != "" || st.Err == "" || st.ErrCode != PinErrCertFileUnreadable {
+			t.Errorf("%s: status = %+v, erwartet kein pin mit kategorie %q", name, st, PinErrCertFileUnreadable)
 		}
 	}
 
 	missing := NewPinProvider(PinProviderConfig{CertFile: filepath.Join(dir, "fehlt.crt")}, logger)
-	if st := missing.Status(context.Background()); st.Pin != "" || st.Err == "" {
-		t.Errorf("fehlende datei: status = %+v, erwartet kein pin mit fehlergrund", st)
+	if st := missing.Status(context.Background()); st.Pin != "" || st.ErrCode != PinErrCertFileUnreadable {
+		t.Errorf("fehlende datei: status = %+v, erwartet kein pin mit kategorie %q", st, PinErrCertFileUnreadable)
 	}
 }
 
@@ -186,6 +188,9 @@ func TestPinProviderDialQuelle(t *testing.T) {
 		if st.Pin != "" || st.Err == "" {
 			t.Fatalf("status = %+v, erwartet kein pin mit fehlergrund", st)
 		}
+		if st.ErrCode != PinErrChainUntrusted {
+			t.Errorf("errcode = %q, erwartet %q", st.ErrCode, PinErrChainUntrusted)
+		}
 	})
 
 	t.Run("letzter pin überlebt fehlgeschlagenen refresh", func(t *testing.T) {
@@ -213,7 +218,9 @@ func TestPinProviderDialQuelle(t *testing.T) {
 		logger, _ := testLogger()
 		// Langes Intervall: der zweite Versuch darf nicht am Cache hängen
 		// bleiben, sonst bliebe das Gate nach einem Startfehler minutenlang zu.
+		// Der Backoff zwischen Fehlversuchen ist im Test praktisch aus.
 		p := NewPinProvider(PinProviderConfig{DialURL: server.URL, Refresh: time.Hour}, logger)
+		p.backoff = time.Nanosecond
 
 		if st := p.Status(context.Background()); st.Pin != "" {
 			t.Fatalf("status = %+v, erwartet kein pin (system-roots)", st)
@@ -227,8 +234,12 @@ func TestPinProviderDialQuelle(t *testing.T) {
 	t.Run("ohne public-url kein pin", func(t *testing.T) {
 		logger, _ := testLogger()
 		p := NewPinProvider(PinProviderConfig{Refresh: time.Nanosecond}, logger)
-		if st := p.Status(context.Background()); st.Pin != "" || st.Err == "" {
+		st := p.Status(context.Background())
+		if st.Pin != "" || st.Err == "" {
 			t.Fatalf("status = %+v, erwartet kein pin mit fehlergrund", st)
+		}
+		if st.ErrCode != PinErrNoPublicURL {
+			t.Errorf("errcode = %q, erwartet %q", st.ErrCode, PinErrNoPublicURL)
 		}
 	})
 
@@ -238,6 +249,98 @@ func TestPinProviderDialQuelle(t *testing.T) {
 		st := p.Status(context.Background())
 		if st.Pin != "" || !strings.Contains(st.Err, "https") {
 			t.Fatalf("status = %+v, erwartet https-fehler", st)
+		}
+		if st.ErrCode != PinErrNoPublicURL {
+			t.Errorf("errcode = %q, erwartet %q", st.ErrCode, PinErrNoPublicURL)
+		}
+	})
+}
+
+// failingDialTarget ist ein TCP-Ziel, das jede Verbindung nach delay ohne
+// TLS-Handshake schließt (der Selbst-Dial scheitert damit), und zählt die
+// Verbindungsversuche.
+func failingDialTarget(t *testing.T, delay time.Duration) (dialURL string, dials func() int) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	var mu sync.Mutex
+	count := 0
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			count++
+			mu.Unlock()
+			time.Sleep(delay)
+			_ = conn.Close()
+		}
+	}()
+	return "https://" + listener.Addr().String(), func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return count
+	}
+}
+
+// TestPinProviderDialBackoff: ohne je gelesenen Pin darf nicht jeder Request
+// einen eigenen Outbound-Handshake auslösen — zwischen Fehlversuchen liegt der
+// Backoff, parallele Aufrufer teilen sich einen Dial.
+func TestPinProviderDialBackoff(t *testing.T) {
+	t.Run("zweiter aufruf im backoff dialt nicht", func(t *testing.T) {
+		dialURL, dials := failingDialTarget(t, 0)
+		logger, _ := testLogger()
+		p := NewPinProvider(PinProviderConfig{DialURL: dialURL}, logger)
+		p.backoff = time.Hour
+
+		for i := range 2 {
+			if st := p.Status(context.Background()); st.Pin != "" || st.ErrCode != PinErrDialFailed {
+				t.Fatalf("aufruf %d: status = %+v, erwartet kein pin mit kategorie %q", i, st, PinErrDialFailed)
+			}
+		}
+		if got := dials(); got != 1 {
+			t.Errorf("dials = %d, erwartet 1 (backoff greift)", got)
+		}
+	})
+
+	t.Run("nach ablauf des backoffs wird erneut gedialt", func(t *testing.T) {
+		dialURL, dials := failingDialTarget(t, 0)
+		logger, _ := testLogger()
+		p := NewPinProvider(PinProviderConfig{DialURL: dialURL}, logger)
+		p.backoff = time.Nanosecond
+
+		p.Status(context.Background())
+		p.Status(context.Background())
+		if got := dials(); got != 2 {
+			t.Errorf("dials = %d, erwartet 2 (backoff abgelaufen)", got)
+		}
+	})
+
+	t.Run("parallele aufrufer teilen sich einen dial", func(t *testing.T) {
+		// Der Dial hängt lange genug, dass die übrigen Aufrufer währenddessen
+		// eintreffen; ohne Singleflight dialte jeder von ihnen selbst.
+		dialURL, dials := failingDialTarget(t, 150*time.Millisecond)
+		logger, _ := testLogger()
+		p := NewPinProvider(PinProviderConfig{DialURL: dialURL}, logger)
+		p.backoff = time.Hour
+
+		var wg sync.WaitGroup
+		for range 5 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				p.Status(context.Background())
+			}()
+		}
+		wg.Wait()
+		if got := dials(); got != 1 {
+			t.Errorf("dials = %d, erwartet 1 (singleflight)", got)
 		}
 	})
 }

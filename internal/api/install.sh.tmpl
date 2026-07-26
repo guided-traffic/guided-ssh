@@ -112,6 +112,9 @@ main() {
     # 1. Vorbedingungen
     [ "$(id -u)" = 0 ] || fail "bitte als root ausführen (sudo sh -s -- …)"
     command -v curl >/dev/null 2>&1 || fail "curl fehlt — bitte installieren"
+    # Ohne sha256sum liefe die Hash-Prüfung (Schritt 4) in eine Fehldiagnose:
+    # deren stderr ist verworfen, die Meldung läse sich wie Manipulation.
+    command -v sha256sum >/dev/null 2>&1 || fail "sha256sum fehlt — bitte coreutils installieren"
     command -v sshd >/dev/null 2>&1 || fail "sshd fehlt — bitte openssh-server installieren"
     if [ ! -f /etc/ssh/ssh_host_ed25519_key.pub ]; then
         echo "gssh-install: erzeuge fehlende ssh-host-keys (ssh-keygen -A)"

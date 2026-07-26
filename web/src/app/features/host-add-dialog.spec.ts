@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { Api } from '../api/api';
 import { AgentManifest, EnrollTokenResponse } from '../api/models';
 import { HostAddDialog, maskToken, twoStepCommands, withArch } from './host-add-dialog';
-import { rolloutMissingText } from './hosts';
+import { pinErrorText, rolloutMissingText } from './hosts';
 
 const COMMAND =
   'curl -fsSL https://gssh.example.com/install.sh | sudo sh -s -- --token gssh-et-abcdefgh1234';
@@ -37,12 +37,21 @@ describe('Host-hinzufügen-Dialog', () => {
     expect(rolloutMissingText(['unbekannt'])).toBe('unbekannt');
   });
 
+  it('pinErrorText übersetzt die Fehlerkategorie und verweist aufs Server-Log', () => {
+    expect(pinErrorText('')).toBe('');
+    const text = pinErrorText('chain_untrusted');
+    expect(text).toContain('nicht vertrauenswürdig');
+    expect(text).toContain('Server-Log');
+    expect(pinErrorText('unbekannt')).toContain('unbekannt');
+  });
+
   it('mintet und zeigt Token maskiert, Befehl folgt der Arch-Auswahl', async () => {
     const manifest: AgentManifest = {
       version: '1.2.3',
       rollout_ready: true,
       missing: [],
       pin_source: 'static',
+      pin_error: '',
       agents: [{ os: 'linux', arch: 'amd64', size: 14_800_000, sha256: 'a'.repeat(64) }],
     };
     const minted: EnrollTokenResponse = {

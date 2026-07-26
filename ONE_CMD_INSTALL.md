@@ -1012,3 +1012,130 @@ ist `grants.ts`, Client-Muster `web/src/app/api/fn/`.
 - **Weitere Arches** (386, arm/v7, riscv64): je ein Eintrag in der
   Dockerfile-Schleife (A2) — Manifest, Script-Dropdown und UI ziehen
   automatisch nach.
+
+---
+
+## Nacharbeiten aus dem Code-Review (2026-07-26)
+
+Review der fertigen Umsetzung (Branch `feat/host-rollout`). Kein kritischer
+Fund, alle Eisernen Regeln halten; verifiziert wurden Build, Vet, Unit-Tests,
+`helm lint` und das Helm-Rendering aller drei Pin-Quellen inklusive der
+fail-fast-Fälle. Die folgenden Punkte sind Nacharbeiten, kein Merge-Blocker —
+R1 vor dem Produktions-Rollout, R2/R6 sind Billig-Fixes mit Operator-Nutzen.
+
+### R1 — [Mittel] Selbst-Dial pro Request ohne Backoff, solange kein Pin je gelesen
+
+**Dateien:** `internal/api/pinprovider.go` (`dialStatus`, Z. 167), Tests.
+
+Bei `pin == ""` dialt **jeder** Aufruf synchron (der `checked`-Timestamp wird
+ignoriert), ohne Singleflight. Solange das Gate zu ist und die Quelle `dial`
+(Default-Zustand jedes halb konfigurierten oder frisch deployten Setups),
+triggert damit jeder Request auf die unauthentifizierten `/v1/agents` und
+`/install.sh` plus jeder Token-Mint einen Outbound-TLS-Dial mit bis zu 5 s
+Timeout. Folgen: Hosts-Seite hängt für Admins ~5 s, wenn das Dial-Ziel
+blackholt; ein Angreifer mit vielen IPs lässt den Server dauerhaft
+Outbound-Handshakes gegen die eigene Public-URL fahren (Rate-Limit ist nur
+per-IP).
+
+**Fix:** Negative-Cache von 5–15 s zwischen Fehlversuchen (Mindestabstand auch
+bei `pin == ""`) plus Singleflight für parallele Aufrufer. Die Absicht des
+bestehenden Verhaltens („Gate soll aufgehen, sobald der Ingress routet")
+bleibt damit erhalten — nur die Rate ist gekappt.
+
+**Fertig, wenn:** Test belegt: zwei dicht aufeinanderfolgende Status-Aufrufe
+bei fehlgeschlagenem Dial lösen genau einen Dial aus; nach Ablauf des
+Backoffs wird erneut gedialt; parallele Aufrufer teilen sich einen Dial.
+
+### R2 — [Klein] `sha256sum` fehlt in den Script-Vorbedingungen
+
+**Dateien:** `internal/api/install.sh.tmpl` (Schritt 1, Z. 114 ff.).
+
+Geprüft werden curl und sshd, nicht `sha256sum`. Fehlt das Tool, schlägt die
+Prüf-Pipeline (Z. 140) fehl, deren stderr verworfen wird — die Meldung
+„sha256-prüfung fehlgeschlagen — binary verworfen" ist dann eine
+Fehldiagnose (sieht nach Manipulation/Korruption aus statt nach fehlendem
+Tool). **Fix:** eine Zeile `command -v sha256sum` bei den Vorbedingungen.
+
+**Fertig, wenn:** Vorbedingungs-Block prüft sha256sum; `sh -n`-Test weiter grün.
+
+### R3 — [Klein] Pin-Fehlergrund fehlt im Manifest (Plan-Abweichung)
+
+**Dateien:** `internal/api/agents.go`, `api/openapi.yaml`, ggf. UI-Hinweis.
+
+Plan P2 verspricht „Grund in Log **und Manifest**"; `PinStatus.Err` ist als
+„für Log/Manifest" dokumentiert, wird aber nirgends serialisiert — das
+Manifest enthält nur `pin_source`. Der Operator sieht *dass* der Pin fehlt,
+das *Warum* (Dial-Fehler, Kette nicht vertraut, Datei unlesbar) nur im
+Server-Log.
+
+**Entscheidung (2026-07-26): grobe Fehlerkategorie.** Neues Manifest-Feld
+`pin_error` mit fester Kategorie (z. B. `dial_failed`, `chain_untrusted`,
+`cert_file_unreadable`, `no_public_url`), von der UI am disabled-Button mit
+angezeigt. Bewusst **kein** Volltext: das Manifest ist unauthentifiziert
+öffentlich, der rohe Fehlertext enthält Interna (Container-Dateipfade,
+Dial-Details). Der Volltext steht weiterhin im Container-Log (slog/stdout,
+`kubectl logs`) — beide Quellen loggen ihn heute schon.
+
+**Umsetzung:** Kategorisierung im PinProvider (Fehler → Kategorie-Konstante),
+Feld in `agentManifest` + `api/openapi.yaml` + generiertem Client, Anzeige in
+`hosts.ts` neben den `missing`-Labels; Plan-Text P2 bleibt damit erfüllt.
+
+### R4 — [Nitpick] Quoting-Check in `renderInstallScript` unvollständig
+
+**Dateien:** `internal/api/install_script.go` (Z. 102 ff.).
+
+Validiert werden URL/Pin/Version/ArchList, aber `Agents[].Arch` und `.SHA256`
+fließen ungeprüft ins Template — Arch sogar ungequotet ins case-Pattern.
+Kein Angriffspfad (Werte sind build-kontrolliert: Dateinamen aus dem Embed,
+Hex aus sha256), aber der selbsterklärte fail-closed-Anspruch der Funktion
+deckt sie nicht. **Fix:** `^[a-z0-9]+$` für Arch, `^[0-9a-f]{64}$` für SHA
+in der bestehenden Prüf-Schleife (~5 Zeilen).
+
+### R5 — [Nitpick] UNIT_EOF-Guard übersieht Terminator in Zeile 1
+
+**Dateien:** `internal/api/install_script.go` (Z. 110).
+
+`strings.Contains(data.Unit, "\nUNIT_EOF")` matcht nicht, wenn die Unit mit
+`UNIT_EOF` **beginnt**. **Fix:** `strings.Contains("\n"+data.Unit,
+"\nUNIT_EOF")`. Rein theoretisch (die Unit ist die repo-eigene Datei) —
+Guard-Vollständigkeit.
+
+### R6 — [UX] Hostname-Bindung ist exakter String-Match, unwarnt
+
+**Dateien:** `web/src/app/features/host-add-dialog.ts` (Hostname-Hint),
+README (One-Command-Abschnitt).
+
+`store` vergleicht den gebundenen Namen exakt mit `os.Hostname()` des Hosts
+(`internal/store/enrollment.go:112`); das Script übergibt kein `--hostname`.
+Tippt der Admin `web-01`, meldet der Host aber den FQDN, scheitert das
+Enrollment hart. Das Token überlebt den Fehlschlag (EnrollHost ist
+transaktional, der Verbrauch rollt zurück) — ein Re-Run nach korrigiertem
+Hostnamen funktioniert, aber der Erstlauf endet für den Operator als
+unerklärlicher Fehler. Weder Dialog noch README warnen vor der
+short-name/FQDN-Falle.
+
+**Entscheidung (2026-07-26): Matching bleibt exakt, nur warnen.** Die Bindung
+ist Versehens-Schutz (der Host meldet seinen Namen selbst — gegen Angreifer
+tragen Einmalverbrauch, TTL, Admin-Mint); tolerantes Matching oder ein
+getemplatetes `--hostname` würden sie aufweichen bzw. zur bloßen
+Namens-Vorgabe entkernen. **Fix:** Dialog-Hint erweitert um beides — Feld
+bleibt optional (leer = ungebunden provisionieren, kein Zwang zur Eingabe),
+und wenn gesetzt: „muss exakt der `hostname`-Ausgabe des Zielhosts
+entsprechen (Kurzname vs. FQDN beachten)". Dazu ein Satz im README.
+
+### Nacharbeiten-Fahrplan
+
+- [x] R1: Dial-Backoff + Singleflight im PinProvider (vor Produktions-Rollout)
+- [x] R2: sha256sum-Vorbedingung im install.sh
+- [x] R3: `pin_error` als grobe Kategorie im Manifest + UI (entschieden: Variante A)
+- [x] R4: Arch-/SHA-Validierung in `renderInstallScript`
+- [x] R5: UNIT_EOF-Guard auf Zeile 1 erweitern
+- [x] R6: Hostname-Hint in Dialog + README (entschieden: Match bleibt exakt, Feld bleibt optional)
+
+**Umgesetzt am 2026-07-26.** R1: `pinDialBackoff` (10 s Mindestabstand, solange
+nie ein Pin gelesen wurde) plus `dialMu` als Singleflight; `Run` läuft über
+denselben Pfad. R3: Kategorien `no_public_url` / `chain_untrusted` /
+`dial_failed` / `cert_file_unreadable` in `PinStatus.ErrCode` → `pin_error` im
+Manifest (OpenAPI + generierter Client) → Klartext unter dem disabled-Button.
+Verifiziert: `make lint`, `make test` (race), `make web-test` und der
+Docker-Integrationstest `internal/agentd` (install.sh im sshd-Container).

@@ -102,6 +102,33 @@ func TestManifestBeiGeschlossenemGate(t *testing.T) {
 	}
 }
 
+// TestManifestNenntPinFehlerKategorie: liefert keine Pin-Quelle einen Pin,
+// weist das Manifest die grobe Kategorie aus — der Volltext bleibt im Log, das
+// Manifest ist unauthentifiziert öffentlich.
+func TestManifestNenntPinFehlerKategorie(t *testing.T) {
+	deps := readyDeps(t)
+	deps.Agents = twoAgents
+	logger, _ := testLogger()
+	deps.Pins = NewPinProvider(PinProviderConfig{DialURL: "http://gssh.example.com"}, logger)
+
+	recorder := get(t, rolloutMux(t, deps), "/v1/agents")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, erwartet 200", recorder.Code)
+	}
+	body := recorder.Body.String()
+
+	var manifest agentManifest
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&manifest); err != nil {
+		t.Fatalf("manifest dekodieren: %v", err)
+	}
+	if manifest.PinError != PinErrNoPublicURL {
+		t.Errorf("pin_error = %q, erwartet %q", manifest.PinError, PinErrNoPublicURL)
+	}
+	if strings.Contains(body, "ist kein https-url") {
+		t.Errorf("manifest enthält den fehler-volltext: %s", body)
+	}
+}
+
 // TestDownloadStreamtBinary prüft den Erfolgsfall inklusive Header.
 func TestDownloadStreamtBinary(t *testing.T) {
 	deps := readyDeps(t)
@@ -234,20 +261,42 @@ func TestInstallScriptSyntax(t *testing.T) {
 	}
 }
 
-// TestInstallScriptQuotingFailClosed: ein Wert, der das Single-Quote-Quoting
-// sprengen würde, bricht das Rendern ab, statt ein kaputtes Script an N Hosts
+// TestInstallScriptQuotingFailClosed: jeder getemplatete Wert, der das Script
+// sprengen könnte, bricht das Rendern ab, statt ein kaputtes Script an N Hosts
 // auszuliefern.
 func TestInstallScriptQuotingFailClosed(t *testing.T) {
-	_, err := renderInstallScript(installScriptData{
-		BaseURL:  "https://gssh.example.com/'; rm -rf /; '",
+	valid := installScriptData{
+		BaseURL:  "https://gssh.example.com",
 		AgentURL: "https://agent.gssh.example.com",
 		Version:  "v0.0.0-test",
 		Pin:      testPinPin,
 		Agents:   linuxAgents(twoAgents),
 		Unit:     agentdist.UnitFile,
-	})
-	if err == nil {
-		t.Fatal("rendern mit anführungszeichen im wert lieferte kein fehler")
+	}
+
+	for name, mutate := range map[string]func(d *installScriptData){
+		"anführungszeichen in der url": func(d *installScriptData) {
+			d.BaseURL = "https://gssh.example.com/'; rm -rf /; '"
+		},
+		"arch sprengt das case-pattern": func(d *installScriptData) {
+			d.Agents = []agentManifestItem{{OS: "linux", Arch: "amd64) echo pwned ;;", SHA256: strings.Repeat("a1", 32)}}
+		},
+		"sha ist kein hex": func(d *installScriptData) {
+			d.Agents = []agentManifestItem{{OS: "linux", Arch: "amd64", SHA256: "nicht-hex"}}
+		},
+		"terminator in der ersten unit-zeile": func(d *installScriptData) {
+			d.Unit = "UNIT_EOF\nrm -rf /\n"
+		},
+	} {
+		data := valid
+		mutate(&data)
+		if _, err := renderInstallScript(data); err == nil {
+			t.Errorf("%s: rendern lieferte keinen fehler", name)
+		}
+	}
+
+	if _, err := renderInstallScript(valid); err != nil {
+		t.Fatalf("gültige daten: %v", err)
 	}
 }
 

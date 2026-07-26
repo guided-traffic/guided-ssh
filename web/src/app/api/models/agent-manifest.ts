@@ -11,6 +11,11 @@ export interface AgentManifest {
   missing: Array<'binaries' | 'pin' | 'agent_public_url' | 'public_url'>;
 
   /**
+   * Grobe Kategorie des letzten Pin-Fehlers (leer ⇒ keiner). Kein Volltext — der steht nur im Server-Log.
+   */
+  pin_error: '' | 'no_public_url' | 'chain_untrusted' | 'dial_failed' | 'cert_file_unreadable';
+
+  /**
    * Aktive SPKI-Pin-Quelle (leer ⇒ kein Pin)
    */
   pin_source: string;

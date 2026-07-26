@@ -26,9 +26,32 @@ const ROLLOUT_MISSING_LABELS: Record<string, string> = {
   public_url: 'GSSH_PUBLIC_URL bzw. GSSH_UI_BASE_URL fehlt',
 };
 
+/**
+ * Klartext zu den Pin-Fehlerkategorien des Manifests (`pin_error`, siehe
+ * internal/api/pinprovider.go). Der Volltext des Fehlers steht bewusst nur im
+ * Server-Log — hier landet nur die Kategorie plus der Hinweis, wo man nachsieht.
+ */
+const PIN_ERROR_LABELS: Record<string, string> = {
+  no_public_url: 'keine bzw. keine https-Public-URL konfiguriert',
+  chain_untrusted: 'Zertifikatskette der Public-URL nicht vertrauenswürdig',
+  dial_failed: 'Selbst-Dial auf die Public-URL fehlgeschlagen',
+  cert_file_unreadable: 'Pin-Zertifikatsdatei fehlt oder ist unlesbar',
+};
+
 /** rolloutMissingText fasst die fehlenden Bedingungen lesbar zusammen. */
 export function rolloutMissingText(missing: readonly string[]): string {
   return missing.map((key) => ROLLOUT_MISSING_LABELS[key] ?? key).join(' · ');
+}
+
+/**
+ * pinErrorText übersetzt die Fehlerkategorie; leer, wenn keine gemeldet ist.
+ * Unbekannte Kategorien werden roh durchgereicht (neuer Server, alte UI).
+ */
+export function pinErrorText(pinError: string): string {
+  if (!pinError) {
+    return '';
+  }
+  return `${PIN_ERROR_LABELS[pinError] ?? pinError} (Details: Server-Log)`;
 }
 
 @Component({
@@ -59,6 +82,9 @@ export function rolloutMissingText(missing: readonly string[]): string {
                 <div class="page-sub rollout-hint">
                   Host-Rollout nicht konfiguriert:
                   {{ rolloutMissingText(m.missing) }}
+                  @if (pinErrorText(m.pin_error); as pinError) {
+                    <div>Pin-Fehler: {{ pinError }}</div>
+                  }
                 </div>
               }
             }
@@ -134,6 +160,7 @@ export class HostsPage implements OnInit {
   protected readonly relativeTime = relativeTime;
   protected readonly formatTimestamp = formatTimestamp;
   protected readonly rolloutMissingText = rolloutMissingText;
+  protected readonly pinErrorText = pinErrorText;
 
   ngOnInit(): void {
     this.load();

@@ -192,6 +192,11 @@ shows the line to run on the target host:
 curl -fsSL https://gssh.example.com/install.sh | sudo sh -s -- --token gssh-et-…
 ```
 
+The hostname binding is optional and matched **exactly** against the host's own
+`hostname` output — bind `web-01` while the host reports `web-01.example.com`
+and the enrollment fails. The token is not spent by that failure, so a re-run
+with the corrected name works; leave the field empty to mint an unbound token.
+
 The script is templated by the server: public URL, agent URL, SPKI pin, the
 SHA-256 of every embedded agent binary and the systemd unit are already baked
 in — only the token and the flags are variable. It downloads the matching

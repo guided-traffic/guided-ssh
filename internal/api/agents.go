@@ -16,11 +16,16 @@ import (
 // antwortet auch bei geschlossenem Gate mit 200 — er ist die Diagnosequelle
 // dafür, welche Bedingung fehlt (siehe rolloutGate).
 type agentManifest struct {
-	Version      string              `json:"version"`
-	RolloutReady bool                `json:"rollout_ready"`
-	Missing      []string            `json:"missing"`
-	PinSource    string              `json:"pin_source"`
-	Agents       []agentManifestItem `json:"agents"`
+	Version      string   `json:"version"`
+	RolloutReady bool     `json:"rollout_ready"`
+	Missing      []string `json:"missing"`
+	PinSource    string   `json:"pin_source"`
+	// PinError ist die grobe Kategorie des letzten Pin-Fehlers (leer = keiner).
+	// Bewusst kein Volltext: das Manifest ist unauthentifiziert öffentlich, der
+	// rohe Fehlertext enthält Interna (Container-Pfade, Dial-Details) und steht
+	// nur im Server-Log.
+	PinError string              `json:"pin_error"`
+	Agents   []agentManifestItem `json:"agents"`
 }
 
 // agentManifestItem beschreibt ein ausgeliefertes Binary. Der Hash ist Hex und
@@ -44,6 +49,7 @@ func handleAgentManifest(gate rolloutGate, agents AgentSource) http.HandlerFunc 
 			RolloutReady: len(st.Missing) == 0,
 			Missing:      st.Missing,
 			PinSource:    st.Pin.Source,
+			PinError:     st.Pin.ErrCode,
 			Agents:       []agentManifestItem{},
 		}
 		if manifest.Missing == nil {

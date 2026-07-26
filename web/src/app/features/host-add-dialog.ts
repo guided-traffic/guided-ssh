@@ -146,6 +146,12 @@ export function twoStepCommands(command: string): string {
             <input matInput [(ngModel)]="hostname" placeholder="web-01" />
             <mat-hint>leer = Token nicht an einen Hostnamen gebunden</mat-hint>
           </mat-form-field>
+          <div class="dim hint-text">
+            Gesetzt bindet das Token an genau diesen Namen — er muss exakt der
+            <code>hostname</code>-Ausgabe des Zielhosts entsprechen (Kurzname vs. FQDN beachten),
+            sonst schlägt das Enrollment fehl. Das Token bleibt dabei unverbraucht; ein erneuter
+            Lauf mit korrigiertem Namen funktioniert.
+          </div>
           <mat-form-field appearance="outline">
             <mat-label>Tags (key=value, …)</mat-label>
             <input matInput [(ngModel)]="tags" placeholder="env=prod, role=web" />

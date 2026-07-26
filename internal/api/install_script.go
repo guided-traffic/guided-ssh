@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -19,6 +20,13 @@ var installScriptTemplateSource string
 // installScriptTemplate wird beim Paket-Start geparst; ein Syntaxfehler im
 // Template ist ein Programmierfehler und soll sofort auffallen.
 var installScriptTemplate = template.Must(template.New("install.sh").Parse(installScriptTemplateSource))
+
+// Zulässige Form der getemplateten Agent-Werte: Arch als case-Pattern, Hash als
+// Vergleichswert der sha256sum-Prüfung.
+var (
+	archPattern   = regexp.MustCompile(`^[a-z0-9]+$`)
+	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 // installScriptData sind die Werte, die der Server in das Script templatet.
 // Alles bis auf Token und Flags steht damit schon fest — insbesondere der
@@ -107,7 +115,20 @@ func renderInstallScript(data installScriptData) ([]byte, error) {
 			return nil, fmt.Errorf("wert für %s enthält anführungszeichen oder zeilenumbruch: %q", field, value)
 		}
 	}
-	if strings.Contains(data.Unit, "\nUNIT_EOF") {
+	// Arch und Hash sind build-kontrolliert (Dateinamen aus dem Embed, Hex aus
+	// sha256), landen aber ungequotet im case-Pattern bzw. im Vergleichswert —
+	// deshalb strikt statt nur auf Quotes prüfen.
+	for _, agent := range data.Agents {
+		if !archPattern.MatchString(agent.Arch) {
+			return nil, fmt.Errorf("arch %q ist kein [a-z0-9]+", agent.Arch)
+		}
+		if !sha256Pattern.MatchString(agent.SHA256) {
+			return nil, fmt.Errorf("sha256 für arch %s ist kein 64-stelliger hex-wert: %q", agent.Arch, agent.SHA256)
+		}
+	}
+	// Der Terminator darf auch nicht in der ersten Zeile stehen — dort fehlt der
+	// führende Umbruch, den der Vergleich sonst voraussetzt.
+	if strings.Contains("\n"+data.Unit, "\nUNIT_EOF") {
 		return nil, fmt.Errorf("systemd-unit enthält den here-doc-terminator")
 	}
 

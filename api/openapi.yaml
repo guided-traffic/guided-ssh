@@ -666,7 +666,7 @@ components:
 
     AgentManifest:
       type: object
-      required: [version, rollout_ready, missing, pin_source, agents]
+      required: [version, rollout_ready, missing, pin_source, pin_error, agents]
       properties:
         version: { type: string }
         rollout_ready: { type: boolean, description: false ⇒ Rollout-Endpunkte antworten mit 503 }
@@ -675,6 +675,12 @@ components:
           description: Fehlende Rollout-Bedingungen
           items: { type: string, enum: [binaries, pin, agent_public_url, public_url] }
         pin_source: { type: string, description: Aktive SPKI-Pin-Quelle (leer ⇒ kein Pin) }
+        pin_error:
+          type: string
+          description: >-
+            Grobe Kategorie des letzten Pin-Fehlers (leer ⇒ keiner). Kein
+            Volltext — der steht nur im Server-Log.
+          enum: ["", no_public_url, chain_untrusted, dial_failed, cert_file_unreadable]
         agents:
           type: array
           items: { $ref: "#/components/schemas/AgentBinary" }
