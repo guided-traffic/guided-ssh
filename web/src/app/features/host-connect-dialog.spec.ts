@@ -11,12 +11,9 @@ import {
   HostConnectDialog,
   HostConnectData,
   connectCommand,
-  ipLoginCommands,
-  pinFallbackHint,
+  ipConnectCommand,
 } from './host-connect-dialog';
 import { HostsPage } from './hosts';
-
-const PIN = '9nPmyRTjBQvKfBpB9OiE9YEfR9dPbGVoBSSlYqAr4X0=';
 
 const HOST: Host = {
   id: '0b7f5f2e-9f2a-4c9e-8a3d-1f2e3d4c5b6a',
@@ -30,8 +27,8 @@ const MANIFEST: ClientManifest = {
   version: 'v2.3.0',
   ready: true,
   missing: [],
-  pin: PIN,
-  pin_source: 'static',
+  pin: '',
+  pin_source: 'dial',
   clients: [{ os: 'linux', arch: 'amd64', size: 8_599_040, sha256: 'a'.repeat(64) }],
 };
 
@@ -52,30 +49,25 @@ describe('Host connect dialog', () => {
     expect(connectCommand('web-01')).toBe('gssh ssh web-01');
   });
 
-  it('ipLoginCommands pairs the IP override with the pin and the connect line', () => {
-    const lines = ipLoginCommands(' 203.0.113.7 ', PIN, 'web-01').split('\n');
-    expect(lines[0]).toBe(`gssh login --api-url https://203.0.113.7 --pin-sha256 ${PIN}`);
-    expect(lines[1]).toBe('gssh ssh web-01');
-    expect(ipLoginCommands('203.0.113.7:8443', PIN, 'web-01')).toContain(
-      'https://203.0.113.7:8443',
+  it('ipConnectCommand keeps host-cert verification via HostKeyAlias', () => {
+    expect(ipConnectCommand(' 10.20.30.40 ', 'web-01')).toBe(
+      'gssh ssh -o HostKeyAlias=web-01 10.20.30.40',
+    );
+    expect(ipConnectCommand('2001:db8::7', 'web-01')).toBe(
+      'gssh ssh -o HostKeyAlias=web-01 2001:db8::7',
     );
   });
 
-  it('ipLoginCommands is fail-closed: no pin, no IP, no shell metacharacters', () => {
-    expect(ipLoginCommands('203.0.113.7', '', 'web-01')).toBe('');
-    expect(ipLoginCommands('   ', PIN, 'web-01')).toBe('');
-    expect(ipLoginCommands('203.0.113.7 ; rm -rf /', PIN, 'web-01')).toBe('');
-    expect(ipLoginCommands('$(id)', PIN, 'web-01')).toBe('');
+  it('ipConnectCommand is fail-closed: empty input, shell metacharacters, option injection', () => {
+    expect(ipConnectCommand('', 'web-01')).toBe('');
+    expect(ipConnectCommand('   ', 'web-01')).toBe('');
+    expect(ipConnectCommand('10.0.0.1 ; rm -rf /', 'web-01')).toBe('');
+    expect(ipConnectCommand('$(id)', 'web-01')).toBe('');
+    // A leading dash would be parsed as an ssh option — the charset has no dash.
+    expect(ipConnectCommand('-oProxyCommand=evil', 'web-01')).toBe('');
   });
 
-  it('pinFallbackHint explains the dial source and the missing source separately', () => {
-    expect(pinFallbackHint('dial')).toContain('auto-derived');
-    expect(pinFallbackHint('dial')).toContain('GSSH_PUBLIC_PIN');
-    expect(pinFallbackHint('')).toContain('No pin source configured');
-    expect(pinFallbackHint('mystery')).toContain('mystery');
-  });
-
-  it('renders install, connect, and the pinned IP fallback that follows the input', async () => {
+  it('renders install, connect, and the IP fallback that follows the input', async () => {
     const fixture = createDialog(MANIFEST);
     fixture.detectChanges();
     await fixture.whenStable();
@@ -85,34 +77,21 @@ describe('Host connect dialog', () => {
     expect(rendered()).toContain('client.sh | sh');
     expect(rendered()).toContain('gssh ssh web-01.prod.example.com');
     expect(rendered()).toContain('DNS fallback');
-    // No IP entered yet ⇒ no command, only the prompt to enter one.
-    expect(rendered()).not.toContain('--pin-sha256');
+    // No IP entered yet ⇒ no command, only the prompt to enter one. (The
+    // explanatory hint mentions HostKeyAlias — check for the option syntax.)
+    expect(rendered()).not.toContain('-o HostKeyAlias=');
 
     const dialog = fixture.componentInstance as unknown as { ip: string };
-    dialog.ip = '203.0.113.7';
+    dialog.ip = '10.20.30.40';
     fixture.detectChanges();
     await fixture.whenStable();
 
     expect(rendered()).toContain(
-      `gssh login --api-url https://203.0.113.7 --pin-sha256 ${PIN}`,
+      'gssh ssh -o HostKeyAlias=web-01.prod.example.com 10.20.30.40',
     );
   });
 
-  it('without an offered pin it explains the gap and renders no command', async () => {
-    const fixture = createDialog({ ...MANIFEST, pin: '', pin_source: 'dial' });
-    fixture.detectChanges();
-    await fixture.whenStable();
-
-    const rendered = fixture.nativeElement.textContent as string;
-    expect(rendered).toContain('Not available');
-    expect(rendered).toContain('auto-derived');
-    expect(rendered).not.toContain('--pin-sha256');
-    expect(rendered).not.toContain('--api-url');
-    // The connect line is independent of the pin and stays.
-    expect(rendered).toContain('gssh ssh web-01.prod.example.com');
-  });
-
-  it('keeps the connect line when the client manifest is unavailable', async () => {
+  it('keeps connect and IP fallback when the client manifest is unavailable', async () => {
     const fixture = createDialog(null);
     fixture.detectChanges();
     await fixture.whenStable();
@@ -120,12 +99,17 @@ describe('Host connect dialog', () => {
     const rendered = fixture.nativeElement.textContent as string;
     expect(rendered).toContain('could not be loaded');
     expect(rendered).toContain('gssh ssh web-01.prod.example.com');
-    expect(rendered).not.toContain('--pin-sha256');
+    expect(rendered).toContain('DNS fallback');
   });
 });
 
 describe('Hosts page connect action', () => {
-  const unenrolled: Host = { ...HOST, id: 'ffffffff-0000-0000-0000-000000000000', name: 'edge-02', enrolled_at: null };
+  const unenrolled: Host = {
+    ...HOST,
+    id: 'ffffffff-0000-0000-0000-000000000000',
+    name: 'edge-02',
+    enrolled_at: null,
+  };
 
   /** Hosts page with two hosts (one enrolled, one not) and a recording dialog. */
   async function createHostsPage() {
@@ -142,7 +126,10 @@ describe('Hosts page connect action', () => {
           },
         },
         { provide: MatDialog, useValue: { open: (...args: unknown[]) => opened.push(args) } },
-        { provide: SessionService, useValue: { isAdmin: signal(false), isAuditor: signal(false) } },
+        {
+          provide: SessionService,
+          useValue: { isAdmin: signal(false), isAuditor: signal(false) },
+        },
       ],
     });
     const fixture = TestBed.createComponent(HostsPage);

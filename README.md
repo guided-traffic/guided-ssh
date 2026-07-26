@@ -273,26 +273,39 @@ setups opt in with `… | sh -s -- --pin`, which requires an
 operator-controlled pin source (`GSSH_PUBLIC_PIN` or
 `GSSH_PUBLIC_PIN_CERT_FILE`).
 
-**DNS fallback (login via IP).** When the server's DNS name does not
-resolve, the Connect dialog renders
+**DNS fallback (connect via IP).** For a target host without a (working)
+DNS entry, the Connect dialog renders
 
 ```sh
-gssh login --api-url https://<ip> --pin-sha256 <pin>
+gssh ssh -o HostKeyAlias=<host-name> <ip>
+```
+
+`HostKeyAlias` makes ssh verify the host certificate against the enrolled
+name (its principals are the full and short hostname, not the IP) while
+connecting to the address — verification stays fully intact, nothing is
+skipped. Without the alias, an IP connect correctly fails the principal
+check. The IP is always user-entered: the server stores no host address,
+and the agent's observed egress IP would not be the sshd address behind
+NAT anyway.
+
+**Login via IP (edge case).** Should the *server's* DNS name be unresolvable
+too, `gssh login` accepts ephemeral overrides — the config file is untouched:
+
+```sh
+gssh login --api-url https://<server-ip> --pin-sha256 <pin>
 ```
 
 The pin replaces chain *and* hostname verification — a via-IP login is fully
-verified TLS; there is no insecure-skip code path. The UI offers the command
-only when the server has an operator-controlled pin source
-(`GSSH_PUBLIC_PIN`/`GSSH_PUBLIC_PIN_CERT_FILE`); auto-derived (`dial`) pins
-rotate with the certificate and are never handed to clients. A file pin is
-only as stable as the deployment's key-rotation policy: a renewal that
-rotates the private key changes the SPKI and thus the pin. Both flags are
-**ephemeral** — the config file is untouched. The login puts a certificate
-into the ssh-agent and `gssh ssh` needs no further API contact until it
-expires: a bridge across a DNS outage, not a persistent switch (persistently
-IP-based setups edit `config.yaml` — `api_url` plus `pin_sha256` —
-deliberately). The bridge covers the CLI→API leg only; the browser→IdP leg
-and host-name resolution keep their own DNS dependency.
+verified TLS; there is no insecure-skip code path. It requires an
+operator-controlled pin source (`GSSH_PUBLIC_PIN` or
+`GSSH_PUBLIC_PIN_CERT_FILE`); auto-derived (`dial`) pins rotate with the
+certificate and are never handed to clients. A file pin is only as stable as
+the deployment's key-rotation policy: a renewal that rotates the private key
+changes the SPKI and thus the pin. The login puts a certificate into the
+ssh-agent and `gssh ssh` needs no further API contact until it expires;
+persistently IP-based setups edit `config.yaml` (`api_url` plus
+`pin_sha256`) deliberately. The browser→IdP leg keeps its own DNS
+dependency.
 
 ## GitLab CI
 

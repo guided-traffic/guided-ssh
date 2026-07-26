@@ -11,7 +11,7 @@ export interface ClientManifest {
   missing: Array<'binaries' | 'public_url' | 'public_url_https' | 'oidc_issuer' | 'oidc_client_id'>;
 
   /**
-   * SPKI pin for the login-via-IP fallback, populated only from an operator-controlled source (static/file). Empty with an auto-derived (dial) pin: it rotates with the certificate and must never become a client's stored trust anchor.
+   * SPKI pin consumed by the client.sh --pin opt-in (and the CLI-only login-via-IP edge case), populated only from an operator-controlled source (static/file). Empty with an auto-derived (dial) pin: it rotates with the certificate and must never become a client's stored trust anchor.
    */
   pin: string;
 

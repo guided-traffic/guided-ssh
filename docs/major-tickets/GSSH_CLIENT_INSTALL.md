@@ -31,8 +31,9 @@ grants nothing — access is only ever granted at `gssh login` time via OIDC.
 The Hosts page additionally gets a per-host **Connect** dialog (Phase D3)
 that mirrors these steps — the one-time install deliberately separated from
 the connect line, so a user with an installed client goes straight to step
-two — plus a **pinned login-via-IP fallback** for environments with
-unreliable DNS (Phase C + D3).
+two — plus a **connect-via-IP fallback** for target hosts without a
+(working) DNS entry (see the D3 correction note; the pinned login-via-IP
+for an unresolvable *server* name remains a CLI-only edge case, Phase C).
 
 ---
 
@@ -111,8 +112,8 @@ deployments for zero gain).
 
 **A → B → C → D → E.** B (endpoints) needs A (binaries + generic source).
 C (CLI login overrides) is independent of A/B and can run in parallel.
-D (frontend) needs B; the connect dialog's IP variant (D3) needs C.
-E (docs, E2E) comes last.
+D (frontend) needs B (D3's connect-via-IP needs no CLI change — native
+ssh `HostKeyAlias`, see the D3 correction). E (docs, E2E) comes last.
 
 ---
 
@@ -282,11 +283,13 @@ empty. Rationale: a dial pin is auto-derived from whatever certificate the
 server currently presents and rotates with it — as a stored long-term
 anchor for the DNS fallback it would break mid-outage or on the next
 renewal, and clients must never be offered it (see the security model).
-Consumers are the connect dialog's login-via-IP variant (D3) and the
-`--pin` path of the script; both keep their existing fail-closed "no pin ⇒
-no command" logic unchanged — this server-side rule is the single
-enforcement point. Public value: it fingerprints the certificate the
-server presents to every TLS client anyway.
+Consumer is the `--pin` path of the script (and the CLI-only
+`gssh login --pin-sha256` edge case, C1); the fail-closed "no pin ⇒ no
+`--pin`" logic is enforced by this server-side rule as the single point.
+(The connect dialog no longer consumes the pin — its DNS fallback is the
+host-side connect-via-IP, see the D3 correction.) Public value: it
+fingerprints the certificate the server presents to every TLS client
+anyway.
 
 Version disclosure: accepted for the same reason as the agent manifest
 (K13 there — the binary is version-identifiable anyway; `gssh version`).
@@ -405,7 +408,9 @@ config line.
 2. `--pin-sha256` is validated with `pintls.DecodePin` **before any
    network call** (fail fast on a mangled copy-paste).
 3. The overrides are **ephemeral** — the config file is never touched.
-   Purpose (and the reason this phase exists): DNS-fallback login via IP.
+   Purpose: reaching the API by IP when the *server's* DNS name is
+   unresolvable — a CLI-only edge case (the dialog's DNS fallback is the
+   host-side connect-via-IP, see the D3 correction).
    `pintls.Transport` verifies solely against the pin (chain **and
    hostname** verification are replaced, see `pintls.go`) — so
    `--api-url https://203.0.113.7 --pin-sha256 <pin>` is fully verified
@@ -479,6 +484,14 @@ broken).
 
 ### D3 — Connect dialog on the Hosts page
 
+> **Corrected 2026-07-26.** The first version of this section (and the
+> first implementation) misread "DNS fallback" as *the server's* DNS name
+> being unresolvable and rendered a pinned `gssh login --api-url` pair.
+> The intended scenario is the **target host** without a (working) DNS
+> entry — the server is reachable via its domain. The pinned login-via-IP
+> stays available as a CLI-only edge case (Phase C, unchanged); the dialog
+> renders the host-side fallback below.
+
 **Files:** `web/src/app/features/hosts.ts`,
 `web/src/app/features/host-connect-dialog.ts` (new).
 
@@ -495,41 +508,40 @@ broken).
      client goes straight to the next section (requirement: install and
      connect are separate steps, not one blob).
    - **"Connect"** — copy line `gssh ssh <name>`.
-   - **"DNS fallback (login via IP)"** — expandable, command rendered
-     **only when the manifest `pin` is non-empty**: an IP input field and
-     the live-rendered copy line
-     `gssh login --api-url https://<input> --pin-sha256 <pin>`, followed
-     by `gssh ssh <name>`. Short hint text: bridges the CLI→API leg only
-     (browser→IdP and host name resolution keep their own DNS
-     dependency); the certificate then carries until expiry, so `gssh
-     ssh` needs no further API contact. Without a pin the section shows
-     **why** it is unavailable instead of hiding (same
-     visible-degradation principle as the Add Host button), using
-     `pin_source` for a precise message: `dial` ⇒ "the pin is
-     auto-derived and rotates with the certificate — the DNS fallback
-     requires an operator-supplied pin (`GSSH_PUBLIC_PIN` or
-     `GSSH_PUBLIC_PIN_CERT_FILE`)"; no source at all ⇒ "no pin source
-     configured".
+   - **"DNS fallback (connect via IP)"** — expandable, for a target host
+     without a (working) DNS entry: an IP input field and the
+     live-rendered copy line
+     `gssh ssh -o HostKeyAlias=<name> <input>`. `HostKeyAlias` makes ssh
+     verify the host certificate against the enrolled name (host certs
+     carry the full and short hostname as principals, `enroll.go` —
+     never the IP), so verification stays fully intact; a bare
+     `ssh user@<ip>` would correctly fail the principal check. No CLI
+     change needed: `gssh ssh` passes arguments verbatim to native ssh.
+     No pin involved — the server stays reachable via its domain, login
+     is the normal `gssh login`.
 3. The dialog makes no access claims: whether the user may actually enter
    the host is decided by the grants at sign time — the UI does not
    pretend to pre-check it.
 
 **Do not:**
-- Render any IP command without a pin (fail-closed — see the security
-  model; an unpinned IP command fails TLS and invites
-  verification-disabling workarounds we refuse to enable).
+- Render a command that weakens host verification (no
+  `StrictHostKeyChecking=no`, no known_hosts tricks) — `HostKeyAlias` is
+  the verified path, anything less invites disabling checks by hand.
+- Render a command from an input containing shell metacharacters or a
+  leading dash (would parse as an ssh option) — strict IP charset, empty
+  result otherwise.
 - Derive or guess the IP server-side or from `window.location` — the
-  operator/user enters it. A guessed value would be exactly the silent
-  wrong URL that iron rule 3 exists to prevent.
+  operator/user enters it. The server stores no host address, and the
+  agent's observed egress IP is not the sshd address behind NAT.
 - Build a browser-based terminal — different feature, entirely different
   security surface, its own ticket if ever.
 
 **Done when:** component tests: button disabled for non-enrolled hosts;
 the dialog renders all three sections with correct commands for a host
-name; the IP input live-updates the login line; a manifest without a pin
-⇒ the fallback section shows the explanation and **no** command, with
-the `dial`-specific text when `pin_source` is `"dial"`; mock mode covers
-all three states (operator pin, dial source, no source).
+name; the IP input live-updates the `HostKeyAlias` line; empty or
+malformed input renders **no** command; the dialog works with an
+unavailable client manifest (connect and fallback stay, install section
+degrades visibly).
 
 ---
 
@@ -542,12 +554,14 @@ all three states (operator pin, dial source, no source).
   table notes that `GSSH_AGENT_DOWNLOAD_RPM` covers both download routes;
   a short security paragraph (model below) linking to
   [docs/host-rollout.md](../host-rollout.md) for the shared
-  `curl | sh` discussion; the login-via-IP bridge semantics (C1 —
-  ephemeral, certificate carries until expiry, persistent setups edit
-  `config.yaml`); a note that the IP fallback needs an operator-supplied
-  pin (`GSSH_PUBLIC_PIN`/`GSSH_PUBLIC_PIN_CERT_FILE`) and that a file pin
-  is only as stable as the deployment's key-rotation policy (a renewal
-  that rotates the private key changes the SPKI and thus the pin).
+  `curl | sh` discussion; the connect-via-IP fallback (`HostKeyAlias`,
+  D3 correction) and, as the CLI-only edge case, the login-via-IP bridge
+  semantics (C1 — ephemeral, certificate carries until expiry, persistent
+  setups edit `config.yaml`); a note that login-via-IP needs an
+  operator-supplied pin (`GSSH_PUBLIC_PIN`/`GSSH_PUBLIC_PIN_CERT_FILE`)
+  and that a file pin is only as stable as the deployment's key-rotation
+  policy (a renewal that rotates the private key changes the SPKI and
+  thus the pin).
 - **DEVELOPER.md:** `internal/bindist`/`clientdist` in the package table;
   dev degradation (empty embed ⇒ manifest `missing: ["binaries"]`); local
   embed via `make cross` + copy.
@@ -598,25 +612,29 @@ Shared ground with the host install is documented there
   explicit opt-in for private-CA or hardened setups where the operator
   controls rotation (static/file pin sources). Documented tradeoff, not a
   silent choice.
-- **Login via IP is pin-gated, never unpinned — and only with an
-  operator-controlled pin.** The connect dialog's DNS fallback renders
-  `gssh login --api-url https://<ip> --pin-sha256 <pin>` only when the
-  manifest carries a pin; without one, the UI explains the gap instead of
-  offering a command that would fail TLS and invite
-  verification-disabling workarounds. The server populates that pin only
-  from the `static`/`file` sources — an auto-derived `dial` pin rotates
-  with the certificate and would break mid-outage or on renewal, so it is
-  never offered to clients (enforced server-side in one place, B2; the
-  host-rollout path is untouched — there the agent consumes the pin
-  immediately at enrollment, not as a stored anchor). The pin replaces
-  chain **and hostname** verification (`pintls.Transport`) — a via-IP
-  connection is fully verified, there is no insecure code path and none
-  is added.
-  Honest limits: this bridges the CLI→API leg only; the browser→IdP leg
-  and host name resolution keep their own DNS dependency. Residual risk
-  (documented): a user who loads the web UI itself via IP, past a browser
-  certificate warning, could be served an attacker's pin — the pin's
-  trust anchor is the DNS-validated UI origin.
+- **Connect via IP keeps host verification intact.** The dialog's DNS
+  fallback (target host without a DNS entry) renders
+  `gssh ssh -o HostKeyAlias=<name> <ip>`: ssh verifies the host
+  certificate against the enrolled name via the alias — no
+  `StrictHostKeyChecking` downgrade, no known_hosts tricks; a bare IP
+  connect would correctly fail the principal check. The rendered line is
+  copy-pasted into a shell, so the IP input is charset-restricted (no
+  shell metacharacters, no leading dash that ssh would parse as an
+  option). The IP is always user-entered — the server stores no host
+  address.
+- **Login via IP (CLI-only edge case) is pin-gated, never unpinned — and
+  only with an operator-controlled pin.** For an unresolvable *server*
+  name, `gssh login --api-url https://<ip> --pin-sha256 <pin>` (C1). The
+  server offers the manifest pin only from the `static`/`file` sources —
+  an auto-derived `dial` pin rotates with the certificate and would break
+  mid-outage or on renewal, so it is never offered to clients (enforced
+  server-side in one place, B2; the host-rollout path is untouched —
+  there the agent consumes the pin immediately at enrollment, not as a
+  stored anchor). The pin replaces chain **and hostname** verification
+  (`pintls.Transport`) — a via-IP connection is fully verified, there is
+  no insecure code path and none is added. Honest limits: this bridges
+  the CLI→API leg only; the browser→IdP leg keeps its own DNS
+  dependency.
 - **Config file mode 0600, never overwritten.** No secrets in it today,
   but pinning and future keys belong to the user alone; overwriting could
   silently redirect an existing client to another server.
@@ -669,10 +687,10 @@ Shared ground with the host install is documented there
       `gssh-mock-pin-source` localStorage key, mirroring the existing
       `gssh-mock-roles` pattern)
 - [x] D3: Hosts `actions` column + connect dialog (install step separated
-      from connect line, enrolled-only, pinned login-via-IP fallback with
-      live-rendered command, fail-closed without pin incl.
-      `pin_source`-specific explanation, mock covers operator-pin/dial/
-      no-source states)
+      from connect line, enrolled-only, connect-via-IP fallback with
+      live-rendered `HostKeyAlias` command, fail-closed on malformed
+      input; corrected 2026-07-26 from the original login-via-IP reading
+      — see the D3 note)
 
 ### Phase E — Docs & E2E
 - [x] E1: README (TL;DR flow, routes, shared download limiter note,
@@ -699,8 +717,8 @@ Shared ground with the host install is documented there
 | 9 | macOS | Served from the same script (`uname -s`, `shasum -a 256` fallback) and as direct downloads on the page; no separate installer |
 | 10 | Steps floor | Three steps is the floor: `login` needs an interactive browser; auto-exec from the piped script rejected (stdin is the pipe) |
 | 11 | Connect entry point | Row-level action on the Hosts page (host-specific ⇒ at the host; the page header holds only global actions); dialog separates one-time install from the connect step; enrolled hosts only; no access pre-check faked in the UI (grants decide at sign time) |
-| 12 | Login via IP | Pin-mandatory pair `--api-url https://<ip>` + `--pin-sha256 <pin>` (the pin replaces chain+hostname verification, `pintls.Transport`); no pin ⇒ no IP command rendered (fail-closed), no insecure-skip path anywhere; the IP is always user-entered, never derived; declared limits: bridges the CLI→API leg only — IdP (browser) and host name resolution keep their DNS dependency. IP fallback and `--pin` require an **operator-controlled pin source** (`static`/`file`); auto-derived `dial` pins are never offered to clients — they rotate with the certificate and would break mid-outage or on renewal. Enforced server-side in B2 (single point); `pin_source` exposed in the manifest for diagnosis. Host-rollout path untouched: `dial` stays legitimate there (pin consumed once at enrollment) |
-| 13 | IP login is a bridge | Ephemeral flag overrides on `gssh login` (ci-login pattern), config file untouched; the signed certificate carries until expiry, so no API contact is needed meanwhile; persistently IP-based setups edit `config.yaml` (`api_url` + `pin_sha256`) deliberately |
+| 12 | DNS fallback in the dialog | **Corrected 2026-07-26** (originally specified as login-via-IP — a misreading of the scenario): the dialog's fallback targets a **host** without a DNS entry and renders `gssh ssh -o HostKeyAlias=<name> <ip>` — host-cert check stays against the enrolled name, no verification downgrade, no CLI change (`gssh ssh` passes args verbatim to ssh). IP always user-entered (server stores no host address; agent egress IP ≠ sshd address behind NAT); strict input charset (shell safety, no option injection) |
+| 13 | Login via IP (server side) | CLI-only edge case, not surfaced in the UI: pin-mandatory pair `gssh login --api-url https://<ip>` + `--pin-sha256 <pin>` (pin replaces chain+hostname verification, `pintls.Transport`; no insecure-skip path anywhere). Requires an **operator-controlled pin source** (`static`/`file`) — auto-derived `dial` pins rotate with the certificate and are never offered (enforced server-side in B2, single point; `pin_source` in the manifest for diagnosis; host-rollout path untouched). Ephemeral flag overrides (ci-login pattern), config file untouched; the signed certificate carries until expiry; persistently IP-based setups edit `config.yaml` (`api_url` + `pin_sha256`) deliberately |
 
 ## Future Notes (deliberately out of scope)
 

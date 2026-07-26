@@ -129,10 +129,9 @@ export const mockAgentManifest: AgentManifest = {
 };
 
 /**
- * Client install ready, with an operator-controlled pin — so the Client setup
- * page and the connect dialog's DNS fallback are fully rendered by default.
- * The other two pin states (dial, none) are reachable via the
- * `gssh-mock-pin-source` override, see mock-api.interceptor.ts.
+ * Client install ready — the Client setup page and the connect dialog render
+ * fully. The pin fields mirror a server with an operator-controlled pin; the
+ * UI itself does not consume them (the pin is the `client.sh --pin` opt-in).
  */
 export const mockClientManifest: ClientManifest = {
   ready: true,

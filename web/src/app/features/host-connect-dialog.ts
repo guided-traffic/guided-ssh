@@ -20,11 +20,12 @@ export interface HostConnectData {
 }
 
 /**
- * Host/IP charset for the DNS-fallback input: IPv4, bracketed IPv6, optional
- * port. Deliberately strict — the rendered line is copied into a shell, and a
- * value with spaces or quotes has no business in it.
+ * IP charset for the DNS-fallback input: IPv4 or IPv6, nothing else.
+ * Deliberately strict — the rendered line is copied into a shell, and a value
+ * with spaces, quotes, or option-like dashes has no business in it. A port
+ * does not belong here either: ssh takes it as `-p`, appended by the user.
  */
-const IP_PATTERN = /^[A-Za-z0-9.:[\]-]+$/;
+const IP_PATTERN = /^[0-9A-Fa-f.:]+$/;
 
 /** connectCommand is the connect line for a host. */
 export function connectCommand(hostName: string): string {
@@ -32,40 +33,18 @@ export function connectCommand(hostName: string): string {
 }
 
 /**
- * ipLoginCommands renders the login-via-IP fallback. Fail-closed: without an
- * (operator-controlled) pin or without a usable IP it returns an empty string —
- * an unpinned IP login fails TLS verification and invites exactly the
- * verification-disabling workarounds this feature refuses to enable.
+ * ipConnectCommand renders the connect line for a host without a DNS entry:
+ * connect to the IP while `HostKeyAlias` keeps the host-certificate check
+ * against the enrolled name (its cert principals are the full and short
+ * hostname, not the IP) — verification stays fully intact, nothing is
+ * skipped. Empty without a usable IP.
  */
-export function ipLoginCommands(ip: string, pin: string, hostName: string): string {
+export function ipConnectCommand(ip: string, hostName: string): string {
   const target = ip.trim();
-  if (!pin || !target || !IP_PATTERN.test(target)) {
+  if (!target || !IP_PATTERN.test(target)) {
     return '';
   }
-  return [
-    `gssh login --api-url https://${target} --pin-sha256 ${pin}`,
-    connectCommand(hostName),
-  ].join('\n');
-}
-
-/**
- * pinFallbackHint explains why no IP command is offered. `dial` is its own
- * case: that pin is auto-derived from the certificate the server currently
- * presents and rotates with it — as a stored anchor for a DNS outage it would
- * break at the worst moment, so the server never hands it out.
- */
-export function pinFallbackHint(pinSource: string): string {
-  if (pinSource === 'dial') {
-    return (
-      'The server pin is auto-derived (dial) and rotates with the certificate — ' +
-      'the DNS fallback requires an operator-supplied pin (GSSH_PUBLIC_PIN or ' +
-      'GSSH_PUBLIC_PIN_CERT_FILE).'
-    );
-  }
-  if (pinSource === '') {
-    return 'No pin source configured on the server (GSSH_PUBLIC_PIN or GSSH_PUBLIC_PIN_CERT_FILE).';
-  }
-  return `The server offers no pin for the source "${pinSource}".`;
+  return `gssh ssh -o HostKeyAlias=${hostName} ${target}`;
 }
 
 @Component({
@@ -124,42 +103,30 @@ export function pinFallbackHint(pinSource: string): string {
         </div>
 
         <details>
-          <summary>DNS fallback: log in via IP</summary>
-          @if (pin) {
-            <div class="hint-text dim">
-              Bridges the client → API leg while DNS is down. The browser → IdP leg and
-              the host name resolution keep their own DNS dependency; afterwards the
-              signed certificate carries until it expires, so no further API contact is
-              needed. The pin replaces chain <em>and</em> hostname verification — the
-              connection stays fully verified.
-            </div>
-            <mat-form-field appearance="outline">
-              <mat-label>Server IP address</mat-label>
-              <input matInput [(ngModel)]="ip" placeholder="203.0.113.7" />
-              <mat-hint>as reachable from your machine; port allowed (1.2.3.4:8443)</mat-hint>
-            </mat-form-field>
-            @if (ipLines(); as lines) {
-              <div class="copy-row">
-                <pre class="mono grow wrap">{{ lines }}</pre>
-                <button
-                  mat-icon-button
-                  aria-label="Copy login commands"
-                  (click)="copy(lines, 'Commands')"
-                >
-                  <mat-icon svgIcon="copy" />
-                </button>
-              </div>
-            } @else {
-              <div class="hint-text dim">Enter an IP address to render the command.</div>
-            }
-            <div class="hint-text dim">
-              One-off: the configuration file is not touched. Permanently IP-based setups
-              edit <code>api_url</code> and <code>pin_sha256</code> in
-              <code>config.yaml</code>.
+          <summary>DNS fallback: connect via IP</summary>
+          <div class="hint-text dim">
+            For a host without a (working) DNS entry: connect to its IP address while
+            <code>HostKeyAlias</code> keeps the host-certificate check against the
+            enrolled name — verification stays fully intact, nothing is skipped.
+          </div>
+          <mat-form-field appearance="outline">
+            <mat-label>Host IP address</mat-label>
+            <input matInput [(ngModel)]="ip" placeholder="10.20.30.40" />
+            <mat-hint>the target host's address, as reachable from your machine</mat-hint>
+          </mat-form-field>
+          @if (ipLine(); as line) {
+            <div class="copy-row">
+              <code class="mono grow wrap">{{ line }}</code>
+              <button
+                mat-icon-button
+                aria-label="Copy IP connect command"
+                (click)="copy(line, 'Command')"
+              >
+                <mat-icon svgIcon="copy" />
+              </button>
             </div>
           } @else {
-            <div class="pill warn">Not available</div>
-            <div class="hint-text">{{ fallbackHint() }}</div>
+            <div class="hint-text dim">Enter an IP address to render the command.</div>
           }
         </details>
       </div>
@@ -221,18 +188,17 @@ export class HostConnectDialog {
   private readonly clipboard = inject(Clipboard);
   private readonly snackBar = inject(MatSnackBar);
 
-  /** User-entered IP — never derived: a guessed address is a silently wrong URL. */
+  /**
+   * User-entered target IP — the server does not know it: hosts are stored
+   * without an address, and the agent's observed egress IP would not be the
+   * sshd address behind NAT anyway. Never guessed (ticket D3 "Do not").
+   */
   protected ip = '';
 
   constructor(@Inject(MAT_DIALOG_DATA) protected readonly data: HostConnectData) {}
 
   protected get manifest(): ClientManifest | null {
     return this.data.manifest;
-  }
-
-  /** Empty ⇒ no operator-controlled pin ⇒ no IP command anywhere in the UI. */
-  protected get pin(): string {
-    return this.data.manifest?.pin ?? '';
   }
 
   installLine(): string {
@@ -243,12 +209,8 @@ export class HostConnectDialog {
     return connectCommand(this.data.host.name);
   }
 
-  ipLines(): string {
-    return ipLoginCommands(this.ip, this.pin, this.data.host.name);
-  }
-
-  fallbackHint(): string {
-    return pinFallbackHint(this.data.manifest?.pin_source ?? '');
+  ipLine(): string {
+    return ipConnectCommand(this.ip, this.data.host.name);
   }
 
   copy(text: string, what: string): void {
