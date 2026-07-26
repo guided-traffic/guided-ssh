@@ -15,6 +15,11 @@ import (
 func registerDevUIAuthRoutes(mux *http.ServeMux, deps Deps) {
 	mapper := auth.NewMapper(deps.Store)
 	mux.HandleFunc("GET /v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		// G710 taints every request-derived string; its sanitizer list is
+		// hard-coded (PathEscape/QueryEscape/strconv only), so a validated
+		// local path can never pass. sanitizeRedirect enforces local-path-only
+		// (tested incl. backslash folding in ui_auth_test.go).
+		//nolint:gosec // G710: sanitizeRedirect restricts the target to a local path
 		http.Redirect(w, r, sanitizeRedirect(r.URL.Query().Get("redirect")), http.StatusFound)
 	})
 	mux.HandleFunc("POST /v1/auth/logout", func(w http.ResponseWriter, _ *http.Request) {
