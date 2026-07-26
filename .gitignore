@@ -10,10 +10,13 @@ web/dist/*
 !web/dist/.gitkeep
 web/.angular/
 
-# Agent binaries for the one-command install: produced by the Docker build
-# (or locally via `make cross`) and embedded via go:embed — never commit them.
+# Agent and client binaries for the one-command installs: produced by the
+# Docker build (or locally via `make cross`) and embedded via go:embed —
+# never commit them.
 internal/agentdist/bin/*
 !internal/agentdist/bin/.gitkeep
+internal/clientdist/bin/*
+!internal/clientdist/bin/.gitkeep
 
 # Helm: downloaded subchart archives (Chart.lock stays versioned)
 deploy/helm/guided-ssh/charts/

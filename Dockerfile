@@ -8,10 +8,11 @@ RUN npm ci
 COPY web/ .
 RUN npx ng build
 
-# Agent build stage: cross-build gssh-agentd for all target arches. The
-# binaries are embedded into the server binary (internal/agentdist) and
-# shipped during the one-command host install — same build, same -ldflags,
-# so a guaranteed version lockstep with the server.
+# Agent build stage: cross-build gssh-agentd and the gssh client for all
+# target platforms. The binaries are embedded into the server binary
+# (internal/agentdist, internal/clientdist) and shipped during the
+# one-command host install respectively the client install — same build,
+# same -ldflags, so a guaranteed version lockstep with the server.
 #
 # --platform=$BUILDPLATFORM is mandatory: otherwise this stage would run
 # under QEMU for each target platform on buildx multi-arch builds (Go compile
@@ -40,6 +41,18 @@ RUN for arch in amd64 arm64; do \
         -o /out/gssh-agentd-linux-$arch ./cmd/gssh-agentd || exit 1; \
     done
 
+# Client binaries go into their own output directory: /out/ is COPY'd whole
+# into internal/agentdist/bin/, so mixing the families would embed clients
+# into the agent manifest. Platforms mirror CROSS_PLATFORMS in the Makefile.
+RUN for platform in linux/amd64 linux/arm64 darwin/arm64; do \
+      CGO_ENABLED=0 GOOS=${platform%/*} GOARCH=${platform#*/} go build -trimpath \
+        -ldflags "-s -w \
+          -X github.com/guided-traffic/guided-ssh/internal/version.version=${VERSION} \
+          -X github.com/guided-traffic/guided-ssh/internal/version.commit=${COMMIT} \
+          -X github.com/guided-traffic/guided-ssh/internal/version.date=${DATE}" \
+        -o /out-client/gssh-${platform%/*}-${platform#*/} ./cmd/gssh || exit 1; \
+    done
+
 # Build stage
 FROM golang:1.26 AS build
 WORKDIR /src
@@ -52,6 +65,7 @@ COPY . .
 COPY --from=webbuild /web/dist ./web/dist
 # Identical -ldflags as in agentbuild — that is the version lockstep.
 COPY --from=agentbuild /out/ ./internal/agentdist/bin/
+COPY --from=agentbuild /out-client/ ./internal/clientdist/bin/
 
 ARG VERSION=dev
 ARG COMMIT=none

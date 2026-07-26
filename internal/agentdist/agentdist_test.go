@@ -14,6 +14,7 @@ func fakeFS() fstest.MapFS {
 	return fstest.MapFS{
 		"gssh-agentd-linux-amd64": {Data: []byte("amd64-binary")},
 		"gssh-agentd-linux-arm64": {Data: []byte("arm64-binary-longer")},
+		"gssh-linux-amd64":        {Data: []byte("client binary, wrong family")},
 		".gitkeep":                {Data: []byte{}},
 		"README":                  {Data: []byte("not a binary")},
 	}
@@ -123,27 +124,6 @@ func TestUnitFileEmbedded(t *testing.T) {
 	}
 }
 
-func TestParseName(t *testing.T) {
-	tests := []struct {
-		name           string
-		wantOK         bool
-		wantOS, wantAr string
-	}{
-		{name: "gssh-agentd-linux-amd64", wantOK: true, wantOS: "linux", wantAr: "amd64"},
-		{name: ".gitkeep"},
-		{name: "gssh-agentd"},
-		{name: "gssh-agentd-linux"},
-		{name: "gssh-agentd-linux-arm-v7"},
-		{name: "gssh-linux-amd64"},
-	}
-	for _, tc := range tests {
-		osName, arch, ok := parseName(tc.name)
-		if ok != tc.wantOK {
-			t.Errorf("parseName(%q) ok = %v, expected %v", tc.name, ok, tc.wantOK)
-			continue
-		}
-		if ok && (osName != tc.wantOS || arch != tc.wantAr) {
-			t.Errorf("parseName(%q) = %q/%q, expected %q/%q", tc.name, osName, arch, tc.wantOS, tc.wantAr)
-		}
-	}
-}
+// Name parsing itself is tested in internal/bindist (TestParseName), which
+// covers both prefixes; the case that matters here — a client-named file must
+// not show up as an agent binary — is asserted via fakeFS above.

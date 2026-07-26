@@ -632,10 +632,10 @@ Shared ground with the host install is documented there
 ## Roadmap (checklist)
 
 ### Phase A — Client Binaries in the Container
-- [ ] A1: extract `internal/bindist` (prefix-parameterized `Source`),
+- [x] A1: extract `internal/bindist` (prefix-parameterized `Source`),
       `agentdist` delegates with unchanged API, new `internal/clientdist`
       (embed `all:bin`, prefix `gssh-`, `.gitkeep`/`.gitignore`) + tests
-- [ ] A2: Dockerfile — client loop (`linux/amd64 linux/arm64 darwin/arm64`)
+- [x] A2: Dockerfile — client loop (`linux/amd64 linux/arm64 darwin/arm64`)
       in the `agentbuild` stage, separate `/out-client/`, `COPY` into
       `internal/clientdist/bin/`
 
