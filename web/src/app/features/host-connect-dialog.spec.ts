@@ -21,6 +21,7 @@ const HOST: Host = {
   tags: {},
   created_at: '2026-01-01T00:00:00Z',
   enrolled_at: '2026-01-01T00:00:00Z',
+  last_seen_addr: '10.20.30.40',
 };
 
 const MANIFEST: ClientManifest = {
@@ -89,6 +90,46 @@ describe('Host connect dialog', () => {
     expect(rendered()).toContain(
       'gssh ssh -o HostKeyAlias=web-01.prod.example.com 10.20.30.40',
     );
+  });
+
+  it('offers the last-seen address as a click-to-fill suggestion', async () => {
+    const fixture = createDialog(MANIFEST);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const rendered = () => fixture.nativeElement.textContent as string;
+    expect(rendered()).toContain('Agent last connected from');
+    expect(rendered()).toContain('10.20.30.40');
+    // Suggestion alone renders no command — only the click fills the input.
+    expect(rendered()).not.toContain('-o HostKeyAlias=');
+
+    (fixture.nativeElement.querySelector('.addr-suggest') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect((fixture.componentInstance as unknown as { ip: string }).ip).toBe('10.20.30.40');
+    expect(rendered()).toContain(
+      'gssh ssh -o HostKeyAlias=web-01.prod.example.com 10.20.30.40',
+    );
+  });
+
+  it('shows no suggestion for a host without a recorded address', async () => {
+    const data: HostConnectData = {
+      host: { ...HOST, last_seen_addr: null },
+      manifest: MANIFEST,
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        { provide: MAT_DIALOG_DATA, useValue: data },
+        { provide: MatDialogRef, useValue: { close: () => {} } },
+      ],
+    });
+    const fixture = TestBed.createComponent(HostConnectDialog);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).not.toContain('Agent last connected from');
   });
 
   it('keeps connect and IP fallback when the client manifest is unavailable', async () => {

@@ -114,6 +114,16 @@ export function ipConnectCommand(ip: string, hostName: string): string {
             <input matInput [(ngModel)]="ip" placeholder="10.20.30.40" />
             <mat-hint>the target host's address, as reachable from your machine</mat-hint>
           </mat-form-field>
+          @if (data.host.last_seen_addr; as seen) {
+            <div class="hint-text dim">
+              Agent last connected from
+              <button type="button" class="addr-suggest mono" (click)="ip = seen">
+                {{ seen }}
+              </button>
+              (click to use) — its egress address; behind NAT this may differ from where
+              sshd listens.
+            </div>
+          }
           @if (ipLine(); as line) {
             <div class="copy-row">
               <code class="mono grow wrap">{{ line }}</code>
@@ -182,6 +192,15 @@ export function ipConnectCommand(ip: string, hostName: string): string {
     mat-form-field {
       width: 100%;
     }
+    .addr-suggest {
+      background: none;
+      border: 1px solid var(--hairline);
+      border-radius: 4px;
+      padding: 1px 6px;
+      cursor: pointer;
+      color: var(--accent-text, inherit);
+      font-size: 12px;
+    }
   `,
 })
 export class HostConnectDialog {
@@ -189,9 +208,10 @@ export class HostConnectDialog {
   private readonly snackBar = inject(MatSnackBar);
 
   /**
-   * User-entered target IP — the server does not know it: hosts are stored
-   * without an address, and the agent's observed egress IP would not be the
-   * sshd address behind NAT anyway. Never guessed (ticket D3 "Do not").
+   * User-entered target IP. The host's last_seen_addr (agent egress at the
+   * last heartbeat) is offered as a labeled click-to-fill suggestion — never
+   * silently prefilled: behind NAT it may not be the sshd address, and a
+   * wrong prefill would be copied blindly (ticket D3 "Do not").
    */
   protected ip = '';
 

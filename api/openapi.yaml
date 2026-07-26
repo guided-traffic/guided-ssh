@@ -917,6 +917,12 @@ components:
           additionalProperties: { type: string }
         enrolled_at: { type: string, format: date-time, nullable: true }
         last_seen_at: { type: string, format: date-time, nullable: true }
+        last_seen_addr:
+          type: string
+          nullable: true
+          description: >-
+            Agent's observed source IP at the last contact (no port). Egress
+            address — behind NAT not necessarily the address sshd listens on.
         cert_valid_before:
           type: string
           format: date-time

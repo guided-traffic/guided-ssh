@@ -49,7 +49,8 @@ export const mockUiConfig: UiConfig = {
 /**
  * Hosts: every combination of last-seen pill (ok < 24h, warn ≥ 24h, muted =
  * never) and certificate pill (ok, warn < 7 days, danger = expired, muted =
- * none), plus tag variants (none, few, many).
+ * none), plus tag variants (none, few, many). web-01 carries a
+ * last_seen_addr (connect dialog's IP suggestion); the others do not.
  */
 export const mockHosts: Host[] = [
   {
@@ -59,6 +60,7 @@ export const mockHosts: Host[] = [
     created_at: ago(90 * DAY),
     enrolled_at: ago(90 * DAY),
     last_seen_at: ago(4 * MINUTE),
+    last_seen_addr: "10.20.30.40",
     cert_valid_before: ahead(21 * DAY),
   },
   {

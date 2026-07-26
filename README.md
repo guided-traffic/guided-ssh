@@ -284,9 +284,10 @@ gssh ssh -o HostKeyAlias=<host-name> <ip>
 name (its principals are the full and short hostname, not the IP) while
 connecting to the address — verification stays fully intact, nothing is
 skipped. Without the alias, an IP connect correctly fails the principal
-check. The IP is always user-entered: the server stores no host address,
-and the agent's observed egress IP would not be the sshd address behind
-NAT anyway.
+check. The dialog offers the agent's source address from its last
+heartbeat (`last_seen_addr`) as a click-to-fill suggestion — labeled as
+the egress address, which behind NAT may differ from where sshd listens;
+the IP is never silently prefilled, the user always confirms it.
 
 **Login via IP (edge case).** Should the *server's* DNS name be unresolvable
 too, `gssh login` accepts ephemeral overrides — the config file is untouched:

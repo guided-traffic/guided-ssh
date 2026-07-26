@@ -530,18 +530,21 @@ broken).
 - Render a command from an input containing shell metacharacters or a
   leading dash (would parse as an ssh option) — strict IP charset, empty
   result otherwise.
-- Derive or guess the IP server-side or from `window.location` — the
-  operator/user enters it. The server stores no host address, and the
-  agent's observed egress IP is not the sshd address behind NAT.
+- Silently prefill the IP — the agent's observed source address
+  (`hosts.last_seen_addr`, stamped per heartbeat) is offered as a
+  **labeled click-to-fill suggestion** only: it is the egress address,
+  behind NAT not necessarily where sshd listens, and a wrong prefill
+  would be copied blindly. The user always confirms the value.
 - Build a browser-based terminal — different feature, entirely different
   security surface, its own ticket if ever.
 
 **Done when:** component tests: button disabled for non-enrolled hosts;
 the dialog renders all three sections with correct commands for a host
 name; the IP input live-updates the `HostKeyAlias` line; empty or
-malformed input renders **no** command; the dialog works with an
-unavailable client manifest (connect and fallback stay, install section
-degrades visibly).
+malformed input renders **no** command; the `last_seen_addr` suggestion
+fills the input on click and is absent for hosts without one; the dialog
+works with an unavailable client manifest (connect and fallback stay,
+install section degrades visibly).
 
 ---
 
@@ -717,7 +720,7 @@ Shared ground with the host install is documented there
 | 9 | macOS | Served from the same script (`uname -s`, `shasum -a 256` fallback) and as direct downloads on the page; no separate installer |
 | 10 | Steps floor | Three steps is the floor: `login` needs an interactive browser; auto-exec from the piped script rejected (stdin is the pipe) |
 | 11 | Connect entry point | Row-level action on the Hosts page (host-specific ⇒ at the host; the page header holds only global actions); dialog separates one-time install from the connect step; enrolled hosts only; no access pre-check faked in the UI (grants decide at sign time) |
-| 12 | DNS fallback in the dialog | **Corrected 2026-07-26** (originally specified as login-via-IP — a misreading of the scenario): the dialog's fallback targets a **host** without a DNS entry and renders `gssh ssh -o HostKeyAlias=<name> <ip>` — host-cert check stays against the enrolled name, no verification downgrade, no CLI change (`gssh ssh` passes args verbatim to ssh). IP always user-entered (server stores no host address; agent egress IP ≠ sshd address behind NAT); strict input charset (shell safety, no option injection) |
+| 12 | DNS fallback in the dialog | **Corrected 2026-07-26** (originally specified as login-via-IP — a misreading of the scenario): the dialog's fallback targets a **host** without a DNS entry and renders `gssh ssh -o HostKeyAlias=<name> <ip>` — host-cert check stays against the enrolled name, no verification downgrade, no CLI change (`gssh ssh` passes args verbatim to ssh). The heartbeat records the agent's source IP (`hosts.last_seen_addr`, migration 0006; mTLS = direct TCP, RemoteAddr is genuine) and the dialog offers it as a labeled click-to-fill suggestion — never a silent prefill (egress ≠ sshd address behind NAT); strict input charset (shell safety, no option injection) |
 | 13 | Login via IP (server side) | CLI-only edge case, not surfaced in the UI: pin-mandatory pair `gssh login --api-url https://<ip>` + `--pin-sha256 <pin>` (pin replaces chain+hostname verification, `pintls.Transport`; no insecure-skip path anywhere). Requires an **operator-controlled pin source** (`static`/`file`) — auto-derived `dial` pins rotate with the certificate and are never offered (enforced server-side in B2, single point; `pin_source` in the manifest for diagnosis; host-rollout path untouched). Ephemeral flag overrides (ci-login pattern), config file untouched; the signed certificate carries until expiry; persistently IP-based setups edit `config.yaml` (`api_url` + `pin_sha256`) deliberately |
 
 ## Future Notes (deliberately out of scope)

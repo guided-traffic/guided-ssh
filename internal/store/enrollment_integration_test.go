@@ -103,13 +103,23 @@ func TestTouchHostLastSeen(t *testing.T) {
 	ctx := context.Background()
 	host := &store.Host{Name: "seen.example.com"}
 	mustNoErr(t, testStore.CreateHost(ctx, host))
-	mustNoErr(t, testStore.TouchHostLastSeen(ctx, host.ID))
+	mustNoErr(t, testStore.TouchHostLastSeen(ctx, host.ID, "10.20.30.40"))
 	got, err := testStore.GetHost(ctx, host.ID)
 	mustNoErr(t, err)
 	if got.LastSeenAt == nil {
 		t.Fatal("last_seen_at not set")
 	}
-	wantNotFound(t, testStore.TouchHostLastSeen(ctx, uuid.New()))
+	if got.LastSeenAddr == nil || *got.LastSeenAddr != "10.20.30.40" {
+		t.Fatalf("last_seen_addr = %v, expected 10.20.30.40", got.LastSeenAddr)
+	}
+	// An empty addr keeps the previous value (parse hiccups must not erase it).
+	mustNoErr(t, testStore.TouchHostLastSeen(ctx, host.ID, ""))
+	got, err = testStore.GetHost(ctx, host.ID)
+	mustNoErr(t, err)
+	if got.LastSeenAddr == nil || *got.LastSeenAddr != "10.20.30.40" {
+		t.Fatalf("empty addr overwrote last_seen_addr: %v", got.LastSeenAddr)
+	}
+	wantNotFound(t, testStore.TouchHostLastSeen(ctx, uuid.New(), "10.20.30.40"))
 }
 
 func TestListAuthorizedPrincipals(t *testing.T) {

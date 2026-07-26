@@ -38,8 +38,10 @@ CORS, no separate deployment (ADR-003, ADR-020).
   entry that renders `gssh ssh -o HostKeyAlias=<name> <ip>` from a
   user-entered IP — the alias keeps the host-certificate check against the
   enrolled name, so verification stays intact (see
-  [README — client install](../README.md#client-install)). The IP is never
-  guessed: the server stores no host address.
+  [README — client install](../README.md#client-install)). The agent's
+  last observed source address is offered as a labeled click-to-fill
+  suggestion (egress ≠ sshd address behind NAT); it is never silently
+  prefilled.
 - **Client setup**: install page for the `gssh` client — the three-step flow
   with the `curl … /client.sh | sh` one-liner, a two-step
   download-inspect-run alternative, direct binary downloads per platform
