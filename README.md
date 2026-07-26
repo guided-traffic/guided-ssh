@@ -64,8 +64,22 @@ Components, data flows, and the separation of the auth paths:
 
 ## TL;DR — try it
 
-The fastest path to a running test installation. You need an OIDC IdP
-(Keycloak, Dex, …) with a public client — that part cannot be faked.
+The fastest path to a running test installation. No IdP at hand? Fake one:
+Dex with its built-in mock connector is a one-container OIDC issuer that logs
+everyone in as a fixed identity carrying the group `authors` — enough to click
+through the whole flow. (Dex's static passwords would look like the more
+obvious fake, but they carry no groups claim — and without groups, neither the
+admin role nor any grant ever matches.) With a real IdP, substitute its
+issuer and client ID below.
+
+```sh
+docker run -d --name gssh-idp -p 5556:5556 \
+  -v "$PWD/hack/dex-dev.yaml:/etc/dex/config.yaml:ro" \
+  ghcr.io/dexidp/dex:latest dex serve /etc/dex/config.yaml
+```
+
+([hack/dex-dev.yaml](hack/dex-dev.yaml) — memory storage, no authentication;
+never expose it anywhere.)
 
 **On your machine** — a PostgreSQL container, a handful of environment
 values, one binary from the [releases](https://github.com/guided-traffic/guided-ssh/releases)
@@ -79,11 +93,11 @@ docker run -d --name gssh-db \
 export GSSH_DB_HOST=localhost GSSH_DB_USER=gssh GSSH_DB_PASSWORD=gssh \
        GSSH_DB_NAME=gssh GSSH_DB_SSLMODE=disable
 export GSSH_CA_MASTER_KEY="$(openssl rand -base64 32)"    # encrypts the CA keys — keep it!
-export GSSH_OIDC_ISSUER=https://idp.example.com/realms/acme
+export GSSH_OIDC_ISSUER=http://127.0.0.1:5556/dex         # or your IdP's issuer
 export GSSH_OIDC_CLIENT_ID=gssh-cli
-export GSSH_ADMIN_GROUP=gssh-admins                       # IdP group allowed to manage grants
+export GSSH_ADMIN_GROUP=authors                           # IdP group allowed to manage grants
 
-gssh-server -listen :8080
+gssh-server -listen :8080 -agent-listen :8443
 ```
 
 The server migrates the database and bootstraps its CA on first start
@@ -92,7 +106,8 @@ The server migrates the database and bootstraps its CA on first start
 **Or on Kubernetes** — no database needed, the chart runs an ephemeral
 PostgreSQL sidecar (`internalDatabase.enabled=true`, Kubernetes ≥ 1.29,
 strictly for trying it out — every pod restart starts with an empty database
-and a fresh CA):
+and a fresh CA). The host-local Dex above is not reachable from inside a
+cluster — point these values at an IdP that is:
 
 ```sh
 helm repo add guided-ssh https://guided-traffic.github.io/guided-ssh
@@ -113,15 +128,16 @@ enroll a host, ssh:
 
 ```yaml
 api_url: http://localhost:8080
-issuer: https://idp.example.com/realms/acme
+issuer: http://127.0.0.1:5556/dex          # must match GSSH_OIDC_ISSUER
 client_id: gssh-cli
+scopes: [openid, profile, email, groups]   # the default omits groups — Dex only sends what is requested
 ```
 
 ```sh
 gssh login                # SSO in the browser, certificate into the ssh-agent
 gssh status               # show the current certificate
 
-gssh-admin grant create --group devs --tags env=dev \
+gssh-admin grant create --group authors --tags env=dev \
     --principals deploy --max-validity 8h
 
 # on the server: one-time enrollment token

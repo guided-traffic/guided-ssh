@@ -1,0 +1,36 @@
+# Throwaway OIDC IdP for trying out guided-ssh locally (see README "TL;DR").
+#
+#   docker run -d --name gssh-idp -p 5556:5556 \
+#     -v "$PWD/hack/dex-dev.yaml:/etc/dex/config.yaml:ro" \
+#     ghcr.io/dexidp/dex:latest dex serve /etc/dex/config.yaml
+#
+# The mock connector logs everyone in as a fixed identity ("Kilgore Trout",
+# kilgore@kilgore.trout) that carries the group "authors" — so the admin role
+# (GSSH_ADMIN_GROUP=authors) and group-based grants actually match. Dex's
+# staticPasswords would look like the more obvious fake, but they carry no
+# groups claim, and without groups no admin role and no grant ever matches.
+#
+# Never expose this anywhere: no authentication, memory storage.
+
+issuer: http://127.0.0.1:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+# Public client (no secret) — Dex then accepts the CLI's loopback redirect
+# (http://127.0.0.1:<random port>/callback) automatically.
+staticClients:
+  - id: gssh-cli
+    name: gssh CLI
+    public: true
+
+connectors:
+  - type: mockCallback
+    id: mock
+    name: mock
