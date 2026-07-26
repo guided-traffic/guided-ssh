@@ -57,6 +57,17 @@
             "development": {
               "optimization": false,
               "extractLicenses": false,
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.mock.ts"
+                }
+              ]
+            },
+            "backend": {
+              "optimization": false,
+              "extractLicenses": false,
               "sourceMap": true
             }
           },
@@ -73,6 +84,9 @@
             },
             "development": {
               "buildTarget": "guided-ssh-ui:build:development"
+            },
+            "backend": {
+              "buildTarget": "guided-ssh-ui:build:backend"
             }
           },
           "defaultConfiguration": "development"

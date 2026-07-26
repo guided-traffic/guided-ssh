@@ -69,18 +69,48 @@ truth):
 
 ## Development
 
+### Mock mode (default `ng serve` — no backend at all)
+
 ```sh
 cd web
 npm ci
-npm start        # ng serve; proxy.conf.json is wired in angular.json
+npm start        # ng serve → http://localhost:4200, everything mocked
+```
+
+Plain `ng serve` runs the UI entirely without a backend: `angular.json`
+replaces [`environment.ts`](../web/src/environments/environment.ts) with
+`environment.mock.ts`, which switches on the
+[mock interceptor](../web/src/app/core/mock/mock-api.interceptor.ts). Every
+`/v1` request is answered from
+[fixtures](../web/src/app/core/mock/mock-data.ts) that deliberately contain
+one example per UI variant (every pill color, expired/expiring/missing
+certificates, active/inactive rows, empty and overlong fields, multi-page
+audit log). Grant/CI-grant/service-account dialogs mutate in-memory state,
+so create/edit/delete behave realistically until reload.
+
+Role variants without a backend, in the browser console:
+
+```js
+localStorage.setItem('gssh-mock-roles', 'readonly'); // or 'auditor,readonly'
+localStorage.setItem('gssh-mock-roles', '');         // logged-out view
+localStorage.removeItem('gssh-mock-roles');          // back to admin
+```
+
+(reload after each change). Production builds ship with `mockApi: false` —
+the mock never answers outside `ng serve`.
+
+### Against a real server
+
+```sh
+npm run start:backend    # ng serve -c backend; /v1 proxied to localhost:8080
 ```
 
 `proxy.conf.json` forwards `/v1` to `http://localhost:8080`, so login and API
 calls work against a locally running `gssh-server`.
 
-### Developer mode (no IdP)
+### Server developer mode (no IdP)
 
-For pure frontend work, the server can skip OIDC entirely: with
+For integration work against the real server without an IdP: with
 `GSSH_DEV_UI_AUTH=insecure` every request without a bearer token acts as a
 logged-in admin (`dev`, all roles). Only the exact value `insecure` activates
 it — anything else fails startup. PostgreSQL and `GSSH_CA_MASTER_KEY` are
@@ -99,8 +129,8 @@ export GSSH_DEV_UI_AUTH=insecure
 go run ./cmd/gssh-server -listen :8080
 ```
 
-Then `npm start` in `web/` — the UI at `http://localhost:4200` is signed in
-as `dev` immediately.
+Then `npm run start:backend` in `web/` — the UI at `http://localhost:4200`
+is signed in as `dev` immediately.
 
 **Security:** this disables authentication on the admin API of that server
 process. It is meant for a server bound to localhost with throwaway data;
