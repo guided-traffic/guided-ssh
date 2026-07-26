@@ -26,7 +26,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeVerifier akzeptiert genau ein Token und liefert feste Claims.
+// fakeVerifier accepts exactly one token and returns fixed claims.
 type fakeVerifier struct {
 	token  string
 	claims *auth.Claims
@@ -34,16 +34,16 @@ type fakeVerifier struct {
 
 func (f *fakeVerifier) Verify(_ context.Context, rawToken string) (*auth.Claims, error) {
 	if rawToken != f.token {
-		return nil, fmt.Errorf("%w: token unbekannt", auth.ErrInvalidToken)
+		return nil, fmt.Errorf("%w: unknown token", auth.ErrInvalidToken)
 	}
 	copied := *f.claims
 	return &copied, nil
 }
 
-// fakeAuthStore ist ein minimaler In-Memory-Store für den Sign-Endpoint
-// (auth.Store-Anteil; der CA-Anteil kommt aus fakeStore in server_test.go).
-// Als GrantSource liefert er standardmäßig einen Grant mit 16 h Maximum;
-// noGrants bzw. grantMaxSeconds steuern die Phase-6-Fälle.
+// fakeAuthStore is a minimal in-memory store for the sign endpoint (the
+// auth.Store portion; the CA portion comes from fakeStore in
+// server_test.go). As a GrantSource it returns by default a grant with a
+// 16h maximum; noGrants and grantMaxSeconds control the phase-6 cases.
 type fakeAuthStore struct {
 	fakeStore
 	users           map[uuid.UUID]*store.User
@@ -126,7 +126,7 @@ func (f *fakeAuthStore) ListGrantsForUser(_ context.Context, _ uuid.UUID) ([]sto
 	}}, nil
 }
 
-const testToken = "gueltiges-test-token" //#nosec G101 -- Testwert, kein Credential
+const testToken = "valid-test-token" //#nosec G101 -- test value, not a credential
 
 func testClaims() *auth.Claims {
 	return &auth.Claims{
@@ -138,7 +138,7 @@ func testClaims() *auth.Claims {
 	}
 }
 
-// newSignServer baut den Testserver mit Sign-Endpoint (echte CA über fakeStore).
+// newSignServer builds the test server with the sign endpoint (real CA over fakeStore).
 func newSignServer(t *testing.T, fs *fakeAuthStore, verifier api.TokenVerifier) *httptest.Server {
 	t.Helper()
 	masterKey := make([]byte, ca.MasterKeySize)
@@ -157,7 +157,7 @@ func newSignServer(t *testing.T, fs *fakeAuthStore, verifier api.TokenVerifier) 
 	return srv
 }
 
-// testPublicKey erzeugt einen Ed25519-Public-Key im authorized_keys-Format.
+// testPublicKey creates an ed25519 public key in authorized_keys format.
 func testPublicKey(t *testing.T) string {
 	t.Helper()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -166,21 +166,21 @@ func testPublicKey(t *testing.T) string {
 	}
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
-		t.Fatalf("ssh-public-key: %v", err)
+		t.Fatalf("ssh public key: %v", err)
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
 }
 
-// postSign ruft den Sign-Endpoint auf.
+// postSign calls the sign endpoint.
 func postSign(t *testing.T, url, token string, body any) (int, []byte) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("body marshalen: %v", err)
+		t.Fatalf("marshaling body: %v", err)
 	}
 	req, err := http.NewRequest(http.MethodPost, url+"/v1/sign/user", bytes.NewReader(payload))
 	if err != nil {
-		t.Fatalf("request bauen: %v", err)
+		t.Fatalf("building request: %v", err)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -192,12 +192,12 @@ func postSign(t *testing.T, url, token string, body any) (int, []byte) {
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("body lesen: %v", err)
+		t.Fatalf("reading body: %v", err)
 	}
 	return resp.StatusCode, data
 }
 
-func TestSignUserErfolg(t *testing.T) {
+func TestSignUserSuccess(t *testing.T) {
 	fs := newFakeAuthStore()
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
@@ -216,17 +216,17 @@ func TestSignUserErfolg(t *testing.T) {
 		ValidBefore time.Time `json:"valid_before"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("antwort dekodieren: %v", err)
+		t.Fatalf("decoding response: %v", err)
 	}
 
-	// Zertifikat parsen und Inhalte prüfen.
+	// Parse the certificate and check its contents.
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.Certificate))
 	if err != nil {
-		t.Fatalf("zertifikat parsen: %v", err)
+		t.Fatalf("parsing certificate: %v", err)
 	}
 	cert, ok := parsed.(*ssh.Certificate)
 	if !ok {
-		t.Fatalf("kein zertifikat: %T", parsed)
+		t.Fatalf("not a certificate: %T", parsed)
 	}
 	if cert.KeyId != "user:alice-id@https://idp.example.com/realms/gssh" || cert.KeyId != resp.KeyID {
 		t.Errorf("keyid: %q vs %q", cert.KeyId, resp.KeyID)
@@ -235,20 +235,20 @@ func TestSignUserErfolg(t *testing.T) {
 		t.Errorf("principals: %v", cert.ValidPrincipals)
 	}
 	if _, ok := cert.Extensions["permit-pty"]; !ok {
-		t.Errorf("permit-pty fehlt: %v", cert.Extensions)
+		t.Errorf("permit-pty missing: %v", cert.Extensions)
 	}
 	lifetime := time.Unix(int64(cert.ValidBefore), 0).Sub(time.Unix(int64(cert.ValidAfter), 0)) //nolint:gosec
 	if lifetime < time.Hour || lifetime > time.Hour+2*time.Minute {
-		t.Errorf("laufzeit %s, erwartet ~1h", lifetime)
+		t.Errorf("lifetime %s, expected ~1h", lifetime)
 	}
 
-	// Benutzer + Gruppe wurden angelegt.
+	// User + group were created.
 	if len(fs.users) != 1 || len(fs.groups) != 1 {
-		t.Errorf("users=%d groups=%d, erwartet je 1", len(fs.users), len(fs.groups))
+		t.Errorf("users=%d groups=%d, expected 1 each", len(fs.users), len(fs.groups))
 	}
 }
 
-func TestSignUserDefaultLaufzeit(t *testing.T) {
+func TestSignUserDefaultValidity(t *testing.T) {
 	fs := newFakeAuthStore()
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
@@ -261,17 +261,17 @@ func TestSignUserDefaultLaufzeit(t *testing.T) {
 		ValidBefore time.Time `json:"valid_before"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("antwort dekodieren: %v", err)
+		t.Fatalf("decoding response: %v", err)
 	}
 	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime < 15*time.Hour || lifetime > 17*time.Hour {
-		t.Errorf("default-laufzeit %s, erwartet ~16h", lifetime)
+		t.Errorf("default lifetime %s, expected ~16h", lifetime)
 	}
 }
 
-func TestSignUserFehlerfaelle(t *testing.T) {
+func TestSignUserErrorCases(t *testing.T) {
 	fs := newFakeAuthStore()
-	// Grant erlaubt 24 h, damit die Policy (16 h) und nicht der Grant die
-	// überlange Anfrage ablehnt.
+	// Grant allows 24h, so the policy (16h) rather than the grant rejects
+	// the overlong request.
 	fs.grantMaxSeconds = 24 * 3600
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 	validKey := testPublicKey(t)
@@ -282,41 +282,41 @@ func TestSignUserFehlerfaelle(t *testing.T) {
 		body       any
 		wantStatus int
 	}{
-		{"ohne token", "", map[string]any{"public_key": validKey}, http.StatusUnauthorized},
-		{"falsches token", "falsch", map[string]any{"public_key": validKey}, http.StatusUnauthorized},
-		{"kaputter body", testToken, "kein-json", http.StatusBadRequest},
-		{"kaputter key", testToken, map[string]any{"public_key": "kein-key"}, http.StatusBadRequest},
-		{"laufzeit über policy-maximum", testToken, map[string]any{
+		{"without token", "", map[string]any{"public_key": validKey}, http.StatusUnauthorized},
+		{"wrong token", "wrong", map[string]any{"public_key": validKey}, http.StatusUnauthorized},
+		{"broken body", testToken, "not-json", http.StatusBadRequest},
+		{"broken key", testToken, map[string]any{"public_key": "not-a-key"}, http.StatusBadRequest},
+		{"lifetime over policy maximum", testToken, map[string]any{
 			"public_key": validKey, "validity_seconds": 24 * 3600,
 		}, http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		if status, body := postSign(t, srv.URL, c.token, c.body); status != c.wantStatus {
-			t.Errorf("%s: status %d (erwartet %d): %s", c.name, status, c.wantStatus, body)
+			t.Errorf("%s: status %d (expected %d): %s", c.name, status, c.wantStatus, body)
 		}
 	}
 }
 
-func TestSignUserOhneGrantAbgelehnt(t *testing.T) {
+func TestSignUserRejectedWithoutGrant(t *testing.T) {
 	fs := newFakeAuthStore()
 	fs.noGrants = true
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
 	status, body := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)})
 	if status != http.StatusForbidden {
-		t.Fatalf("ohne grant: status %d (erwartet 403): %s", status, body)
+		t.Fatalf("without grant: status %d (expected 403): %s", status, body)
 	}
 	if !strings.Contains(string(body), "grants") {
-		t.Errorf("fehlermeldung ohne hinweis auf grants: %s", body)
+		t.Errorf("error message without a reference to grants: %s", body)
 	}
 }
 
-func TestSignUserLaufzeitDurchGrantGedeckelt(t *testing.T) {
+func TestSignUserValidityCappedByGrant(t *testing.T) {
 	fs := newFakeAuthStore()
-	fs.grantMaxSeconds = 3600 // Grant erlaubt maximal 1 h
+	fs.grantMaxSeconds = 3600 // grant allows at most 1h
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
-	// Anfrage über dem Grant-Maximum wird gekappt statt abgelehnt.
+	// A request beyond the grant maximum gets capped instead of rejected.
 	status, body := postSign(t, srv.URL, testToken, map[string]any{
 		"public_key": testPublicKey(t), "validity_seconds": 8 * 3600,
 	})
@@ -328,60 +328,60 @@ func TestSignUserLaufzeitDurchGrantGedeckelt(t *testing.T) {
 		ValidBefore time.Time `json:"valid_before"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("antwort dekodieren: %v", err)
+		t.Fatalf("decoding response: %v", err)
 	}
 	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime != time.Hour {
-		t.Errorf("laufzeit %s, erwartet 1h (grant-maximum)", lifetime)
+		t.Errorf("lifetime %s, expected 1h (grant maximum)", lifetime)
 	}
 }
 
-func TestSignUserZertifikatAlsKeyAbgelehnt(t *testing.T) {
+func TestSignUserCertificateAsKeyRejected(t *testing.T) {
 	fs := newFakeAuthStore()
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
-	// Erst ein echtes Zertifikat holen, dann als public_key einreichen.
+	// First get a real certificate, then submit it as public_key.
 	status, body := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)})
 	if status != http.StatusOK {
-		t.Fatalf("setup-zertifikat: status %d", status)
+		t.Fatalf("setup certificate: status %d", status)
 	}
 	var resp struct {
 		Certificate string `json:"certificate"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("antwort dekodieren: %v", err)
+		t.Fatalf("decoding response: %v", err)
 	}
 	if status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": resp.Certificate}); status != http.StatusBadRequest {
-		t.Errorf("zertifikat als key: status %d, erwartet 400", status)
+		t.Errorf("certificate as key: status %d, expected 400", status)
 	}
 }
 
-func TestSignUserInaktiverBenutzer(t *testing.T) {
+func TestSignUserInactiveUser(t *testing.T) {
 	fs := newFakeAuthStore()
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
-	// Benutzer anlegen (erste Ausstellung), dann deaktivieren.
+	// Create the user (first issuance), then deactivate them.
 	if status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)}); status != http.StatusOK {
-		t.Fatal("setup fehlgeschlagen")
+		t.Fatal("setup failed")
 	}
 	for _, u := range fs.users {
 		u.Active = false
 	}
 	if status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)}); status != http.StatusForbidden {
-		t.Errorf("inaktiver benutzer: status %d, erwartet 403", status)
+		t.Errorf("inactive user: status %d, expected 403", status)
 	}
 }
 
-func TestSignUserMappingFehler(t *testing.T) {
+func TestSignUserMappingError(t *testing.T) {
 	fs := newFakeAuthStore()
-	fs.mappingError = errors.New("db kaputt")
+	fs.mappingError = errors.New("db broken")
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
 	if status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)}); status != http.StatusInternalServerError {
-		t.Errorf("mapping-fehler: status %d, erwartet 500", status)
+		t.Errorf("mapping error: status %d, expected 500", status)
 	}
 }
 
-func TestSignUserNegativeLaufzeitFaelltAufDefault(t *testing.T) {
+func TestSignUserNegativeValidityFallsBackToDefault(t *testing.T) {
 	fs := newFakeAuthStore()
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
@@ -396,27 +396,27 @@ func TestSignUserNegativeLaufzeitFaelltAufDefault(t *testing.T) {
 		ValidBefore time.Time `json:"valid_before"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("antwort dekodieren: %v", err)
+		t.Fatalf("decoding response: %v", err)
 	}
 	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime < 15*time.Hour || lifetime > 17*time.Hour {
-		t.Errorf("laufzeit %s, erwartet default ~16h", lifetime)
+		t.Errorf("lifetime %s, expected default ~16h", lifetime)
 	}
 }
 
-func TestSignUserBodyZuGross(t *testing.T) {
+func TestSignUserBodyTooLarge(t *testing.T) {
 	fs := newFakeAuthStore()
 	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: testClaims()})
 
-	// > 64 KiB ⇒ MaxBytesReader bricht das Dekodieren ab ⇒ 400.
+	// > 64 KiB ⇒ MaxBytesReader aborts decoding ⇒ 400.
 	status, _ := postSign(t, srv.URL, testToken, map[string]any{
 		"public_key": strings.Repeat("A", 100_000),
 	})
 	if status != http.StatusBadRequest {
-		t.Errorf("übergroßer body: status %d, erwartet 400", status)
+		t.Errorf("oversized body: status %d, expected 400", status)
 	}
 }
 
-func TestSignUserRateLimitNachFehlversuchen(t *testing.T) {
+func TestSignUserRateLimitAfterFailedAttempts(t *testing.T) {
 	fs := newFakeAuthStore()
 	masterKey := make([]byte, ca.MasterKeySize)
 	certAuthority, err := ca.New(&fs.fakeStore, masterKey, ca.NewPolicyEngine(ca.DefaultPolicies()))
@@ -426,7 +426,7 @@ func TestSignUserRateLimitNachFehlversuchen(t *testing.T) {
 	if err := certAuthority.EnsureCAKeys(context.Background()); err != nil {
 		t.Fatalf("EnsureCAKeys: %v", err)
 	}
-	// Faktisch kein Refill während des Tests: Sperre nach 2 Fehlversuchen.
+	// Effectively no refill during the test: lockout after 2 failed attempts.
 	limiter := api.NewRateLimiter(api.RateLimiterConfig{
 		RequestsPerMinute: 600, Burst: 100,
 		FailuresPerMinute: 0.001, FailureBurst: 2,
@@ -441,20 +441,20 @@ func TestSignUserRateLimitNachFehlversuchen(t *testing.T) {
 	validKey := testPublicKey(t)
 
 	for i := range 2 {
-		if status, _ := postSign(t, srv.URL, "falsch", map[string]any{"public_key": validKey}); status != http.StatusUnauthorized {
-			t.Fatalf("fehlversuch %d: status %d, erwartet 401", i+1, status)
+		if status, _ := postSign(t, srv.URL, "wrong", map[string]any{"public_key": validKey}); status != http.StatusUnauthorized {
+			t.Fatalf("failed attempt %d: status %d, expected 401", i+1, status)
 		}
 	}
-	// Failure-Budget erschöpft: auch ein valider Request wird gedrosselt.
+	// Failure budget exhausted: even a valid request gets throttled.
 	if status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": validKey}); status != http.StatusTooManyRequests {
-		t.Errorf("nach fehlversuchen: status %d, erwartet 429", status)
+		t.Errorf("after failed attempts: status %d, expected 429", status)
 	}
 }
 
-func TestSignUserOhneOIDCKonfiguration(t *testing.T) {
-	srv := newTestServer(t, &fakeStore{}) // ohne Verifier/Store
+func TestSignUserWithoutOIDCConfiguration(t *testing.T) {
+	srv := newTestServer(t, &fakeStore{}) // without Verifier/Store
 	status, _ := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)})
 	if status != http.StatusServiceUnavailable {
-		t.Errorf("status %d, erwartet 503", status)
+		t.Errorf("status %d, expected 503", status)
 	}
 }

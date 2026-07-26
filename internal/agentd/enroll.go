@@ -21,33 +21,33 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
-// EnrollOptions steuern das Enrollment.
+// EnrollOptions control the enrollment.
 type EnrollOptions struct {
-	// ServerURL ist die öffentliche API des gssh-servers (POST /v1/enroll).
+	// ServerURL is the public API of the gssh server (POST /v1/enroll).
 	ServerURL string
-	// AgentURL ist die mTLS-Agent-API für den späteren Betrieb.
+	// AgentURL is the mTLS agent API used for later operation.
 	AgentURL string
-	// Token ist das einmalige Enrollment-Token.
+	// Token is the one-time enrollment token.
 	Token string
-	// Hostname; leer = os.Hostname().
+	// Hostname; empty = os.Hostname().
 	Hostname string
-	// Tags aus dem Enrollment (Token-Tags haben serverseitig Vorrang).
+	// Tags for the enrollment (token tags take precedence server-side).
 	Tags map[string]string
-	// PinSHA256 pinnt das TLS-Zertifikat des Enroll-Endpoints (Base64-SPKI).
+	// PinSHA256 pins the TLS certificate of the enroll endpoint (base64 SPKI).
 	PinSHA256 string
-	// StateDir, SSHDir, SSHKeyPath: leer = Defaults.
+	// StateDir, SSHDir, SSHKeyPath: empty = defaults.
 	StateDir   string
 	SSHDir     string
 	SSHKeyPath string
-	// SessionAudit aktiviert das Host-Session-/sudo-Audit (Phase 9, Opt-in):
-	// schreibt pam_exec-Hooks + sshd-Korrelation, erzeugt das Socket-Token.
+	// SessionAudit enables host session/sudo audit (phase 9, opt-in): writes
+	// pam_exec hooks + sshd correlation, generates the socket token.
 	SessionAudit bool
-	// PAMDir ist das PAM-Konfigurationsverzeichnis (Default /etc/pam.d); fehlt
-	// es, werden die pam_exec-Hooks übersprungen (Tests/nicht-Linux).
+	// PAMDir is the PAM configuration directory (default /etc/pam.d); if
+	// missing, the pam_exec hooks are skipped (tests/non-Linux).
 	PAMDir string
 }
 
-// enrollResponse spiegelt die Antwort von POST /v1/enroll (internal/api).
+// enrollResponse mirrors the response of POST /v1/enroll (internal/api).
 type enrollResponse struct {
 	HostID          string `json:"host_id"`
 	HostCertificate string `json:"host_certificate"`
@@ -56,13 +56,13 @@ type enrollResponse struct {
 	MTLSCA          string `json:"mtls_ca"`
 }
 
-// Enroll registriert den Host: mTLS-Schlüssel + CSR erzeugen, Token gegen
-// Host-Zertifikat und mTLS-Client-Zertifikat tauschen, State-Verzeichnis und
-// sshd-Konfiguration schreiben. Idempotent — ein erneutes Enrollment (neues
-// Token) überschreibt die Dateien.
+// Enroll registers the host: generates the mTLS key + CSR, exchanges the
+// token for a host certificate and an mTLS client certificate, and writes
+// the state directory and sshd configuration. Idempotent — a repeated
+// enrollment (new token) overwrites the files.
 func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	if opts.ServerURL == "" || opts.Token == "" || opts.AgentURL == "" {
-		return fmt.Errorf("server-url, agent-url und token sind pflicht")
+		return fmt.Errorf("server-url, agent-url, and token are required")
 	}
 	if opts.StateDir == "" {
 		opts.StateDir = DefaultStateDir
@@ -79,17 +79,17 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	if opts.Hostname == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			return fmt.Errorf("hostname ermitteln: %w", err)
+			return fmt.Errorf("determining hostname: %w", err)
 		}
 		opts.Hostname = hostname
 	}
 
 	sshPub, err := os.ReadFile(opts.SSHKeyPath)
 	if err != nil {
-		return fmt.Errorf("ssh-host-key lesen (sshd installiert? ssh-keygen -A): %w", err)
+		return fmt.Errorf("reading ssh-host-key (is sshd installed? run ssh-keygen -A): %w", err)
 	}
 
-	// Ephemeraler mTLS-Schlüssel + CSR; die Identität (CN) vergibt der Server.
+	// Ephemeral mTLS key + CSR; the server assigns the identity (CN).
 	priv, csrPEM, err := newMTLSKeyAndCSR()
 	if err != nil {
 		return err
@@ -108,25 +108,25 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	}
 
 	fmt.Fprintf(stdout, "enrolled: %s (host-id %s)\n", opts.Hostname, response.HostID)
-	fmt.Fprintf(stdout, "sshd-snippet: %s — Include prüfen und sshd neu laden\n", SnippetPath(opts.SSHDir))
+	fmt.Fprintf(stdout, "sshd snippet: %s — check the Include and reload sshd\n", SnippetPath(opts.SSHDir))
 	return nil
 }
 
-// newMTLSKeyAndCSR erzeugt ein frisches Ed25519-Schlüsselpaar und einen
-// leeren CSR dafür (Enrollment und Rotation; die Identität setzt der Server).
+// newMTLSKeyAndCSR generates a fresh Ed25519 key pair and an empty CSR for
+// it (enrollment and rotation; the server sets the identity).
 func newMTLSKeyAndCSR() (ed25519.PrivateKey, []byte, error) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("mtls-schlüssel erzeugen: %w", err)
+		return nil, nil, fmt.Errorf("generating mtls key: %w", err)
 	}
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, priv)
 	if err != nil {
-		return nil, nil, fmt.Errorf("csr erzeugen: %w", err)
+		return nil, nil, fmt.Errorf("generating csr: %w", err)
 	}
 	return priv, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}), nil
 }
 
-// postEnroll ruft POST /v1/enroll auf (optional mit SPKI-Pinning).
+// postEnroll calls POST /v1/enroll (optionally with SPKI pinning).
 func postEnroll(ctx context.Context, opts EnrollOptions, sshPub, csrPEM string) (*enrollResponse, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	if opts.PinSHA256 != "" {
@@ -154,29 +154,29 @@ func postEnroll(ctx context.Context, opts EnrollOptions, sshPub, csrPEM string) 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("enroll-endpoint erreichen: %w", err)
+		return nil, fmt.Errorf("reaching enroll endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("enrollment abgelehnt: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return nil, fmt.Errorf("enrollment rejected: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	var response enrollResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("enroll-antwort dekodieren: %w", err)
+		return nil, fmt.Errorf("decoding enroll response: %w", err)
 	}
 	if response.HostID == "" || response.MTLSCertificate == "" || response.HostCertificate == "" {
-		return nil, fmt.Errorf("enroll-antwort unvollständig")
+		return nil, fmt.Errorf("enroll response incomplete")
 	}
 	return &response, nil
 }
 
-// writeState schreibt mTLS-Material und Agent-Konfiguration ins
-// State-Verzeichnis (0700; Schlüssel 0600).
+// writeState writes the mTLS material and agent configuration into the
+// state directory (0700; keys 0600).
 func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollResponse) error {
 	paths := Paths{StateDir: opts.StateDir}
 	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
-		return fmt.Errorf("state-verzeichnis anlegen: %w", err)
+		return fmt.Errorf("creating state directory: %w", err)
 	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
@@ -194,7 +194,7 @@ func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollRes
 	}
 	for _, f := range files {
 		if err := os.WriteFile(f.path, f.data, f.mode); err != nil {
-			return fmt.Errorf("%s schreiben: %w", f.path, err)
+			return fmt.Errorf("writing %s: %w", f.path, err)
 		}
 	}
 	cfg := &Config{
@@ -214,54 +214,56 @@ func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollRes
 	return writeConfig(paths, cfg)
 }
 
-// writeSocketToken erzeugt das Token der schreibenden Socket-Endpunkte (Phase 9),
-// sofern noch keins existiert (idempotentes Re-Enrollment). 0600 → nur root.
+// writeSocketToken generates the token for the writable socket endpoints
+// (phase 9), unless one already exists (idempotent re-enrollment). 0600 →
+// root only.
 func writeSocketToken(paths Paths) error {
 	if _, err := os.Stat(paths.SocketTokenFile()); err == nil {
 		return nil
 	}
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
-		return fmt.Errorf("socket-token erzeugen: %w", err)
+		return fmt.Errorf("generating socket token: %w", err)
 	}
 	return os.WriteFile(paths.SocketTokenFile(), []byte(hex.EncodeToString(buf)), 0o600)
 }
 
-// writeSSHDFiles schreibt Host-Zertifikat, TrustedUserCAKeys-Bundle und den
-// sshd-Konfigurations-Schnipsel (idempotent).
+// writeSSHDFiles writes the host certificate, the TrustedUserCAKeys bundle,
+// and the sshd configuration snippet (idempotent).
 func writeSSHDFiles(opts EnrollOptions, response *enrollResponse) error {
 	certPath := HostCertPath(opts.SSHKeyPath)
-	if err := os.WriteFile(certPath, []byte(response.HostCertificate+"\n"), 0o644); err != nil { //nolint:gosec // öffentliches Zertifikat, sshd muss lesen
-		return fmt.Errorf("host-zertifikat schreiben: %w", err)
+	if err := os.WriteFile(certPath, []byte(response.HostCertificate+"\n"), 0o644); err != nil { //nolint:gosec // public certificate, sshd must read it
+		return fmt.Errorf("writing host certificate: %w", err)
 	}
-	if err := os.WriteFile(UserCAPath(opts.SSHDir), []byte(response.UserCABundle), 0o644); err != nil { //nolint:gosec // öffentliche CA-Keys
-		return fmt.Errorf("user-ca-bundle schreiben: %w", err)
+	if err := os.WriteFile(UserCAPath(opts.SSHDir), []byte(response.UserCABundle), 0o644); err != nil { //nolint:gosec // public ca keys
+		return fmt.Errorf("writing user ca bundle: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(SnippetPath(opts.SSHDir)), 0o755); err != nil { //nolint:gosec // sshd-Standardverzeichnis
+	if err := os.MkdirAll(filepath.Dir(SnippetPath(opts.SSHDir)), 0o755); err != nil { //nolint:gosec // standard sshd directory
 		return err
 	}
 	binary, err := os.Executable()
 	if err != nil {
 		binary = "gssh-agentd"
 	}
-	// Bei aktivem Session-Audit reicht sshd dem Principals-Helfer Serial (%s) und
-	// Key-ID (%i) des Zertifikats, und LogLevel VERBOSE loggt den Serial (ADR-005
-	// Stufe 2). Ohne Audit bleibt das Snippet wie in Phase 5.
+	// With session audit enabled, sshd hands the principals helper the
+	// certificate's serial (%s) and key id (%i), and LogLevel VERBOSE logs
+	// the serial (ADR-005 tier 2). Without audit, the snippet stays as in
+	// phase 5.
 	principalsArgs := "-user %u"
 	logLevel := ""
 	if opts.SessionAudit {
 		principalsArgs = "-user %u -serial %s -keyid %i"
 		logLevel = "LogLevel VERBOSE\n"
 	}
-	snippet := fmt.Sprintf(`# guided-ssh — generiert von gssh-agentd enroll, nicht manuell editieren.
-# Voraussetzung: die Haupt-sshd_config enthält "Include %s/sshd_config.d/*.conf".
+	snippet := fmt.Sprintf(`# guided-ssh — generated by gssh-agentd enroll, do not edit manually.
+# Requires the main sshd_config to contain "Include %s/sshd_config.d/*.conf".
 TrustedUserCAKeys %s
 HostCertificate %s
 %sAuthorizedPrincipalsCommand %s principals -state-dir %s %s
 AuthorizedPrincipalsCommandUser root
 `, opts.SSHDir, UserCAPath(opts.SSHDir), certPath, logLevel, binary, opts.StateDir, principalsArgs)
-	if err := os.WriteFile(SnippetPath(opts.SSHDir), []byte(snippet), 0o644); err != nil { //nolint:gosec // sshd-Konfiguration, muss für sshd lesbar sein
-		return fmt.Errorf("sshd-snippet schreiben: %w", err)
+	if err := os.WriteFile(SnippetPath(opts.SSHDir), []byte(snippet), 0o644); err != nil { //nolint:gosec // sshd configuration, must be readable by sshd
+		return fmt.Errorf("writing sshd snippet: %w", err)
 	}
 	if opts.SessionAudit {
 		if err := writePAMFiles(opts, binary); err != nil {
@@ -271,30 +273,30 @@ AuthorizedPrincipalsCommandUser root
 	return nil
 }
 
-// pamManagedMarker kennzeichnet die von guided-ssh verwaltete pam_exec-Zeile.
+// pamManagedMarker marks the pam_exec line managed by guided-ssh.
 const pamManagedMarker = "# guided-ssh session audit (managed)"
 
-// writePAMFiles hängt idempotent einen pam_exec-Hook an die PAM-Stacks von sshd
-// und sudo an (session open/close → gssh-agentd pam-session). `optional` +
-// Helfer-Exit 0 ⇒ fail-open. Fehlt das PAM-Verzeichnis (Tests/nicht-Linux), wird
-// übersprungen. Bestehende Zeilen bleiben unangetastet.
+// writePAMFiles idempotently appends a pam_exec hook to the PAM stacks of
+// sshd and sudo (session open/close → gssh-agentd pam-session). `optional`
+// + helper exit 0 ⇒ fail-open. If the PAM directory is missing
+// (tests/non-Linux), this is skipped. Existing lines are left untouched.
 func writePAMFiles(opts EnrollOptions, binary string) error {
 	if info, err := os.Stat(opts.PAMDir); err != nil || !info.IsDir() {
-		return nil //nolint:nilerr // kein PAM-Stack (z. B. nicht-Linux) — bewusst überspringen
+		return nil //nolint:nilerr // no PAM stack (e.g. non-Linux) — deliberately skipped
 	}
 	line := fmt.Sprintf("%s\nsession optional pam_exec.so quiet %s pam-session -state-dir %s\n",
 		pamManagedMarker, binary, opts.StateDir)
 	for _, service := range []string{"sshd", "sudo"} {
 		if err := ensurePAMLine(filepath.Join(opts.PAMDir, service), line); err != nil {
-			return fmt.Errorf("pam-hook %s: %w", service, err)
+			return fmt.Errorf("pam hook %s: %w", service, err)
 		}
 	}
 	return nil
 }
 
-// ensurePAMLine hängt den Hook an, falls die Datei existiert und den Marker noch
-// nicht enthält. Nicht vorhandene Service-Dateien werden übersprungen (nicht jeder
-// Host hat /etc/pam.d/sudo).
+// ensurePAMLine appends the hook if the file exists and does not yet
+// contain the marker. Missing service files are skipped (not every host has
+// /etc/pam.d/sudo).
 func ensurePAMLine(path, line string) error {
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -310,5 +312,5 @@ func ensurePAMLine(path, line string) error {
 	if len(body) > 0 && body[len(body)-1] != '\n' {
 		body = append(body, '\n')
 	}
-	return os.WriteFile(path, append(body, []byte(line)...), 0o644) //nolint:gosec // PAM-Konfiguration, muss lesbar sein
+	return os.WriteFile(path, append(body, []byte(line)...), 0o644) //nolint:gosec // PAM configuration, must be readable
 }

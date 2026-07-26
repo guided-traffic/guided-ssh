@@ -1,26 +1,27 @@
-# ADR-008: REST+JSON; mTLS für Host-Agenten, OIDC für Menschen und CI
+# ADR-008: REST+JSON; mTLS for host agents, OIDC for humans and CI
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Drei Arten von API-Konsumenten mit unterschiedlichem Vertrauensmodell:
-Menschen (CLI/Browser), CI-Jobs (GitLab) und Host-Agenten.
+Three kinds of API consumers with different trust models: humans (CLI/browser),
+CI jobs (GitLab), and host agents.
 
-## Entscheidung
+## Decision
 
-REST + JSON als einheitlicher API-Stil, beschrieben per OpenAPI-Spec (`api/`,
-Single Source of Truth, generierte Clients). Authentifizierung strikt getrennt:
+REST + JSON as the uniform API style, described via an OpenAPI spec (`api/`,
+single source of truth, generated clients). Authentication is strictly separated:
 
-- Menschen: OIDC (Authorization Code + PKCE, Device-Flow als Fallback)
-- CI: GitLab-OIDC-`id_token`, validiert gegen GitLab-JWKS
-- Host-Agenten: mTLS mit host-gebundenem Client-Zertifikat
+- Humans: OIDC (Authorization Code + PKCE, device flow as fallback)
+- CI: GitLab OIDC `id_token`, validated against GitLab's JWKS
+- Host agents: mTLS with a host-bound client certificate
 
-## Konsequenzen
+## Consequences
 
-- Getrennte Auth-Pfade ⇒ getrennte Angriffsflächen und klare Policy-Zuordnung
-  (User-Grants vs. CI-Grants vs. Host-Scope).
-- Kein gRPC: einfaches Debugging, UI und CLI nutzen dieselbe API; OpenAPI
-  generiert Angular- und Go-Clients.
-- mTLS erfordert Zertifikatsrotation für Agenten (Phase 10) — bewusst eingepreist.
+- Separate auth paths mean separate attack surfaces and clear policy
+  assignment (user grants vs. CI grants vs. host scope).
+- No gRPC: simple debugging, UI and CLI use the same API; OpenAPI generates
+  Angular and Go clients.
+- mTLS requires certificate rotation for agents (Phase 10) — deliberately
+  budgeted for.

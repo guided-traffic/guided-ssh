@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CreateHost legt einen Host an und füllt ID und Zeitstempel.
+// CreateHost creates a host and fills in the ID and timestamp.
 func (s *Store) CreateHost(ctx context.Context, h *Host) error {
 	created, err := queryOne[Host](ctx, s.pool, `
 		INSERT INTO hosts (name, public_key, enrolled_at, last_seen_at)
@@ -22,22 +22,22 @@ func (s *Store) CreateHost(ctx context.Context, h *Host) error {
 	return nil
 }
 
-// GetHost liefert einen Host per ID.
+// GetHost returns a host by ID.
 func (s *Store) GetHost(ctx context.Context, id uuid.UUID) (*Host, error) {
 	return queryOne[Host](ctx, s.pool, `SELECT * FROM hosts WHERE id = $1`, id)
 }
 
-// GetHostByName liefert einen Host per Name.
+// GetHostByName returns a host by name.
 func (s *Store) GetHostByName(ctx context.Context, name string) (*Host, error) {
 	return queryOne[Host](ctx, s.pool, `SELECT * FROM hosts WHERE name = $1`, name)
 }
 
-// ListHosts liefert alle Hosts.
+// ListHosts returns all hosts.
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	return queryAll[Host](ctx, s.pool, `SELECT * FROM hosts ORDER BY name`)
 }
 
-// UpdateHost aktualisiert die veränderlichen Felder eines Hosts.
+// UpdateHost updates the mutable fields of a host.
 func (s *Store) UpdateHost(ctx context.Context, h *Host) error {
 	updated, err := queryOne[Host](ctx, s.pool, `
 		UPDATE hosts
@@ -52,12 +52,12 @@ func (s *Store) UpdateHost(ctx context.Context, h *Host) error {
 	return nil
 }
 
-// DeleteHost entfernt einen Host (Tags kaskadieren).
+// DeleteHost removes a host (tags cascade).
 func (s *Store) DeleteHost(ctx context.Context, id uuid.UUID) error {
 	return s.execAffectingOne(ctx, `DELETE FROM hosts WHERE id = $1`, id)
 }
 
-// SetHostTags ersetzt die Tags eines Hosts atomar.
+// SetHostTags atomically replaces the tags of a host.
 func (s *Store) SetHostTags(ctx context.Context, hostID uuid.UUID, tags map[string]string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM host_tags WHERE host_id = $1`, hostID); err != nil {
@@ -70,16 +70,16 @@ func (s *Store) SetHostTags(ctx context.Context, hostID uuid.UUID, tags map[stri
 	})
 }
 
-// HostDetailed ist ein Host inklusive Tags und Ablauf des zuletzt
-// ausgestellten Host-Zertifikats (für die Web-UI, Phase 8).
+// HostDetailed is a host including tags and the expiry of the most
+// recently issued host certificate (for the web UI, phase 8).
 type HostDetailed struct {
 	Host
 	Tags            map[string]string `db:"tags"`
 	CertValidBefore *time.Time        `db:"cert_valid_before"`
 }
 
-// ListHostsDetailed liefert alle Hosts inklusive Tags und dem spätesten
-// valid_before ihrer Host-Zertifikate (NULL, wenn noch keines ausgestellt wurde).
+// ListHostsDetailed returns all hosts including tags and the latest
+// valid_before of their host certificates (NULL if none has been issued yet).
 func (s *Store) ListHostsDetailed(ctx context.Context) ([]HostDetailed, error) {
 	return queryAll[HostDetailed](ctx, s.pool, `
 		SELECT h.*,
@@ -92,7 +92,7 @@ func (s *Store) ListHostsDetailed(ctx context.Context) ([]HostDetailed, error) {
 		ORDER BY h.name`)
 }
 
-// GetHostTags liefert die Tags eines Hosts.
+// GetHostTags returns the tags of a host.
 func (s *Store) GetHostTags(ctx context.Context, hostID uuid.UUID) (map[string]string, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT key, value FROM host_tags WHERE host_id = $1`, hostID)

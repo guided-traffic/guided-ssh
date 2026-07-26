@@ -11,15 +11,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Audit-Events für Grant-Änderungen (Phase 6): jede Mutation ist einem Actor
-// zuordenbar und wird transaktional mit der Änderung geschrieben.
+// Audit events for grant changes (phase 6): every mutation is attributable
+// to an actor and is written transactionally along with the change.
 const (
 	EventGrantCreated = "grant.created"
 	EventGrantUpdated = "grant.updated"
 	EventGrantDeleted = "grant.deleted"
 )
 
-// grantAuditEvent baut das Audit-Event zu einer Grant-Änderung.
+// grantAuditEvent builds the audit event for a grant change.
 func grantAuditEvent(eventType, actor string, g *AccessGrant) (*AuditEvent, error) {
 	payload, err := json.Marshal(map[string]any{
 		"grant_id":             g.ID,
@@ -35,8 +35,8 @@ func grantAuditEvent(eventType, actor string, g *AccessGrant) (*AuditEvent, erro
 	return &AuditEvent{EventType: eventType, Actor: actor, Payload: payload}, nil
 }
 
-// createGrantTx legt eine Zugriffsregel innerhalb der Transaktion an und
-// schreibt das Audit-Event.
+// createGrantTx creates an access rule within the transaction and writes
+// the audit event.
 func createGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *AccessGrant) error {
 	if g.TagSelector == nil {
 		g.TagSelector = map[string]string{}
@@ -57,28 +57,28 @@ func createGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *AccessGrant)
 	return insertAuditEvent(ctx, tx, event)
 }
 
-// CreateGrant legt eine Zugriffsregel an (füllt ID und Zeitstempel) und
-// schreibt transaktional ein Audit-Event mit dem Actor.
+// CreateGrant creates an access rule (fills in the ID and timestamp) and
+// writes an audit event with the actor transactionally.
 func (s *Store) CreateGrant(ctx context.Context, actor string, g *AccessGrant) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return createGrantTx(ctx, tx, actor, g)
 	})
 }
 
-// GetGrant liefert eine Zugriffsregel per ID.
+// GetGrant returns an access rule by ID.
 func (s *Store) GetGrant(ctx context.Context, id uuid.UUID) (*AccessGrant, error) {
 	return queryOne[AccessGrant](ctx, s.pool, `SELECT * FROM access_grants WHERE id = $1`, id)
 }
 
-// GrantWithGroup ist eine Zugriffsregel inklusive Gruppenname und -Issuer
-// (für API/CLI, wo Gruppen per Name statt UUID angesprochen werden).
+// GrantWithGroup is an access rule including group name and issuer
+// (for the API/CLI, where groups are addressed by name rather than UUID).
 type GrantWithGroup struct {
 	AccessGrant
 	GroupName   string `db:"group_name"`
 	GroupIssuer string `db:"group_issuer"`
 }
 
-// GetGrantDetailed liefert eine Zugriffsregel inklusive Gruppeninfo.
+// GetGrantDetailed returns an access rule including group info.
 func (s *Store) GetGrantDetailed(ctx context.Context, id uuid.UUID) (*GrantWithGroup, error) {
 	return queryOne[GrantWithGroup](ctx, s.pool, `
 		SELECT g.*, gr.name AS group_name, gr.issuer AS group_issuer
@@ -87,7 +87,7 @@ func (s *Store) GetGrantDetailed(ctx context.Context, id uuid.UUID) (*GrantWithG
 		WHERE g.id = $1`, id)
 }
 
-// ListGrantsDetailed liefert alle Zugriffsregeln inklusive Gruppeninfo.
+// ListGrantsDetailed returns all access rules including group info.
 func (s *Store) ListGrantsDetailed(ctx context.Context) ([]GrantWithGroup, error) {
 	return queryAll[GrantWithGroup](ctx, s.pool, `
 		SELECT g.*, gr.name AS group_name, gr.issuer AS group_issuer
@@ -96,12 +96,12 @@ func (s *Store) ListGrantsDetailed(ctx context.Context) ([]GrantWithGroup, error
 		ORDER BY gr.name, g.created_at, g.id`)
 }
 
-// ListGrants liefert alle Zugriffsregeln.
+// ListGrants returns all access rules.
 func (s *Store) ListGrants(ctx context.Context) ([]AccessGrant, error) {
 	return queryAll[AccessGrant](ctx, s.pool, `SELECT * FROM access_grants ORDER BY created_at, id`)
 }
 
-// ListGrantsForGroups liefert alle Zugriffsregeln der angegebenen Gruppen.
+// ListGrantsForGroups returns all access rules of the given groups.
 func (s *Store) ListGrantsForGroups(ctx context.Context, groupIDs []uuid.UUID) ([]AccessGrant, error) {
 	return queryAll[AccessGrant](ctx, s.pool, `
 		SELECT * FROM access_grants
@@ -109,9 +109,8 @@ func (s *Store) ListGrantsForGroups(ctx context.Context, groupIDs []uuid.UUID) (
 		ORDER BY created_at, id`, groupIDs)
 }
 
-// ListGrantsForUser liefert alle Zugriffsregeln, die über eine
-// Gruppenmitgliedschaft für diesen Benutzer gelten (Auswertung bei
-// Zertifikatsausstellung).
+// ListGrantsForUser returns all access rules that apply to this user via a
+// group membership (evaluated during certificate issuance).
 func (s *Store) ListGrantsForUser(ctx context.Context, userID uuid.UUID) ([]AccessGrant, error) {
 	return queryAll[AccessGrant](ctx, s.pool, `
 		SELECT g.* FROM access_grants g
@@ -120,15 +119,15 @@ func (s *Store) ListGrantsForUser(ctx context.Context, userID uuid.UUID) ([]Acce
 		ORDER BY g.created_at, g.id`, userID)
 }
 
-// UpdateGrant aktualisiert die veränderlichen Felder einer Zugriffsregel und
-// schreibt transaktional ein Audit-Event mit dem Actor.
+// UpdateGrant updates the mutable fields of an access rule and writes an
+// audit event with the actor transactionally.
 func (s *Store) UpdateGrant(ctx context.Context, actor string, g *AccessGrant) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return updateGrantTx(ctx, tx, actor, g)
 	})
 }
 
-// updateGrantTx aktualisiert eine Zugriffsregel innerhalb der Transaktion.
+// updateGrantTx updates an access rule within the transaction.
 func updateGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *AccessGrant) error {
 	if g.TagSelector == nil {
 		g.TagSelector = map[string]string{}
@@ -150,15 +149,15 @@ func updateGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *AccessGrant)
 	return insertAuditEvent(ctx, tx, event)
 }
 
-// DeleteGrant entfernt eine Zugriffsregel und schreibt transaktional ein
-// Audit-Event mit dem Actor.
+// DeleteGrant removes an access rule and writes an audit event with the
+// actor transactionally.
 func (s *Store) DeleteGrant(ctx context.Context, actor string, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return deleteGrantTx(ctx, tx, actor, id)
 	})
 }
 
-// deleteGrantTx entfernt eine Zugriffsregel innerhalb der Transaktion.
+// deleteGrantTx removes an access rule within the transaction.
 func deleteGrantTx(ctx context.Context, tx pgx.Tx, actor string, id uuid.UUID) error {
 	deleted, err := queryOne[AccessGrant](ctx, tx,
 		`DELETE FROM access_grants WHERE id = $1 RETURNING *`, id)
@@ -172,28 +171,28 @@ func deleteGrantTx(ctx context.Context, tx pgx.Tx, actor string, id uuid.UUID) e
 	return insertAuditEvent(ctx, tx, event)
 }
 
-// ErrInvalidGrantSpec: eine deklarative Zugriffsregel ist unvollständig oder
-// widersprüchlich (Client-Fehler, kein technischer Fehler).
-var ErrInvalidGrantSpec = errors.New("ungültige grant-spezifikation")
+// ErrInvalidGrantSpec: a declarative access rule is incomplete or
+// contradictory (client error, not a technical error).
+var ErrInvalidGrantSpec = errors.New("invalid grant specification")
 
-// GrantSpec ist eine deklarative Zugriffsregel (YAML-Import/Apply): die
-// Gruppe wird per Name referenziert und bei Bedarf angelegt.
+// GrantSpec is a declarative access rule (YAML import/apply): the group is
+// referenced by name and created if needed.
 type GrantSpec struct {
-	// Group ist der Gruppenname im IdP.
+	// Group is the group name in the IdP.
 	Group string
-	// Issuer der Gruppe; leer ⇒ DefaultIssuer des Aufrufs.
+	// Issuer of the group; empty ⇒ the call's DefaultIssuer.
 	Issuer string
-	// TagSelector muss Teilmenge der Host-Tags sein (leer = alle Hosts).
+	// TagSelector must be a subset of the host tags (empty = all hosts).
 	TagSelector map[string]string
-	// Principals sind die lokalen Ziel-Benutzer auf den Hosts.
+	// Principals are the local target users on the hosts.
 	Principals []string
-	// Sudo markiert den Grant für sudo-Berechtigung (Durchsetzung Phase 9).
+	// Sudo marks the grant for sudo authorization (enforced in phase 9).
 	Sudo bool
-	// MaxValiditySeconds ist die maximale Zertifikatslaufzeit.
+	// MaxValiditySeconds is the maximum certificate validity.
 	MaxValiditySeconds int64
 }
 
-// ApplyResult fasst einen deklarativen Grant-Abgleich zusammen.
+// ApplyResult summarizes a declarative grant reconciliation.
 type ApplyResult struct {
 	Created   int `json:"created"`
 	Updated   int `json:"updated"`
@@ -201,8 +200,8 @@ type ApplyResult struct {
 	Unchanged int `json:"unchanged"`
 }
 
-// grantKey identifiziert einen Grant für den deklarativen Abgleich:
-// Issuer + Gruppenname + kanonischer Tag-Selektor (JSON sortiert Map-Keys).
+// grantKey identifies a grant for the declarative reconciliation:
+// issuer + group name + canonical tag selector (JSON sorts map keys).
 func grantKey(issuer, group string, selector map[string]string) (string, error) {
 	if selector == nil {
 		selector = map[string]string{}
@@ -214,12 +213,12 @@ func grantKey(issuer, group string, selector map[string]string) (string, error) 
 	return issuer + "\x00" + group + "\x00" + string(canonical), nil
 }
 
-// ApplyGrants gleicht den Grant-Bestand deklarativ mit specs ab (GitOps):
-// Grants werden über (Issuer, Gruppe, Tag-Selektor) identifiziert — neue
-// werden angelegt, abweichende aktualisiert, nicht mehr deklarierte gelöscht.
-// Unbekannte Gruppen werden angelegt (der IdP-Sync verknüpft Mitglieder,
-// sobald die Gruppe dort existiert). Alles läuft in einer Transaktion; jede
-// Änderung erzeugt ein Audit-Event mit dem Actor.
+// ApplyGrants reconciles the grant inventory with specs declaratively
+// (GitOps): grants are identified by (issuer, group, tag selector) — new
+// ones are created, differing ones updated, ones no longer declared are
+// deleted. Unknown groups are created (the IdP sync links members once the
+// group exists there). Everything runs in one transaction; every change
+// produces an audit event with the actor.
 func (s *Store) ApplyGrants(ctx context.Context, actor, defaultIssuer string, specs []GrantSpec) (*ApplyResult, error) {
 	result := &ApplyResult{}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -250,7 +249,7 @@ func (s *Store) ApplyGrants(ctx context.Context, actor, defaultIssuer string, sp
 				return err
 			}
 			if seen[key] {
-				return fmt.Errorf("store: %w: grant %d (gruppe %q): doppelter eintrag für gruppe und tag-selektor",
+				return fmt.Errorf("store: %w: grant %d (group %q): duplicate entry for group and tag selector",
 					ErrInvalidGrantSpec, i+1, spec.Group)
 			}
 			seen[key] = true
@@ -277,9 +276,9 @@ func (s *Store) ApplyGrants(ctx context.Context, actor, defaultIssuer string, sp
 	return result, nil
 }
 
-// grantsByKey gruppiert den Grant-Bestand nach Abgleich-Schlüssel; mehrere
-// Grants pro Schlüssel sind Duplikate — der älteste wird Update-Kandidat,
-// der Rest wird beim Abgleich gelöscht.
+// grantsByKey groups the grant inventory by reconciliation key; multiple
+// grants per key are duplicates — the oldest becomes the update candidate,
+// the rest are deleted during reconciliation.
 func grantsByKey(existing []GrantWithGroup) (map[string][]GrantWithGroup, error) {
 	byKey := map[string][]GrantWithGroup{}
 	for _, grant := range existing {
@@ -292,8 +291,9 @@ func grantsByKey(existing []GrantWithGroup) (map[string][]GrantWithGroup, error)
 	return byKey, nil
 }
 
-// applySpecTx wendet eine einzelne Spec gegen den Bestand an: vorhandener
-// Grant wird aktualisiert (Duplikate gelöscht), fehlender samt Gruppe angelegt.
+// applySpecTx applies a single spec against the inventory: an existing
+// grant is updated (duplicates deleted), a missing one is created along
+// with its group.
 func applySpecTx(ctx context.Context, tx pgx.Tx, actor, issuer string, spec GrantSpec, candidates []GrantWithGroup, result *ApplyResult) error {
 	if len(candidates) == 0 {
 		group, err := ensureGroupTx(ctx, tx, issuer, spec.Group)
@@ -338,29 +338,29 @@ func applySpecTx(ctx context.Context, tx pgx.Tx, actor, issuer string, spec Gran
 	return nil
 }
 
-// validateGrantSpec prüft Pflichtfelder einer deklarativen Zugriffsregel;
-// Verstöße wrappen ErrInvalidGrantSpec (Client-Fehler).
+// validateGrantSpec checks the required fields of a declarative access
+// rule; violations wrap ErrInvalidGrantSpec (client error).
 func validateGrantSpec(index int, issuer string, spec GrantSpec) error {
 	fail := func(reason string) error {
-		return fmt.Errorf("store: %w: grant %d (gruppe %q): %s",
+		return fmt.Errorf("store: %w: grant %d (group %q): %s",
 			ErrInvalidGrantSpec, index+1, spec.Group, reason)
 	}
 	if spec.Group == "" {
-		return fail("gruppe fehlt")
+		return fail("group is missing")
 	}
 	if issuer == "" {
-		return fail("issuer fehlt (weder im grant noch als default gesetzt)")
+		return fail("issuer is missing (set neither on the grant nor as a default)")
 	}
 	if len(spec.Principals) == 0 {
-		return fail("principals fehlen")
+		return fail("principals are missing")
 	}
 	if spec.MaxValiditySeconds <= 0 {
-		return fail("max_validity muss größer 0 sein")
+		return fail("max_validity must be greater than 0")
 	}
 	return nil
 }
 
-// ensureGroupTx löst eine Gruppe per Issuer+Name auf und legt sie bei Bedarf an.
+// ensureGroupTx resolves a group by issuer+name and creates it if needed.
 func ensureGroupTx(ctx context.Context, tx pgx.Tx, issuer, name string) (*Group, error) {
 	group, err := queryOne[Group](ctx, tx,
 		`SELECT * FROM groups WHERE issuer = $1 AND name = $2`, issuer, name)

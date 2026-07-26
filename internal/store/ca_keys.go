@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CreateCAKey legt einen CA-Key an und füllt ID und Zeitstempel.
-// Leerer State wird zu "active".
+// CreateCAKey creates a CA key and fills in the ID and timestamp.
+// An empty state defaults to "active".
 func (s *Store) CreateCAKey(ctx context.Context, k *CAKey) error {
 	if k.State == "" {
 		k.State = CAKeyStateActive
@@ -27,28 +27,28 @@ func (s *Store) CreateCAKey(ctx context.Context, k *CAKey) error {
 	return nil
 }
 
-// GetCAKey liefert einen CA-Key per ID.
+// GetCAKey returns a CA key by ID.
 func (s *Store) GetCAKey(ctx context.Context, id uuid.UUID) (*CAKey, error) {
 	return queryOne[CAKey](ctx, s.pool, `SELECT * FROM ca_keys WHERE id = $1`, id)
 }
 
-// ListCAKeys liefert alle CA-Keys eines Zwecks, neueste zuerst.
+// ListCAKeys returns all CA keys of a purpose, newest first.
 func (s *Store) ListCAKeys(ctx context.Context, purpose string) ([]CAKey, error) {
 	return queryAll[CAKey](ctx, s.pool, `
 		SELECT * FROM ca_keys WHERE purpose = $1
 		ORDER BY created_at DESC, id`, purpose)
 }
 
-// ListActiveCAKeys liefert alle nicht ausgemusterten CA-Keys eines Zwecks
-// (active + retiring — beide gehören ins verteilte CA-Bundle).
+// ListActiveCAKeys returns all non-retired CA keys of a purpose
+// (active + retiring — both belong in the distributed CA bundle).
 func (s *Store) ListActiveCAKeys(ctx context.Context, purpose string) ([]CAKey, error) {
 	return queryAll[CAKey](ctx, s.pool, `
 		SELECT * FROM ca_keys WHERE purpose = $1 AND state <> 'retired'
 		ORDER BY created_at DESC, id`, purpose)
 }
 
-// UpdateCAKeyState setzt den Zustand eines CA-Keys; bei "retired" wird
-// retired_at gestempelt.
+// UpdateCAKeyState sets the state of a CA key; when set to "retired",
+// retired_at is stamped.
 func (s *Store) UpdateCAKeyState(ctx context.Context, id uuid.UUID, state string) (*CAKey, error) {
 	return queryOne[CAKey](ctx, s.pool, `
 		UPDATE ca_keys

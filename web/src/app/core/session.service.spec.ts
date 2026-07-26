@@ -7,9 +7,9 @@ import { AuthSession } from '../api/models';
 import { SessionService } from './session.service';
 
 /**
- * init() darf niemals unbehandelt rejecten: Fehler (Server down, BFF nicht
- * konfiguriert ⇒ 503) landen im error-Signal, checking endet — die UI zeigt
- * eine Fehlermeldung statt ewig zu hängen.
+ * init() must never reject unhandled: errors (server down, BFF not
+ * configured ⇒ 503) end up in the error signal, checking ends — the UI
+ * shows an error message instead of hanging forever.
  */
 describe('SessionService.init', () => {
   const setup = (me: () => unknown) => {
@@ -19,7 +19,7 @@ describe('SessionService.init', () => {
     return TestBed.inject(SessionService);
   };
 
-  it('übernimmt Benutzername und Rollen aus /v1/auth/me', async () => {
+  it('adopts username and roles from /v1/auth/me', async () => {
     const session: AuthSession = {
       authenticated: true,
       username: 'alice',
@@ -36,7 +36,7 @@ describe('SessionService.init', () => {
     expect(service.error()).toBe('');
   });
 
-  it('bleibt ohne Session abgemeldet und ohne Fehler', async () => {
+  it('stays signed out without a session and without an error', async () => {
     const service = setup(() => of({ authenticated: false } as AuthSession));
     await service.init();
     expect(service.authenticated()).toBe(false);
@@ -45,7 +45,7 @@ describe('SessionService.init', () => {
     expect(service.error()).toBe('');
   });
 
-  it('meldet Fehler statt zu rejecten, wenn /v1/auth/me fehlschlägt', async () => {
+  it('reports an error instead of rejecting when /v1/auth/me fails', async () => {
     const service = setup(() => throwError(() => new Error('503')));
     await expect(service.init()).resolves.toBeUndefined();
     expect(service.checking()).toBe(false);
@@ -53,7 +53,7 @@ describe('SessionService.init', () => {
     expect(service.error()).not.toBe('');
   });
 
-  it('init ist idempotent — mehrfacher Aufruf (App + Guard) fragt nur einmal an', async () => {
+  it('init is idempotent — multiple calls (app + guard) only fetch once', async () => {
     let calls = 0;
     const service = setup(() => {
       calls++;

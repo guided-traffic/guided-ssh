@@ -19,8 +19,9 @@ import (
 	"time"
 )
 
-// testPKI baut eine Wegwerf-PKI (CA, Server-Zertifikat, Client-Zertifikat)
-// und legt das Client-Material wie nach einem Enrollment ins State-Verzeichnis.
+// testPKI builds a throwaway PKI (CA, server certificate, client certificate)
+// and places the client material into the state directory as it would be
+// after an enrollment.
 func testPKI(t *testing.T, stateDir string) (serverTLS tls.Certificate, caPEM []byte) {
 	t.Helper()
 	caPub, caPriv, err := ed25519.GenerateKey(rand.Reader)
@@ -93,8 +94,8 @@ func testPKI(t *testing.T, stateDir string) (serverTLS tls.Certificate, caPEM []
 	return serverTLS, caPEM
 }
 
-// newTestAgentAPI startet einen mTLS-Server mit Agent-Endpunkt-Fakes und
-// liefert den fertig verdrahteten apiClient.
+// newTestAgentAPI starts an mTLS server with agent endpoint fakes and
+// returns the fully wired apiClient.
 func newTestAgentAPI(t *testing.T, handler http.Handler) *apiClient {
 	t.Helper()
 	stateDir := t.TempDir()
@@ -154,44 +155,44 @@ func TestAPIClientRoundtrip(t *testing.T) {
 	}
 }
 
-func TestAPIClientFehlerfaelle(t *testing.T) {
+func TestAPIClientErrorCases(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/agent/renew", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]string{}) // kein certificate
+		_ = json.NewEncoder(w).Encode(map[string]string{}) // no certificate
 	})
 	mux.HandleFunc("GET /v1/agent/principals", func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "host unbekannt", http.StatusUnauthorized)
+		http.Error(w, "unknown host", http.StatusUnauthorized)
 	})
 	mux.HandleFunc("GET /v1/agent/bundle/user", func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "kaputt", http.StatusInternalServerError)
+		http.Error(w, "broken", http.StatusInternalServerError)
 	})
 	client := newTestAgentAPI(t, mux)
 	ctx := context.Background()
 
 	if _, err := client.Renew(ctx, "key"); err == nil {
-		t.Error("renew ohne zertifikat: fehler erwartet")
+		t.Error("renew without certificate: expected error")
 	}
 	if _, err := client.Principals(ctx, "deploy"); err == nil {
-		t.Error("principals 401: fehler erwartet")
+		t.Error("principals 401: expected error")
 	}
 	if _, err := client.Bundle(ctx); err == nil {
-		t.Error("bundle 500: fehler erwartet")
+		t.Error("bundle 500: expected error")
 	}
 }
 
-func TestNewAPIClientFehlendesMaterial(t *testing.T) {
+func TestNewAPIClientMissingMaterial(t *testing.T) {
 	if _, err := newAPIClient(&Config{AgentURL: "https://x"}, Paths{StateDir: t.TempDir()}); err == nil {
-		t.Fatal("fehler erwartet (kein mtls-material)")
+		t.Fatal("expected error (no mtls material)")
 	}
-	// Zertifikat + Key da, aber kaputte Server-CA.
+	// Certificate + key present, but broken server CA.
 	stateDir := t.TempDir()
 	testPKI(t, stateDir)
 	paths := Paths{StateDir: stateDir}
-	if err := os.WriteFile(paths.ServerCAFile(), []byte("kein pem"), 0o600); err != nil {
+	if err := os.WriteFile(paths.ServerCAFile(), []byte("not pem"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := newAPIClient(&Config{AgentURL: "https://x"}, paths); err == nil {
-		t.Fatal("fehler erwartet (kaputte ca)")
+		t.Fatal("expected error (broken ca)")
 	}
 }
 
@@ -202,16 +203,16 @@ func TestRunReloadCommand(t *testing.T) {
 	d.cfg.ReloadCommand = "touch " + marker
 	d.runReloadCommand()
 	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("reload-kommando lief nicht: %v", err)
+		t.Errorf("reload command did not run: %v", err)
 	}
-	// Fehlerpfad: Kommando schlägt fehl (nur Logging, kein Panik).
+	// Error path: command fails (logging only, no panic).
 	d.cfg.ReloadCommand = "false"
 	d.runReloadCommand()
 }
 
 func TestLoadCache(t *testing.T) {
 	d := newTestDaemon(t, &fakeAPI{})
-	// Gültiger Cache wird geladen.
+	// A valid cache gets loaded.
 	entry := map[string]cacheEntry{"deploy": {Principals: []string{"alice"}, FetchedAt: time.Now()}}
 	raw, _ := json.Marshal(entry)
 	if err := os.WriteFile(d.paths.CacheFile(), raw, 0o600); err != nil {
@@ -222,10 +223,10 @@ func TestLoadCache(t *testing.T) {
 	got := d.cache["deploy"]
 	d.mu.Unlock()
 	if len(got.Principals) != 1 {
-		t.Errorf("cache nicht geladen: %+v", got)
+		t.Errorf("cache not loaded: %+v", got)
 	}
-	// Kaputter Cache wird ignoriert.
-	if err := os.WriteFile(d.paths.CacheFile(), []byte("müll"), 0o600); err != nil {
+	// A broken cache is ignored.
+	if err := os.WriteFile(d.paths.CacheFile(), []byte("garbage"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	d.loadCache()

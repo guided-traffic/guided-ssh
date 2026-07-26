@@ -15,8 +15,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
 
-// Run führt das CLI aus und liefert den Exit-Code: 0 ok, 1 Fehler, 2
-// Aufruffehler; bei status bedeutet 1 „kein gültiges Zertifikat" (skriptbar).
+// Run executes the CLI and returns the exit code: 0 ok, 1 error, 2 usage
+// error; for status, 1 means "no valid certificate" (scriptable).
 func Run(stdout, stderr io.Writer, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -46,42 +46,42 @@ func Run(stdout, stderr io.Writer, args []string) int {
 		usage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "gssh: unbekanntes kommando %q\n\n", command)
+		fmt.Fprintf(stderr, "gssh: unknown command %q\n\n", command)
 		usage(stderr)
 		return 2
 	}
 }
 
-// usage gibt die Kommandoübersicht aus.
+// usage prints the command overview.
 func usage(w io.Writer) {
-	fmt.Fprint(w, `gssh — zertifikatsbasierter ssh-zugriff (guided-ssh)
+	fmt.Fprint(w, `gssh — certificate-based ssh access (guided-ssh)
 
-kommandos:
-  login [--device] [--validity 8h] [--if-needed] [--config pfad]
-        per sso anmelden; schlüsselpaar und zertifikat landen nur im ssh-agent
+commands:
+  login [--device] [--validity 8h] [--if-needed] [--config path]
+        sign in via sso; key pair and certificate go only into the ssh-agent
   ci-login [--api-url url] [--token-env GSSH_CI_TOKEN] [--validity 1h] [--pin-sha256 pin]
-        gitlab-ci: job-token (id_tokens) gegen ci-zertifikat tauschen und in
-        den ssh-agent des jobs laden; api-url auch via GSSH_API_URL
-  ssh <ssh-argumente…>
-        wie ssh, stellt vorher ein gültiges zertifikat sicher (auto-login);
-        konfigurationspfad ggf. über GSSH_CONFIG
-  status [--config pfad]
-        konfiguration und zertifikatsstatus; exit-code 1 ohne gültiges zertifikat
+        gitlab ci: exchange the job token (id_tokens) for a ci certificate and
+        load it into the job's ssh-agent; api-url also via GSSH_API_URL
+  ssh <ssh-arguments…>
+        like ssh, but first ensures a valid certificate (auto-login);
+        config path optionally via GSSH_CONFIG
+  status [--config path]
+        show configuration and certificate status; exit code 1 without a valid certificate
   logout
-        guided-ssh-einträge aus dem ssh-agent entfernen
-  integrate [--hosts muster]
-        ssh_config-schnipsel für transparentes natives ssh ausgeben
+        remove guided-ssh entries from the ssh-agent
+  integrate [--hosts pattern]
+        print an ssh_config snippet for transparent native ssh
   version
-        version ausgeben
+        print the version
 `)
 }
 
-// loadConfigCmd lädt die Konfiguration für ein Kommando; bei fehlender Datei
-// gibt es zusätzlich einen Hinweis mit Beispielinhalt.
+// loadConfigCmd loads the configuration for a command; if the file is
+// missing, it also prints a hint with example content.
 func loadConfigCmd(flagValue string, stderr io.Writer) (*Config, bool) {
 	path := ResolveConfigPath(flagValue)
 	if path == "" {
-		fmt.Fprintln(stderr, "gssh: kein konfigurationspfad ermittelbar (HOME nicht gesetzt?)")
+		fmt.Fprintln(stderr, "gssh: could not determine a configuration path (HOME not set?)")
 		return nil, false
 	}
 	cfg, err := LoadConfig(path)
@@ -95,14 +95,14 @@ func loadConfigCmd(flagValue string, stderr io.Writer) (*Config, bool) {
 	return cfg, true
 }
 
-// runLoginCmd behandelt gssh login.
+// runLoginCmd handles gssh login.
 func runLoginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "pfad zur konfigurationsdatei")
-	device := fs.Bool("device", false, "device-flow statt browser (headless)")
-	validity := fs.Duration("validity", 0, "gewünschte laufzeit (0 = default)")
-	ifNeeded := fs.Bool("if-needed", false, "nur anmelden, wenn kein gültiges zertifikat im agenten liegt")
+	configPath := fs.String("config", "", "path to the configuration file")
+	device := fs.Bool("device", false, "device flow instead of browser (headless)")
+	validity := fs.Duration("validity", 0, "desired validity (0 = default)")
+	ifNeeded := fs.Bool("if-needed", false, "only sign in if no valid certificate is in the agent")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -112,15 +112,15 @@ func runLoginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	opts := loginOptions{device: *device, validity: *validity, ifNeeded: *ifNeeded}
 	if err := login(ctx, cfg, opts, stdout, stderr); err != nil {
-		fmt.Fprintf(stderr, "gssh: login fehlgeschlagen: %v\n", err)
+		fmt.Fprintf(stderr, "gssh: login failed: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-// runSSHCmd behandelt gssh ssh. Bewusst kein FlagSet: alle Argumente gehen
-// unverändert an natives ssh; der Konfigurationspfad kommt aus GSSH_CONFIG
-// bzw. dem Standardpfad.
+// runSSHCmd handles gssh ssh. Deliberately no FlagSet: all arguments go
+// unchanged to native ssh; the config path comes from GSSH_CONFIG or the
+// default path.
 func runSSHCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	cfg, ok := loadConfigCmd("", stderr)
 	if !ok {
@@ -133,20 +133,20 @@ func runSSHCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	return 0
 }
 
-// runStatusCmd behandelt gssh status: Konfiguration ist optional (bester
-// Aufwand), der Agent-Zustand entscheidet über den Exit-Code.
+// runStatusCmd handles gssh status: configuration is optional (best
+// effort), the agent state decides the exit code.
 func runStatusCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "pfad zur konfigurationsdatei")
+	configPath := fs.String("config", "", "path to the configuration file")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	path := ResolveConfigPath(*configPath)
 	if cfg, err := LoadConfig(path); err == nil {
-		fmt.Fprintf(stdout, "konfiguration: %s (api %s, issuer %s)\n", path, cfg.APIURL, cfg.Issuer)
+		fmt.Fprintf(stdout, "configuration: %s (api %s, issuer %s)\n", path, cfg.APIURL, cfg.Issuer)
 	} else {
-		fmt.Fprintf(stdout, "konfiguration: %s (fehler: %v)\n", path, err)
+		fmt.Fprintf(stdout, "configuration: %s (error: %v)\n", path, err)
 	}
 
 	ag, conn, err := connectAgent()
@@ -161,19 +161,19 @@ func runStatusCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if len(certs) == 0 {
-		fmt.Fprintln(stdout, "kein guided-ssh-zertifikat im agenten — anmelden mit: gssh login")
+		fmt.Fprintln(stdout, "no guided-ssh certificate in the agent — sign in with: gssh login")
 		return 1
 	}
 	valid := false
 	for _, cert := range certs {
-		state := "abgelaufen"
+		state := "expired"
 		if certValid(cert, 0) {
-			state = fmt.Sprintf("gültig bis %s (noch %s)",
+			state = fmt.Sprintf("valid until %s (%s remaining)",
 				certTime(cert.ValidBefore).Format(time.RFC3339),
 				time.Until(certTime(cert.ValidBefore)).Round(time.Minute))
 			valid = true
 		}
-		fmt.Fprintf(stdout, "zertifikat %s — principals %s — %s\n",
+		fmt.Fprintf(stdout, "certificate %s — principals %s — %s\n",
 			cert.KeyId, strings.Join(cert.ValidPrincipals, ", "), state)
 	}
 	if !valid {
@@ -182,7 +182,7 @@ func runStatusCmd(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runLogoutCmd behandelt gssh logout.
+// runLogoutCmd handles gssh logout.
 func runLogoutCmd(stdout, stderr io.Writer) int {
 	ag, conn, err := connectAgent()
 	if err != nil {
@@ -195,22 +195,22 @@ func runLogoutCmd(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gssh: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "abgemeldet (%d agent-einträge entfernt)\n", removed)
+	fmt.Fprintf(stdout, "signed out (%d agent entries removed)\n", removed)
 	return 0
 }
 
-// runIntegrateCmd gibt den ssh_config-Schnipsel für transparente Integration
-// aus: Match exec triggert den Auto-Login, natives ssh bleibt der Transport.
+// runIntegrateCmd prints the ssh_config snippet for transparent integration:
+// Match exec triggers the auto-login, native ssh remains the transport.
 func runIntegrateCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh integrate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	hosts := fs.String("hosts", "*", "host-muster, für das der auto-login greifen soll")
+	hosts := fs.String("hosts", "*", "host pattern the auto-login should apply to")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	fmt.Fprintf(stdout, `# guided-ssh: auto-login bei fehlendem zertifikat (an ~/.ssh/config anhängen)
-# hinweis: ssh unterdrückt die ausgaben des match-exec-kommandos; der
-# browser-flow funktioniert trotzdem. headless vorher: gssh login --device
+	fmt.Fprintf(stdout, `# guided-ssh: auto-login on missing certificate (append to ~/.ssh/config)
+# note: ssh suppresses the output of the match-exec command; the browser
+# flow still works. for headless use beforehand: gssh login --device
 Match host "%s" exec "gssh login --if-needed"
 `, *hosts)
 	return 0

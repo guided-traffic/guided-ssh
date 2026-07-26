@@ -1,24 +1,26 @@
-# ADR-006: Signer-Interface — Software-Key zuerst, KMS/HSM später
+# ADR-006: Signer interface — software key first, KMS/HSM later
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Der CA-Schlüssel ist das wertvollste Asset (siehe Bedrohungsmodell). Produktionsreife
-verlangt KMS/HSM; für Entwicklung und frühe Phasen wäre das unverhältnismäßig schwer.
+The CA key is the most valuable asset (see the threat model). Production
+readiness calls for KMS/HSM; for development and early phases, that would be
+disproportionately heavyweight.
 
-## Entscheidung
+## Decision
 
-Signieren läuft ausschließlich über ein Interface
-(`Sign(ctx, CertRequest) (*ssh.Certificate, error)`). Erste Implementierung:
-Software-Signer mit Ed25519-Key, verschlüsselt at rest (Schlüssel aus K8s-Secret).
-Später (Phase 10): PKCS#11-Signer (deckt HSM und SoftHSM-Tests ab), Cloud-KMS nach Bedarf.
-Benutzer- und Host-CA verwenden getrennte Schlüssel.
+Signing goes exclusively through an interface
+(`Sign(ctx, CertRequest) (*ssh.Certificate, error)`). First implementation:
+software signer with an Ed25519 key, encrypted at rest (key from a K8s
+secret). Later (Phase 10): PKCS#11 signer (covers HSM and SoftHSM tests),
+cloud KMS as needed. User and host CAs use separate keys.
 
-## Konsequenzen
+## Consequences
 
-- Backend-Wechsel ohne Umbau der CA-Logik; Policy- und Audit-Pfad identisch für alle Signer.
-- Jede Signatur-Operation wird unabhängig vom Backend auditiert.
-- Software-Signer bleibt dauerhaft für Entwicklung/Tests; Produktions-Deployments
-  konfigurieren das Backend über Helm-Values.
+- Backend can be swapped without reworking the CA logic; the policy and audit
+  path is identical for all signers.
+- Every signing operation is audited independently of the backend.
+- The software signer remains available permanently for development/tests;
+  production deployments configure the backend via Helm values.

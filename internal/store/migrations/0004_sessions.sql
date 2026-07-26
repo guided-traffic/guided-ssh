@@ -1,10 +1,10 @@
 -- +goose Up
 
--- Host-Sessions (Phase 9): der Host-Agent meldet Session-Start/-Ende über die
--- mTLS-Agent-API. cert_serial korreliert die Session mit dem ausgestellten
--- Zertifikat (certificates.serial) und damit mit dem Nutzer; user_id wird bei
--- der Korrelation aufgelöst (NULL, wenn der Serial unbekannt/nicht auflösbar ist,
--- z. B. lokale Konten ohne guided-ssh-Zertifikat). ended_at NULL = aktive Session.
+-- Host sessions (phase 9): the host agent reports session start/end via the
+-- mTLS agent API. cert_serial correlates the session with the issued
+-- certificate (certificates.serial) and thereby with the user; user_id is
+-- resolved during correlation (NULL if the serial is unknown/unresolvable,
+-- e.g. local accounts without a guided-ssh certificate). ended_at NULL = active session.
 CREATE TABLE host_sessions (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     host_id     uuid        NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
@@ -20,7 +20,7 @@ CREATE TABLE host_sessions (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- Aktive Sessions je Host (Dashboards, Korrelation von Session-Ende auf -Start).
+-- Active sessions per host (dashboards, correlating session end with start).
 CREATE INDEX host_sessions_active_idx ON host_sessions (host_id, local_user, tty)
     WHERE ended_at IS NULL;
 CREATE INDEX host_sessions_cert_serial_idx ON host_sessions (cert_serial);

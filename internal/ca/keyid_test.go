@@ -28,7 +28,7 @@ func TestCIPrincipals(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := CIPrincipals(c.project); !slices.Equal(got, c.want) {
-			t.Errorf("CIPrincipals(%q) = %v, erwartet %v", c.project, got, c.want)
+			t.Errorf("CIPrincipals(%q) = %v, expected %v", c.project, got, c.want)
 		}
 	}
 }

@@ -5,7 +5,7 @@ export interface Grant {
   created_at: string;
 
   /**
-   * Gruppenname im IdP
+   * Group name in the IdP
    */
   group: string;
   id: string;

@@ -1,7 +1,7 @@
 @if (session.checking()) {
   <div class="splash">
     <mat-spinner diameter="36" />
-    <span class="dim">Anmeldung wird geprüft …</span>
+    <span class="dim">Checking sign-in …</span>
   </div>
 } @else if (session.error()) {
   <div class="login-stage">
@@ -10,7 +10,7 @@
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
       <p class="login-claim error-text">{{ session.error() }}</p>
-      <button mat-stroked-button (click)="reload()">Erneut versuchen</button>
+      <button mat-stroked-button (click)="reload()">Try again</button>
     </div>
   </div>
 } @else if (!session.authenticated()) {
@@ -20,10 +20,10 @@
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
       <p class="login-claim">
-        Zertifikatsbasierte SSH-Zugriffe — Hosts, Zugriffsregeln und Audit an einem Ort.
+        Certificate-based SSH access — hosts, access rules, and audit in one place.
       </p>
       <button mat-flat-button class="login-button" (click)="session.login()">
-        Mit SSO anmelden
+        Sign in with SSO
       </button>
     </div>
   </div>
@@ -34,10 +34,10 @@
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
       <p class="login-claim">
-        Angemeldet als <strong>{{ session.username() }}</strong> — aber keiner
-        UI-Rolle zugeordnet. Bitte Admin-, Auditor- oder Read-only-Gruppe anfragen.
+        Signed in as <strong>{{ session.username() }}</strong> — but not assigned
+        to any UI role. Please request the admin, auditor, or read-only group.
       </p>
-      <button mat-stroked-button (click)="session.logout()">Abmelden</button>
+      <button mat-stroked-button (click)="session.logout()">Sign out</button>
     </div>
   </div>
 } @else {
@@ -51,13 +51,13 @@
           <mat-icon svgIcon="hosts" />Hosts
         </a>
         <a routerLink="/grants" routerLinkActive="active">
-          <mat-icon svgIcon="key" />Zugriffsregeln
+          <mat-icon svgIcon="key" />Access rules
         </a>
         <a routerLink="/ci" routerLinkActive="active">
-          <mat-icon svgIcon="ci" />CI &amp; Service-Accounts
+          <mat-icon svgIcon="ci" />CI &amp; Service Accounts
         </a>
         <a routerLink="/users" routerLinkActive="active">
-          <mat-icon svgIcon="users" />Benutzer &amp; Gruppen
+          <mat-icon svgIcon="users" />Users &amp; Groups
         </a>
         @if (session.isAuditor()) {
           <a routerLink="/audit" routerLinkActive="active">
@@ -72,7 +72,7 @@
             @if (session.isAdmin()) { Admin } @else if (session.isAuditor()) { Auditor } @else { Read-only }
           </span>
         </div>
-        <button mat-icon-button aria-label="Abmelden" title="Abmelden" (click)="session.logout()">
+        <button mat-icon-button aria-label="Sign out" title="Sign out" (click)="session.logout()">
           <mat-icon svgIcon="logout" />
         </button>
       </div>

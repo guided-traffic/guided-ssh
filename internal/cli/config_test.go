@@ -25,13 +25,13 @@ validity: 8h
 		t.Fatalf("LoadConfig: %v", err)
 	}
 	if cfg.APIURL != "https://gssh.example.com/" || cfg.Issuer != "https://idp.example.com/realms/x" {
-		t.Errorf("unerwartete urls: %+v", cfg)
+		t.Errorf("unexpected urls: %+v", cfg)
 	}
 	if cfg.ClientID != "gssh-cli" || len(cfg.Scopes) != 2 {
-		t.Errorf("client_id/scopes falsch: %+v", cfg)
+		t.Errorf("client_id/scopes wrong: %+v", cfg)
 	}
 	if time.Duration(cfg.Validity) != 8*time.Hour {
-		t.Errorf("validity = %v, erwartet 8h", time.Duration(cfg.Validity))
+		t.Errorf("validity = %v, expected 8h", time.Duration(cfg.Validity))
 	}
 	decoded, err := cfg.Pin()
 	if err != nil || len(decoded) != sha256.Size {
@@ -39,48 +39,48 @@ validity: 8h
 	}
 }
 
-func TestLoadConfigFehlt(t *testing.T) {
-	_, err := LoadConfig(filepath.Join(t.TempDir(), "nix.yaml"))
+func TestLoadConfigMissing(t *testing.T) {
+	_, err := LoadConfig(filepath.Join(t.TempDir(), "missing.yaml"))
 	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("erwartete os.ErrNotExist, bekam %v", err)
+		t.Fatalf("expected os.ErrNotExist, got %v", err)
 	}
 }
 
-func TestLoadConfigPflichtfelder(t *testing.T) {
+func TestLoadConfigRequiredFields(t *testing.T) {
 	path := writeConfig(t, "api_url: https://gssh.example.com\n")
 	_, err := LoadConfig(path)
 	if err == nil {
-		t.Fatal("fehler erwartet (pflichtfelder)")
+		t.Fatal("error expected (required fields)")
 	}
 	for _, want := range []string{"issuer", "client_id"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("fehler %q nennt %q nicht", err, want)
+			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
 }
 
-func TestLoadConfigKaputtesYAML(t *testing.T) {
-	path := writeConfig(t, "api_url: [kein\nstring\n")
+func TestLoadConfigBrokenYAML(t *testing.T) {
+	path := writeConfig(t, "api_url: [invalid\nstring\n")
 	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("fehler erwartet (yaml)")
+		t.Fatal("error expected (yaml)")
 	}
 }
 
-func TestLoadConfigUngueltigeDauer(t *testing.T) {
-	path := writeConfig(t, "api_url: a\nissuer: b\nclient_id: c\nvalidity: sofort\n")
+func TestLoadConfigInvalidDuration(t *testing.T) {
+	path := writeConfig(t, "api_url: a\nissuer: b\nclient_id: c\nvalidity: immediately\n")
 	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("fehler erwartet (dauer)")
+		t.Fatal("error expected (duration)")
 	}
 }
 
-func TestLoadConfigUngueltigerPin(t *testing.T) {
+func TestLoadConfigInvalidPin(t *testing.T) {
 	base := "api_url: a\nissuer: b\nclient_id: c\n"
 	for name, pin := range map[string]string{
-		"kein base64":   "pin_sha256: '%%%'",
-		"falsche länge": "pin_sha256: " + base64.StdEncoding.EncodeToString([]byte("kurz")),
+		"not base64":   "pin_sha256: '%%%'",
+		"wrong length": "pin_sha256: " + base64.StdEncoding.EncodeToString([]byte("short")),
 	} {
 		if _, err := LoadConfig(writeConfig(t, base+pin+"\n")); err == nil {
-			t.Errorf("%s: fehler erwartet", name)
+			t.Errorf("%s: error expected", name)
 		}
 	}
 }
@@ -103,13 +103,13 @@ func TestDefaultConfigPathHome(t *testing.T) {
 func TestResolveConfigPath(t *testing.T) {
 	t.Setenv(envConfig, "/env/config.yaml")
 	if got := ResolveConfigPath("/flag/config.yaml"); got != "/flag/config.yaml" {
-		t.Errorf("flag muss gewinnen, bekam %q", got)
+		t.Errorf("flag must win, got %q", got)
 	}
 	if got := ResolveConfigPath(""); got != "/env/config.yaml" {
-		t.Errorf("env muss vor default kommen, bekam %q", got)
+		t.Errorf("env must come before default, got %q", got)
 	}
 	t.Setenv(envConfig, "")
 	if got := ResolveConfigPath(""); !strings.HasSuffix(got, "config.yaml") {
-		t.Errorf("default-pfad fehlt, bekam %q", got)
+		t.Errorf("default path missing, got %q", got)
 	}
 }

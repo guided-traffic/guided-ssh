@@ -16,29 +16,29 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 )
 
-// openBrowser öffnet eine URL im Standard-Browser (in Tests überschrieben).
+// openBrowser opens a URL in the default browser (overridden in tests).
 var openBrowser = func(url string) error {
 	command := "xdg-open"
 	if runtime.GOOS == "darwin" {
 		command = "open"
 	}
-	return exec.Command(command, url).Start() //nolint:gosec // url kommt vom eigenen OIDC-Flow
+	return exec.Command(command, url).Start() //nolint:gosec // url comes from our own OIDC flow
 }
 
-// loginOptions steuern gssh login.
+// loginOptions control gssh login.
 type loginOptions struct {
-	// device erzwingt den Device-Flow (headless, ohne Browser/Callback).
+	// device forces the device flow (headless, no browser/callback).
 	device bool
-	// validity übersteuert die gewünschte Laufzeit (0 = Config/Server-Default).
+	// validity overrides the desired lifetime (0 = config/server default).
 	validity time.Duration
-	// ifNeeded überspringt den Login, solange ein gültiges Zertifikat im
-	// Agenten liegt (Auto-Login für gssh ssh und Match-exec-Integration).
+	// ifNeeded skips the login as long as a valid certificate is in the
+	// agent (auto-login for gssh ssh and the Match-exec integration).
 	ifNeeded bool
 }
 
-// login erzeugt ein ephemerales Ed25519-Schlüsselpaar, holt per OIDC-Flow ein
-// ID-Token, tauscht es am Sign-Endpoint gegen ein Zertifikat und lädt beides
-// ausschließlich in den ssh-agent.
+// login generates an ephemeral Ed25519 key pair, obtains an ID token via
+// the OIDC flow, exchanges it at the sign endpoint for a certificate, and
+// loads both exclusively into the ssh-agent.
 func login(ctx context.Context, cfg *Config, opts loginOptions, stdout, stderr io.Writer) error {
 	ag, conn, err := connectAgent()
 	if err != nil {
@@ -58,11 +58,11 @@ func login(ctx context.Context, cfg *Config, opts loginOptions, stdout, stderr i
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return fmt.Errorf("schlüsselpaar erzeugen: %w", err)
+		return fmt.Errorf("generating key pair: %w", err)
 	}
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
-		return fmt.Errorf("public key konvertieren: %w", err)
+		return fmt.Errorf("converting public key: %w", err)
 	}
 
 	idToken, err := FetchIDToken(ctx, cfg, opts.device, stderr)
@@ -85,14 +85,14 @@ func login(ctx context.Context, cfg *Config, opts loginOptions, stdout, stderr i
 	if err := loadIntoAgent(ag, priv, cert); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "angemeldet: %s — principals %s, gültig bis %s\n",
+	fmt.Fprintf(stdout, "signed in: %s — principals %s, valid until %s\n",
 		cert.KeyId, strings.Join(cert.ValidPrincipals, ", "),
 		certTime(cert.ValidBefore).Format(time.RFC3339))
 	return nil
 }
 
-// FetchIDToken führt den OIDC-Flow aus: Authorization Code + PKCE mit
-// Browser (Default) oder Device-Flow (--device); auch von gssh-admin genutzt.
+// FetchIDToken runs the OIDC flow: authorization code + PKCE with a
+// browser (default) or the device flow (--device); also used by gssh-admin.
 func FetchIDToken(ctx context.Context, cfg *Config, device bool, stderr io.Writer) (string, error) {
 	flow, err := auth.NewFlow(ctx, auth.FlowConfig{
 		IssuerURL: cfg.Issuer,
@@ -104,23 +104,23 @@ func FetchIDToken(ctx context.Context, cfg *Config, device bool, stderr io.Write
 	}
 	if device {
 		return flow.DeviceFlow(ctx, func(uri, code string) {
-			fmt.Fprintf(stderr, "im browser öffnen: %s\ncode eingeben: %s\n", uri, code)
+			fmt.Fprintf(stderr, "open in browser: %s\nenter code: %s\n", uri, code)
 		})
 	}
 	return flow.AuthCodePKCE(ctx, func(url string) error {
-		fmt.Fprintf(stderr, "browser wird geöffnet — falls nicht, url manuell öffnen:\n%s\n", url)
+		fmt.Fprintf(stderr, "opening browser — if it doesn't open, visit this url manually:\n%s\n", url)
 		if err := openBrowser(url); err != nil {
-			// Nicht fatal: die URL steht im Terminal.
-			fmt.Fprintf(stderr, "browser öffnen fehlgeschlagen: %v\n", err)
+			// Not fatal: the URL is shown in the terminal.
+			fmt.Fprintf(stderr, "opening browser failed: %v\n", err)
 		}
 		return nil
 	})
 }
 
-// FetchServiceToken holt ein ID-Token nicht-interaktiv per
-// Client-Credentials-Flow (Service-Account, z. B. der GitOps-Grants-Sync von
-// gssh-admin). clientID leer = client_id der Konfiguration; der IdP-Client
-// braucht den Scope openid, damit die Token-Antwort ein id_token enthält.
+// FetchServiceToken obtains an ID token non-interactively via the
+// client-credentials flow (service account, e.g. gssh-admin's GitOps grants
+// sync). Empty clientID = the configuration's client_id; the IdP client
+// needs the openid scope so the token response includes an id_token.
 func FetchServiceToken(ctx context.Context, cfg *Config, clientID, clientSecret string) (string, error) {
 	if clientID == "" {
 		clientID = cfg.ClientID

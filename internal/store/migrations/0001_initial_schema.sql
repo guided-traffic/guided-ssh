@@ -1,6 +1,6 @@
 -- +goose Up
 
--- Benutzer aus dem IdP (Source of Truth bleibt der IdP, siehe Plan: kein SCIM im MVP).
+-- Users from the IdP (the IdP stays the source of truth, see plan: no SCIM in the MVP).
 CREATE TABLE users (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     issuer     text        NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE host_tags (
     PRIMARY KEY (host_id, key)
 );
 
--- Zugriffsregel: IdP-Gruppe × Tag-Selektor → Principals, sudo, max. Zertifikatslaufzeit.
+-- Access rule: IdP group × tag selector → principals, sudo, max certificate validity.
 CREATE TABLE access_grants (
     id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id             uuid        NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
@@ -64,14 +64,14 @@ CREATE TABLE ca_keys (
     purpose               text        NOT NULL CHECK (purpose IN ('user', 'host')),
     algorithm             text        NOT NULL DEFAULT 'ed25519',
     public_key            text        NOT NULL,
-    -- verschlüsselt at rest (Phase 2); NULL, wenn der Key in einem KMS/HSM liegt (Phase 10)
+    -- encrypted at rest (phase 2); NULL if the key lives in a KMS/HSM instead (phase 10)
     encrypted_private_key bytea,
     state                 text        NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'retiring', 'retired')),
     created_at            timestamptz NOT NULL DEFAULT now(),
     retired_at            timestamptz
 );
 
--- CI-Identitäten (z. B. GitLab-Projekte); claim_matcher bestimmt, welche OIDC-Claims passen müssen.
+-- CI identities (e.g. GitLab projects); claim_matcher determines which OIDC claims must match.
 CREATE TABLE service_accounts (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name          text        NOT NULL UNIQUE,
@@ -83,7 +83,7 @@ CREATE TABLE service_accounts (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
--- Jedes ausgestellte Zertifikat (Benutzer und Host).
+-- Every issued certificate (user and host).
 CREATE TABLE certificates (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     serial             bigint      NOT NULL UNIQUE,
@@ -105,11 +105,11 @@ CREATE TABLE certificates (
 CREATE INDEX certificates_key_id_idx ON certificates (key_id);
 CREATE INDEX certificates_valid_before_idx ON certificates (valid_before);
 
--- Serial-Vergabe für Zertifikate (Phase 2 nutzt sie beim Signieren).
+-- Serial assignment for certificates (phase 2 uses it while signing).
 CREATE SEQUENCE certificate_serial_seq;
 
--- Append-only-Audit-Log; nach Monat partitionierbar (Retention-Konzept: docs/audit-retention.md).
--- Partitionsschlüssel occurred_at muss Teil des Primary Key sein.
+-- Append-only audit log; partitionable by month (retention concept: docs/audit-retention.md).
+-- The partition key occurred_at must be part of the primary key.
 CREATE TABLE audit_events (
     id          bigint GENERATED ALWAYS AS IDENTITY,
     occurred_at timestamptz NOT NULL DEFAULT now(),
@@ -120,14 +120,14 @@ CREATE TABLE audit_events (
 )
 PARTITION BY RANGE (occurred_at);
 
--- Default-Partition fängt alles, solange keine Monatspartitionen angelegt sind.
+-- Default partition catches everything as long as no monthly partitions exist yet.
 CREATE TABLE audit_events_default PARTITION OF audit_events DEFAULT;
 
 CREATE INDEX audit_events_occurred_at_idx ON audit_events (occurred_at);
 CREATE INDEX audit_events_event_type_idx ON audit_events (event_type, occurred_at);
 
--- Append-only-Schutz: UPDATE/DELETE schlagen unabhängig von DB-Grants fehl.
--- Zweite Schutzschicht (kein UPDATE/DELETE-Grant für die App-Rolle): docs/audit-retention.md.
+-- Append-only protection: UPDATE/DELETE fail regardless of DB grants.
+-- Second layer of protection (no UPDATE/DELETE grant for the app role): docs/audit-retention.md.
 -- +goose StatementBegin
 CREATE FUNCTION audit_events_block_mutation() RETURNS trigger
     LANGUAGE plpgsql

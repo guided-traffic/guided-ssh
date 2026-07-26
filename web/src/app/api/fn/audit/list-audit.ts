@@ -14,7 +14,7 @@ export interface ListAudit$Params {
   actor?: string;
 
 /**
- * Teilstring über Actor und Payload
+ * Substring match over actor and payload
  */
   q?: string;
   since?: string;

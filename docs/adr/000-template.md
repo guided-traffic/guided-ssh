@@ -1,16 +1,16 @@
-# ADR-NNN: Titel
+# ADR-NNN: Title
 
-- Status: vorgeschlagen | akzeptiert | abgelöst durch ADR-NNN
-- Datum: JJJJ-MM-TT
+- Status: proposed | accepted | superseded by ADR-NNN
+- Date: YYYY-MM-DD
 
-## Kontext
+## Context
 
-Welches Problem ist zu lösen, welche Kräfte wirken?
+What problem needs to be solved, what forces are at play?
 
-## Entscheidung
+## Decision
 
-Was wird getan — aktiv formuliert.
+What will be done — stated actively.
 
-## Konsequenzen
+## Consequences
 
-Was wird dadurch leichter, was schwerer? Folgekosten, Risiken, Rückbaupfad.
+What becomes easier, what becomes harder as a result? Follow-on costs, risks, rollback path.

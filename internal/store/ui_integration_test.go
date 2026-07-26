@@ -13,8 +13,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// Phase 8: Store-Methoden der Web-UI (Hosts mit Tags/Cert-Ablauf, Benutzer
-// mit Gruppen, Audit-Suche/-Pagination/-Streaming, Service-Account-Not-Aus).
+// Phase 8: store methods of the web UI (hosts with tags/cert expiry, users
+// with groups, audit search/pagination/streaming, service account kill switch).
 
 func TestListHostsDetailed(t *testing.T) {
 	cleanDB(t)
@@ -26,7 +26,7 @@ func TestListHostsDetailed(t *testing.T) {
 	h2 := &store.Host{Name: "db-1"}
 	mustNoErr(t, testStore.CreateHost(ctx, h2))
 
-	// Host-Zertifikate: das späteste valid_before zählt; User-Zertifikate nicht.
+	// Host certificates: the latest valid_before counts; user certificates do not.
 	ca := &store.CAKey{Purpose: store.CertTypeHost, Algorithm: "ed25519", PublicKey: "ca-pk"}
 	mustNoErr(t, testStore.CreateCAKey(ctx, ca))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -54,19 +54,19 @@ func TestListHostsDetailed(t *testing.T) {
 	if len(hosts) != 2 {
 		t.Fatalf("hosts = %d", len(hosts))
 	}
-	// Sortiert nach Name: db-1 vor web-1.
+	// Sorted by name: db-1 before web-1.
 	if hosts[0].Name != "db-1" || hosts[1].Name != "web-1" {
-		t.Fatalf("reihenfolge: %s, %s", hosts[0].Name, hosts[1].Name)
+		t.Fatalf("order: %s, %s", hosts[0].Name, hosts[1].Name)
 	}
 	if len(hosts[0].Tags) != 0 || hosts[0].CertValidBefore != nil {
-		t.Errorf("db-1 ohne tags/cert erwartet: %+v", hosts[0])
+		t.Errorf("expected db-1 without tags/cert: %+v", hosts[0])
 	}
 	web := hosts[1]
 	if web.Tags["env"] != "prod" || web.Tags["role"] != "web" {
 		t.Errorf("tags = %v", web.Tags)
 	}
 	if web.CertValidBefore == nil || !web.CertValidBefore.Equal(now.Add(30*24*time.Hour)) {
-		t.Errorf("cert_valid_before = %v, erwartet max. der host-zertifikate", web.CertValidBefore)
+		t.Errorf("cert_valid_before = %v, want the max of the host certificates", web.CertValidBefore)
 	}
 }
 
@@ -99,14 +99,14 @@ func TestListUsersDetailed(t *testing.T) {
 	}
 }
 
-func TestAuditSearchPaginationUndStreaming(t *testing.T) {
+func TestAuditSearchPaginationAndStreaming(t *testing.T) {
 	cleanDB(t)
 	ctx := context.Background()
 
 	maxBefore, err := testStore.MaxAuditEventID(ctx)
 	mustNoErr(t, err)
 	if maxBefore != 0 {
-		t.Fatalf("max id auf leerer tabelle = %d", maxBefore)
+		t.Fatalf("max id on an empty table = %d", maxBefore)
 	}
 
 	events := []store.AuditEvent{
@@ -118,19 +118,19 @@ func TestAuditSearchPaginationUndStreaming(t *testing.T) {
 		mustNoErr(t, testStore.AppendAuditEvent(ctx, &events[i]))
 	}
 
-	// Suche über Payload (Host) und Actor (Pipeline), case-insensitiv.
+	// Search over payload (host) and actor (pipeline), case-insensitive.
 	byHost, err := testStore.ListAuditEvents(ctx, store.AuditFilter{Search: "WEB-1"})
 	mustNoErr(t, err)
 	if len(byHost) != 1 || byHost[0].ID != events[0].ID {
-		t.Errorf("suche host = %+v", byHost)
+		t.Errorf("search host = %+v", byHost)
 	}
 	byPipeline, err := testStore.ListAuditEvents(ctx, store.AuditFilter{Search: "infra/ansible"})
 	mustNoErr(t, err)
 	if len(byPipeline) != 1 || byPipeline[0].ID != events[1].ID {
-		t.Errorf("suche pipeline = %+v", byPipeline)
+		t.Errorf("search pipeline = %+v", byPipeline)
 	}
 
-	// Pagination: neueste zuerst, Offset überspringt.
+	// Pagination: newest first, offset skips ahead.
 	page, err := testStore.ListAuditEvents(ctx, store.AuditFilter{Limit: 2, Offset: 1})
 	mustNoErr(t, err)
 	if len(page) != 2 || page[0].ID != events[1].ID || page[1].ID != events[0].ID {
@@ -148,7 +148,7 @@ func TestAuditSearchPaginationUndStreaming(t *testing.T) {
 		t.Errorf("count cert_issued = %d", issued)
 	}
 
-	// Streaming: alles nach einer ID, aufsteigend, mit Limit.
+	// Streaming: everything after an ID, ascending, with a limit.
 	after, err := testStore.ListAuditEventsAfter(ctx, events[0].ID, 10)
 	mustNoErr(t, err)
 	if len(after) != 2 || after[0].ID != events[1].ID || after[1].ID != events[2].ID {
@@ -162,7 +162,7 @@ func TestAuditSearchPaginationUndStreaming(t *testing.T) {
 	maxID, err := testStore.MaxAuditEventID(ctx)
 	mustNoErr(t, err)
 	if maxID != events[2].ID {
-		t.Errorf("max id = %d, erwartet %d", maxID, events[2].ID)
+		t.Errorf("max id = %d, want %d", maxID, events[2].ID)
 	}
 }
 
@@ -173,16 +173,16 @@ func TestSetServiceAccountActive(t *testing.T) {
 	sa, err := testStore.EnsureCIServiceAccount(ctx, "https://gitlab.example.com", "infra/ansible")
 	mustNoErr(t, err)
 	if !sa.Active {
-		t.Fatal("neuer service-account nicht aktiv")
+		t.Fatal("new service account is not active")
 	}
 
 	updated, err := testStore.SetServiceAccountActive(ctx, "user:admin@idp", sa.ID, false)
 	mustNoErr(t, err)
 	if updated.Active {
-		t.Error("active nicht auf false gesetzt")
+		t.Error("active was not set to false")
 	}
 
-	// Audit-Event mit Actor in derselben Transaktion.
+	// Audit event with actor in the same transaction.
 	auditEvents, err := testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: store.EventServiceAccountUpdated})
 	mustNoErr(t, err)
 	if len(auditEvents) != 1 || auditEvents[0].Actor != "user:admin@idp" {

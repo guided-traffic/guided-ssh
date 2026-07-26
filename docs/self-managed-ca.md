@@ -6,7 +6,7 @@ in the `ca_keys` table. In **self-managed** mode you generate the keys
 yourself, hand them to the server as mounted files, and the application never
 writes private key material to the database.
 
-Related documents: [Operations manual](betriebshandbuch.md),
+Related documents: [Operations manual](operations-manual.md),
 [Helm chart README](../deploy/helm/guided-ssh/README.md),
 [GitOps reference setup](../deploy/flux-example/README.md).
 

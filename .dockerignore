@@ -1,5 +1,5 @@
-# Build-Kontext klein halten; die Web-UI-Stage installiert Abhängigkeiten
-# selbst (npm ci) und baut dist frisch.
+# Keep the build context small; the web UI stage installs dependencies
+# itself (npm ci) and builds dist fresh.
 web/node_modules
 web/dist
 web/.angular

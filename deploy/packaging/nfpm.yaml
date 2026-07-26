@@ -1,6 +1,6 @@
-# nfpm-Konfiguration für gssh-agentd (deb + rpm).
-# Build: make packages  (erwartet nfpm im PATH und bin/gssh-agentd-linux-<arch>)
-# Umgebungsvariablen: VERSION (SemVer ohne v-Präfix), ARCH (amd64|arm64)
+# nfpm configuration for gssh-agentd (deb + rpm).
+# Build: make packages  (expects nfpm in PATH and bin/gssh-agentd-linux-<arch>)
+# Environment variables: VERSION (SemVer without v prefix), ARCH (amd64|arm64)
 name: gssh-agentd
 arch: ${ARCH}
 platform: linux
@@ -8,20 +8,20 @@ version: ${VERSION}
 section: admin
 maintainer: Guided Traffic <mail@hans-fischer.com>
 description: |
-  guided-ssh Host-Agent: Host-Enrollment, automatische Erneuerung des
-  SSH-Host-Zertifikats, TrustedUserCAKeys-Pflege und
-  AuthorizedPrincipalsCommand-Helper mit Fail-closed-Cache.
+  guided-ssh host agent: host enrollment, automatic renewal of the
+  SSH host certificate, TrustedUserCAKeys maintenance, and an
+  AuthorizedPrincipalsCommand helper with a fail-closed cache.
 homepage: https://github.com/guided-traffic/guided-ssh
 license: Apache-2.0
 contents:
-  # nfpm expandiert Env-Vars in Metadaten (name/arch/version), aber NICHT in
-  # contents[].src-Globs. Darum stellt `make packages` je Arch das passende
-  # Binary unter diesem stabilen Pfad bereit (siehe Makefile-Target packages).
+  # nfpm expands env vars in metadata (name/arch/version), but NOT in
+  # contents[].src globs. That's why `make packages` provides the matching
+  # binary per arch under this stable path (see Makefile target packages).
   - src: bin/pkg/gssh-agentd
     dst: /usr/bin/gssh-agentd
     file_info:
       mode: 0755
-  # Einzige Quelle der Unit: internal/agentdist (von dort auch go:embed).
+  # Single source of the unit: internal/agentdist (also go:embed from there).
   - src: internal/agentdist/gssh-agentd.service
     dst: /lib/systemd/system/gssh-agentd.service
     file_info:

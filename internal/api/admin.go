@@ -16,8 +16,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// AdminStore sind die von der Admin-API benötigten Store-Methoden
-// (*store.Store erfüllt sie; Tests nutzen einen Fake).
+// AdminStore is the set of store methods needed by the admin API
+// (*store.Store satisfies it; tests use a fake).
 type AdminStore interface {
 	ListGrantsDetailed(ctx context.Context) ([]store.GrantWithGroup, error)
 	GetGrantDetailed(ctx context.Context, id uuid.UUID) (*store.GrantWithGroup, error)
@@ -26,7 +26,7 @@ type AdminStore interface {
 	DeleteGrant(ctx context.Context, actor string, id uuid.UUID) error
 	ApplyGrants(ctx context.Context, actor, defaultIssuer string, specs []store.GrantSpec) (*store.ApplyResult, error)
 
-	// CI-Grants (Phase 7).
+	// CI grants (phase 7).
 	ListCIGrants(ctx context.Context) ([]store.CIGrant, error)
 	GetCIGrant(ctx context.Context, id uuid.UUID) (*store.CIGrant, error)
 	CreateCIGrant(ctx context.Context, actor string, g *store.CIGrant) error
@@ -35,8 +35,8 @@ type AdminStore interface {
 	ApplyCIGrants(ctx context.Context, actor string, specs []store.CIGrantSpec) (*store.ApplyResult, error)
 }
 
-// grantJSON ist die API-Repräsentation einer Zugriffsregel; die Gruppe wird
-// per Name + Issuer angesprochen (UUIDs bleiben intern).
+// grantJSON is the API representation of an access grant; the group is
+// addressed by name + issuer (UUIDs stay internal).
 type grantJSON struct {
 	ID                 string            `json:"id"`
 	Group              string            `json:"group"`
@@ -49,25 +49,25 @@ type grantJSON struct {
 	UpdatedAt          time.Time         `json:"updated_at"`
 }
 
-// grantRequest ist der Body von POST/PUT auf Grants.
+// grantRequest is the body of POST/PUT on grants.
 type grantRequest struct {
-	// Group ist der Gruppenname im IdP (Pflicht bei POST).
+	// Group is the group name in the IdP (required on POST).
 	Group string `json:"group,omitempty"`
-	// Issuer der Gruppe; leer ⇒ Issuer des Admin-Tokens.
+	// Issuer of the group; empty ⇒ issuer of the admin token.
 	Issuer      string            `json:"issuer,omitempty"`
 	TagSelector map[string]string `json:"tag_selector,omitempty"`
 	Principals  []string          `json:"principals"`
 	Sudo        bool              `json:"sudo,omitempty"`
-	// MaxValiditySeconds ist die maximale Zertifikatslaufzeit (Pflicht, > 0).
+	// MaxValiditySeconds is the maximum certificate lifetime (required, > 0).
 	MaxValiditySeconds int64 `json:"max_validity_seconds"`
 }
 
-// applyRequest ist der Body von POST /v1/admin/grants/apply.
+// applyRequest is the body of POST /v1/admin/grants/apply.
 type applyRequest struct {
 	Grants []grantRequest `json:"grants"`
 }
 
-// toGrantJSON mappt einen Store-Grant auf die API-Repräsentation.
+// toGrantJSON maps a store grant onto the API representation.
 func toGrantJSON(g *store.GrantWithGroup) grantJSON {
 	return grantJSON{
 		ID:                 g.ID.String(),
@@ -82,15 +82,15 @@ func toGrantJSON(g *store.GrantWithGroup) grantJSON {
 	}
 }
 
-// Rollen der Admin-API (Phase 8): admin schließt auditor ein, auditor
-// schließt readonly ein. Jede Rolle ist an eine IdP-Gruppe gebunden.
+// Roles of the admin API (phase 8): admin includes auditor, auditor
+// includes readonly. Each role is bound to an IdP group.
 const (
 	roleAdmin    = "admin"
 	roleAuditor  = "auditor"
 	roleReadOnly = "readonly"
 )
 
-// adminContext bündelt die Abhängigkeiten der Admin-Handler.
+// adminContext bundles the dependencies of the admin handlers.
 type adminContext struct {
 	store         AdminStore
 	ui            UIStore
@@ -102,21 +102,21 @@ type adminContext struct {
 	auditorGroup  string
 	readonlyGroup string
 	logger        *slog.Logger
-	// rollout gated das Token-Minting genauso wie die öffentlichen
-	// Rollout-Routen; publicBaseURL ist die Basis des install_command
-	// (das Gate garantiert, dass sie gesetzt ist).
+	// rollout gates token minting the same way as the public rollout
+	// routes; publicBaseURL is the base of install_command
+	// (the gate guarantees it is set).
 	rollout       rolloutGate
 	publicBaseURL string
 }
 
-// registerAdminRoutes hängt die Admin-API an den Mux. Ohne OIDC oder ohne
-// eine einzige konfigurierte Rollen-Gruppe antwortet der gesamte Admin-Pfad
-// mit 503 (fail-closed, aber diagnostizierbar).
+// registerAdminRoutes attaches the admin API to the mux. Without OIDC or
+// without a single configured role group, the entire admin path responds
+// with 503 (fail-closed, but diagnosable).
 func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 	anyRole := deps.AdminGroup != "" || deps.AuditorGroup != "" || deps.ReadOnlyGroup != ""
 	if deps.Admin == nil || deps.Verifier == nil || deps.Store == nil || !anyRole {
 		mux.HandleFunc("/v1/admin/", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "admin-api nicht konfiguriert (oidc und rollen-gruppe erforderlich)", http.StatusServiceUnavailable)
+			http.Error(w, "admin api not configured (oidc and role group required)", http.StatusServiceUnavailable)
 		})
 		return
 	}
@@ -149,13 +149,13 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 	registerUIRoutes(mux, admin)
 }
 
-// adminHandler ist ein Handler mit authentifiziertem Admin-Kontext; actor ist
-// die KeyID-Form des Admins (für Audit-Events).
+// adminHandler is a handler with an authenticated admin context; actor is
+// the KeyID form of the admin (for audit events).
 type adminHandler func(w http.ResponseWriter, r *http.Request, claims *auth.Claims, actor string)
 
-// hasRole prüft, ob die Claims die Mindest-Rolle erfüllen; höhere Rollen
-// schließen niedrigere ein. Eine leere Gruppen-Konfiguration vergibt die
-// jeweilige Rolle an niemanden (fail-closed).
+// hasRole checks whether the claims satisfy the minimum role; higher roles
+// include lower ones. An empty group configuration grants the respective
+// role to nobody (fail-closed).
 func (a *adminContext) hasRole(claims *auth.Claims, minRole string) bool {
 	inGroup := func(group string) bool {
 		return group != "" && slices.Contains(claims.Groups, group)
@@ -173,9 +173,9 @@ func (a *adminContext) hasRole(claims *auth.Claims, minRole string) bool {
 	}
 }
 
-// authorized prüft die Authentifizierung (Bearer-Token oder UI-Session),
-// aktiven Benutzer und die Mindest-Rolle (aus den Claims des Logins,
-// konsistent zum Sign-Endpoint).
+// authorized checks authentication (bearer token or UI session), active
+// user, and the minimum role (from the login's claims, consistent with the
+// sign endpoint).
 func (a *adminContext) authorized(minRole string, next adminHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := a.authenticate(w, r)
@@ -183,33 +183,33 @@ func (a *adminContext) authorized(minRole string, next adminHandler) http.Handle
 			return
 		}
 		if _, err := a.mapper.EnsureUser(r.Context(), claims); errors.Is(err, auth.ErrUserInactive) {
-			http.Error(w, "benutzer ist deaktiviert", http.StatusForbidden)
+			http.Error(w, "user is disabled", http.StatusForbidden)
 			return
 		} else if err != nil {
-			a.logger.Error("admin: benutzer-mapping fehlgeschlagen", "subject", claims.Subject, "error", err)
+			a.logger.Error("admin: user mapping failed", "subject", claims.Subject, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		if !a.hasRole(claims, minRole) {
-			a.logger.Info("admin: zugriff verweigert", "subject", claims.Subject, "groups", claims.Groups, "min_role", minRole)
-			http.Error(w, "keine berechtigung (rolle "+minRole+" erforderlich)", http.StatusForbidden)
+			a.logger.Info("admin: access denied", "subject", claims.Subject, "groups", claims.Groups, "min_role", minRole)
+			http.Error(w, "not authorized (role "+minRole+" required)", http.StatusForbidden)
 			return
 		}
 		next(w, r, claims, ca.UserKeyID(claims.Subject, claims.Issuer))
 	}
 }
 
-// authenticate ermittelt die Claims des Aufrufers: Bearer-Token (CLI,
-// Service-Accounts) oder Session-Cookie der Web-UI. Cookie-Requests müssen
-// zusätzlich den X-Requested-With-Header tragen — ein Custom-Header, den
-// Cross-Site-Formulare nicht setzen können (CSRF-Schutz zusätzlich zu
-// SameSite=Lax). false ⇒ Fehlerantwort wurde geschrieben.
+// authenticate determines the caller's claims: bearer token (CLI, service
+// accounts) or the web UI's session cookie. Cookie requests must
+// additionally carry the X-Requested-With header — a custom header that
+// cross-site forms cannot set (CSRF protection in addition to
+// SameSite=Lax). false ⇒ an error response was written.
 func (a *adminContext) authenticate(w http.ResponseWriter, r *http.Request) (*auth.Claims, bool) {
 	if rawToken, ok := bearerToken(r); ok {
 		claims, err := a.verifier.Verify(r.Context(), rawToken)
 		if err != nil {
-			a.logger.Info("admin: token abgelehnt", "error", err)
-			http.Error(w, "id-token ungültig", http.StatusUnauthorized)
+			a.logger.Info("admin: token rejected", "error", err)
+			http.Error(w, "id token invalid", http.StatusUnauthorized)
 			return nil, false
 		}
 		return claims, true
@@ -217,29 +217,29 @@ func (a *adminContext) authenticate(w http.ResponseWriter, r *http.Request) (*au
 	if a.uiAuth != nil {
 		if claims := a.uiAuth.sessionFromRequest(r); claims != nil {
 			if r.Header.Get("X-Requested-With") == "" {
-				a.logger.Info("admin: session-request ohne x-requested-with abgelehnt", "path", r.URL.Path)
-				http.Error(w, "x-requested-with-header fehlt", http.StatusForbidden)
+				a.logger.Info("admin: session request without x-requested-with rejected", "path", r.URL.Path)
+				http.Error(w, "x-requested-with header missing", http.StatusForbidden)
 				return nil, false
 			}
 			return claims, true
 		}
 	}
-	http.Error(w, "authorization fehlt (bearer-token oder ui-session)", http.StatusUnauthorized)
+	http.Error(w, "authorization missing (bearer token or ui session)", http.StatusUnauthorized)
 	return nil, false
 }
 
-// writeJSON schreibt eine JSON-Antwort mit Statuscode.
+// writeJSON writes a JSON response with a status code.
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-// grantID parst die Grant-ID aus dem Pfad; false ⇒ 404 wurde geschrieben.
+// grantID parses the grant ID from the path; false ⇒ 404 was written.
 func grantID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "grant-id ungültig", http.StatusNotFound)
+		http.Error(w, "grant id invalid", http.StatusNotFound)
 		return uuid.Nil, false
 	}
 	return id, true
@@ -248,7 +248,7 @@ func grantID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 func (a *adminContext) handleListGrants(w http.ResponseWriter, r *http.Request, _ *auth.Claims, _ string) {
 	grants, err := a.store.ListGrantsDetailed(r.Context())
 	if err != nil {
-		a.logger.Error("admin: grants laden fehlgeschlagen", "error", err)
+		a.logger.Error("admin: loading grants failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -266,11 +266,11 @@ func (a *adminContext) handleGetGrant(w http.ResponseWriter, r *http.Request, _ 
 	}
 	grant, err := a.store.GetGrantDetailed(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "grant nicht gefunden", http.StatusNotFound)
+		http.Error(w, "grant not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		a.logger.Error("admin: grant laden fehlgeschlagen", "id", id, "error", err)
+		a.logger.Error("admin: loading grant failed", "id", id, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -280,19 +280,19 @@ func (a *adminContext) handleGetGrant(w http.ResponseWriter, r *http.Request, _ 
 func (a *adminContext) handleCreateGrant(w http.ResponseWriter, r *http.Request, claims *auth.Claims, actor string) {
 	var req grantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "request-body ungültig", http.StatusBadRequest)
+		http.Error(w, "request body invalid", http.StatusBadRequest)
 		return
 	}
 	if req.Group == "" {
-		http.Error(w, "group fehlt", http.StatusBadRequest)
+		http.Error(w, "group missing", http.StatusBadRequest)
 		return
 	}
 	if len(req.Principals) == 0 {
-		http.Error(w, "principals fehlen", http.StatusBadRequest)
+		http.Error(w, "principals missing", http.StatusBadRequest)
 		return
 	}
 	if req.MaxValiditySeconds <= 0 {
-		http.Error(w, "max_validity_seconds muss größer 0 sein", http.StatusBadRequest)
+		http.Error(w, "max_validity_seconds must be greater than 0", http.StatusBadRequest)
 		return
 	}
 	issuer := req.Issuer
@@ -301,7 +301,7 @@ func (a *adminContext) handleCreateGrant(w http.ResponseWriter, r *http.Request,
 	}
 	group, err := a.ensureGroup(r.Context(), issuer, req.Group)
 	if err != nil {
-		a.logger.Error("admin: gruppe auflösen fehlgeschlagen", "group", req.Group, "error", err)
+		a.logger.Error("admin: resolving group failed", "group", req.Group, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -316,7 +316,7 @@ func (a *adminContext) handleCreateGrant(w http.ResponseWriter, r *http.Request,
 		grant.TagSelector = map[string]string{}
 	}
 	if err := a.store.CreateGrant(r.Context(), actor, grant); err != nil {
-		a.logger.Error("admin: grant anlegen fehlgeschlagen", "group", req.Group, "error", err)
+		a.logger.Error("admin: creating grant failed", "group", req.Group, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -332,24 +332,24 @@ func (a *adminContext) handleUpdateGrant(w http.ResponseWriter, r *http.Request,
 	}
 	var req grantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "request-body ungültig", http.StatusBadRequest)
+		http.Error(w, "request body invalid", http.StatusBadRequest)
 		return
 	}
 	if len(req.Principals) == 0 {
-		http.Error(w, "principals fehlen", http.StatusBadRequest)
+		http.Error(w, "principals missing", http.StatusBadRequest)
 		return
 	}
 	if req.MaxValiditySeconds <= 0 {
-		http.Error(w, "max_validity_seconds muss größer 0 sein", http.StatusBadRequest)
+		http.Error(w, "max_validity_seconds must be greater than 0", http.StatusBadRequest)
 		return
 	}
 	current, err := a.store.GetGrantDetailed(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "grant nicht gefunden", http.StatusNotFound)
+		http.Error(w, "grant not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		a.logger.Error("admin: grant laden fehlgeschlagen", "id", id, "error", err)
+		a.logger.Error("admin: loading grant failed", "id", id, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -361,7 +361,7 @@ func (a *adminContext) handleUpdateGrant(w http.ResponseWriter, r *http.Request,
 	grant.Sudo = req.Sudo
 	grant.MaxValiditySeconds = req.MaxValiditySeconds
 	if err := a.store.UpdateGrant(r.Context(), actor, &grant); err != nil {
-		a.logger.Error("admin: grant aktualisieren fehlgeschlagen", "id", id, "error", err)
+		a.logger.Error("admin: updating grant failed", "id", id, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -377,11 +377,11 @@ func (a *adminContext) handleDeleteGrant(w http.ResponseWriter, r *http.Request,
 	}
 	err := a.store.DeleteGrant(r.Context(), actor, id)
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "grant nicht gefunden", http.StatusNotFound)
+		http.Error(w, "grant not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		a.logger.Error("admin: grant löschen fehlgeschlagen", "id", id, "error", err)
+		a.logger.Error("admin: deleting grant failed", "id", id, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -391,7 +391,7 @@ func (a *adminContext) handleDeleteGrant(w http.ResponseWriter, r *http.Request,
 func (a *adminContext) handleApplyGrants(w http.ResponseWriter, r *http.Request, claims *auth.Claims, actor string) {
 	var req applyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "request-body ungültig", http.StatusBadRequest)
+		http.Error(w, "request body invalid", http.StatusBadRequest)
 		return
 	}
 	specs := make([]store.GrantSpec, 0, len(req.Grants))
@@ -411,15 +411,15 @@ func (a *adminContext) handleApplyGrants(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if err != nil {
-		a.logger.Error("admin: apply fehlgeschlagen", "error", err)
+		a.logger.Error("admin: apply failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
-// ensureGroup löst eine Gruppe per Issuer+Name auf und legt sie bei Bedarf an
-// (der IdP-Sync verknüpft Mitglieder, sobald die Gruppe dort existiert).
+// ensureGroup resolves a group by issuer+name and creates it if needed
+// (the IdP sync links members as soon as the group exists there).
 func (a *adminContext) ensureGroup(ctx context.Context, issuer, name string) (*store.Group, error) {
 	group, err := a.groups.GetGroupByName(ctx, issuer, name)
 	if err == nil {

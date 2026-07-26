@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// socketTokenHeader trägt das Token der schreibenden Socket-Endpunkte.
-const socketTokenHeader = "X-GSSH-Token" //nolint:gosec // Header-Name, kein Secret
+// socketTokenHeader carries the token of the writable socket endpoints.
+const socketTokenHeader = "X-GSSH-Token" //nolint:gosec // header name, not a secret
 
-// newSocketClient baut einen HTTP-Client, der über den Unix-Socket des Daemons
-// spricht (die Adresse im Request-URL ist ein Platzhalter).
+// newSocketClient builds an HTTP client that talks over the daemon's unix
+// socket (the address in the request URL is a placeholder).
 func newSocketClient(socketPath string, timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
@@ -30,8 +30,8 @@ func newSocketClient(socketPath string, timeout time.Duration) *http.Client {
 	}
 }
 
-// readSocketToken liest das Socket-Token aus dem State-Verzeichnis (leer, wenn
-// es fehlt — Session-Audit ist dann nicht aktiviert).
+// readSocketToken reads the socket token from the state directory (empty if
+// it is missing — session audit is then not enabled).
 func readSocketToken(stateDir string) string {
 	raw, err := os.ReadFile(Paths{StateDir: stateDir}.SocketTokenFile())
 	if err != nil {
@@ -40,8 +40,9 @@ func readSocketToken(stateDir string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// postSocketJSON sendet body als JSON an den Daemon-Socket-Pfad mit Token (der
-// client ist bereits an den Socket gebunden, die URL-Host ist ein Platzhalter).
+// postSocketJSON sends body as JSON to the daemon socket path with the
+// token (the client is already bound to the socket, the URL host is a
+// placeholder).
 func postSocketJSON(ctx context.Context, client *http.Client, token, path string, body any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -55,7 +56,7 @@ func postSocketJSON(ctx context.Context, client *http.Client, token, path string
 	req.Header.Set(socketTokenHeader, token)
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("gssh-agentd nicht erreichbar: %w", err)
+		return fmt.Errorf("gssh-agentd unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -65,8 +66,8 @@ func postSocketJSON(ctx context.Context, client *http.Client, token, path string
 	return nil
 }
 
-// sessionEventWire ist das Draht-/Spool-Format eines Session-/sudo-Ereignisses;
-// es entspricht exakt dem Body von POST /v1/agent/sessions (Serial 0 = keiner).
+// sessionEventWire is the wire/spool format of a session/sudo event; it
+// matches exactly the body of POST /v1/agent/sessions (serial 0 = none).
 type sessionEventWire struct {
 	Phase      string    `json:"phase"`
 	Service    string    `json:"service"`
@@ -80,8 +81,8 @@ type sessionEventWire struct {
 	OccurredAt time.Time `json:"occurred_at"`
 }
 
-// authRecord meldet dem Daemon einen frisch am Login gesehenen Serial (aus den
-// sshd-Tokens %s/%i), damit er eine nachfolgende Session-Open korrelieren kann.
+// authRecord reports to the daemon a serial freshly seen at login (from the
+// sshd tokens %s/%i), so it can correlate a following session open.
 type authRecord struct {
 	User   string `json:"user"`
 	Serial int64  `json:"serial"`

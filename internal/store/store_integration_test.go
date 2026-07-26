@@ -23,7 +23,7 @@ import (
 var (
 	testDSN   string
 	testStore *store.Store
-	rawPool   *pgxpool.Pool // für Setup/Asserts an der Repository-API vorbei
+	rawPool   *pgxpool.Pool // for setup/asserts that bypass the repository API
 )
 
 func TestMain(m *testing.M) {
@@ -48,7 +48,7 @@ func run(m *testing.M) (int, error) {
 		defer func() { _ = testcontainers.TerminateContainer(ctr) }()
 	}
 	if err != nil {
-		return 1, fmt.Errorf("postgres-container: %w", err)
+		return 1, fmt.Errorf("postgres container: %w", err)
 	}
 
 	testDSN, err = ctr.ConnectionString(ctx, "sslmode=disable")
@@ -73,8 +73,8 @@ func run(m *testing.M) (int, error) {
 	return m.Run(), nil
 }
 
-// cleanDB leert alle Tabellen (TRUNCATE feuert keine Row-Trigger, umgeht also
-// bewusst den Append-only-Schutz — nur für Test-Isolation).
+// cleanDB empties all tables (TRUNCATE does not fire row triggers, so it
+// deliberately bypasses the append-only protection — for test isolation only).
 func cleanDB(t *testing.T) {
 	t.Helper()
 	_, err := rawPool.Exec(context.Background(), `
@@ -89,28 +89,28 @@ func cleanDB(t *testing.T) {
 func mustNoErr(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("unerwarteter Fehler: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func wantNotFound(t *testing.T, err error) {
 	t.Helper()
 	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("ErrNotFound erwartet, bekommen: %v", err)
+		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
 }
 
 func TestMigrateIdempotent(t *testing.T) {
-	// Migrationen liefen bereits in TestMain — erneuter Lauf muss ein No-op sein.
+	// Migrations already ran in TestMain — running again must be a no-op.
 	mustNoErr(t, store.Migrate(context.Background(), testDSN))
 }
 
 func TestNewInvalidDSN(t *testing.T) {
 	if _, err := store.New(context.Background(), "postgres://invalid@localhost:1/nope?connect_timeout=1"); err == nil {
-		t.Fatal("Fehler erwartet")
+		t.Fatal("expected an error")
 	}
 	if err := store.Migrate(context.Background(), "postgres://invalid@localhost:1/nope?connect_timeout=1"); err == nil {
-		t.Fatal("Fehler erwartet")
+		t.Fatal("expected an error")
 	}
 }
 
@@ -121,7 +121,7 @@ func TestUsersCRUD(t *testing.T) {
 	u := &store.User{Issuer: "https://idp.example", Subject: "sub-1", Username: "alice", Email: "alice@example.com", Active: true}
 	mustNoErr(t, testStore.CreateUser(ctx, u))
 	if u.ID == uuid.Nil || u.CreatedAt.IsZero() {
-		t.Fatal("ID/CreatedAt nicht gefüllt")
+		t.Fatal("ID/CreatedAt not filled")
 	}
 
 	got, err := testStore.GetUser(ctx, u.ID)
@@ -133,7 +133,7 @@ func TestUsersCRUD(t *testing.T) {
 	got, err = testStore.GetUserBySubject(ctx, "https://idp.example", "sub-1")
 	mustNoErr(t, err)
 	if got.ID != u.ID {
-		t.Fatal("GetUserBySubject liefert falschen Benutzer")
+		t.Fatal("GetUserBySubject returned the wrong user")
 	}
 
 	uid := int32(4200)
@@ -141,13 +141,13 @@ func TestUsersCRUD(t *testing.T) {
 	u.Active = false
 	mustNoErr(t, testStore.UpdateUser(ctx, u))
 	if u.UID == nil || *u.UID != 4200 || u.Active {
-		t.Fatalf("Update nicht übernommen: %+v", u)
+		t.Fatalf("update not applied: %+v", u)
 	}
 
 	all, err := testStore.ListUsers(ctx)
 	mustNoErr(t, err)
 	if len(all) != 1 {
-		t.Fatalf("ListUsers = %d Einträge", len(all))
+		t.Fatalf("ListUsers = %d entries", len(all))
 	}
 
 	_, err = testStore.GetUser(ctx, uuid.New())
@@ -174,22 +174,22 @@ func TestUserGroups(t *testing.T) {
 	groups, err := testStore.ListUserGroups(ctx, u.ID)
 	mustNoErr(t, err)
 	if len(groups) != 2 {
-		t.Fatalf("erwartet 2 Gruppen, bekommen %d", len(groups))
+		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
 
-	// Sync ersetzt den Zielzustand komplett.
+	// Sync fully replaces the target state.
 	mustNoErr(t, testStore.SetUserGroups(ctx, u.ID, []uuid.UUID{g2.ID}))
 	groups, err = testStore.ListUserGroups(ctx, u.ID)
 	mustNoErr(t, err)
 	if len(groups) != 1 || groups[0].Name != "devs" {
-		t.Fatalf("erwartet [devs], bekommen %+v", groups)
+		t.Fatalf("expected [devs], got %+v", groups)
 	}
 
 	mustNoErr(t, testStore.SetUserGroups(ctx, u.ID, nil))
 	groups, err = testStore.ListUserGroups(ctx, u.ID)
 	mustNoErr(t, err)
 	if len(groups) != 0 {
-		t.Fatalf("erwartet 0 Gruppen, bekommen %d", len(groups))
+		t.Fatalf("expected 0 groups, got %d", len(groups))
 	}
 }
 
@@ -210,7 +210,7 @@ func TestGroupsCRUD(t *testing.T) {
 	got, err = testStore.GetGroupByName(ctx, "idp", "ops")
 	mustNoErr(t, err)
 	if got.ID != g.ID {
-		t.Fatal("GetGroupByName liefert falsche Gruppe")
+		t.Fatal("GetGroupByName returned the wrong group")
 	}
 
 	all, err := testStore.ListGroups(ctx)
@@ -236,7 +236,7 @@ func TestHostsCRUDAndTags(t *testing.T) {
 	got, err := testStore.GetHostByName(ctx, "web-1.example")
 	mustNoErr(t, err)
 	if got.ID != h.ID {
-		t.Fatal("GetHostByName liefert falschen Host")
+		t.Fatal("GetHostByName returned the wrong host")
 	}
 	if _, err := testStore.GetHost(ctx, h.ID); err != nil {
 		t.Fatal(err)
@@ -249,22 +249,22 @@ func TestHostsCRUDAndTags(t *testing.T) {
 	h.LastSeenAt = &now
 	mustNoErr(t, testStore.UpdateHost(ctx, h))
 	if h.PublicKey == nil || h.EnrolledAt == nil || h.LastSeenAt == nil {
-		t.Fatalf("Update nicht übernommen: %+v", h)
+		t.Fatalf("update not applied: %+v", h)
 	}
 
 	mustNoErr(t, testStore.SetHostTags(ctx, h.ID, map[string]string{"role": "web", "env": "prod"}))
 	tags, err := testStore.GetHostTags(ctx, h.ID)
 	mustNoErr(t, err)
 	if len(tags) != 2 || tags["role"] != "web" || tags["env"] != "prod" {
-		t.Fatalf("Tags = %v", tags)
+		t.Fatalf("tags = %v", tags)
 	}
 
-	// Ersetzen, nicht mergen.
+	// Replaces, does not merge.
 	mustNoErr(t, testStore.SetHostTags(ctx, h.ID, map[string]string{"role": "db"}))
 	tags, err = testStore.GetHostTags(ctx, h.ID)
 	mustNoErr(t, err)
 	if len(tags) != 1 || tags["role"] != "db" {
-		t.Fatalf("Tags = %v", tags)
+		t.Fatalf("tags = %v", tags)
 	}
 
 	hosts, err := testStore.ListHosts(ctx)
@@ -320,7 +320,7 @@ func TestGrantsCRUD(t *testing.T) {
 	grant.Sudo = false
 	mustNoErr(t, testStore.UpdateGrant(ctx, "admin:test", grant))
 	if len(grant.Principals) != 2 || grant.Sudo {
-		t.Fatalf("Update nicht übernommen: %+v", grant)
+		t.Fatalf("update not applied: %+v", grant)
 	}
 
 	all, err := testStore.ListGrants(ctx)
@@ -337,13 +337,13 @@ func TestGrantsCRUD(t *testing.T) {
 	forGroups, err = testStore.ListGrantsForGroups(ctx, []uuid.UUID{uuid.New()})
 	mustNoErr(t, err)
 	if len(forGroups) != 0 {
-		t.Fatalf("ListGrantsForGroups (fremde Gruppe) = %d", len(forGroups))
+		t.Fatalf("ListGrantsForGroups (unrelated group) = %d", len(forGroups))
 	}
 
-	// CHECK-Constraint: Laufzeit muss > 0 sein.
+	// CHECK constraint: validity must be > 0.
 	bad := &store.AccessGrant{GroupID: g.ID, Principals: []string{"x"}, MaxValiditySeconds: 0}
 	if err := testStore.CreateGrant(ctx, "admin:test", bad); err == nil {
-		t.Fatal("CHECK-Verletzung erwartet")
+		t.Fatal("expected a CHECK violation")
 	}
 
 	mustNoErr(t, testStore.DeleteGrant(ctx, "admin:test", grant.ID))
@@ -351,22 +351,22 @@ func TestGrantsCRUD(t *testing.T) {
 	_, err = testStore.GetGrant(ctx, grant.ID)
 	wantNotFound(t, err)
 
-	// Jede Mutation hat ein Audit-Event mit Actor hinterlassen
-	// (created, updated, deleted — der CHECK-Fehler rollte zurück).
+	// Every mutation left an audit event with an actor
+	// (created, updated, deleted — the CHECK error rolled back).
 	for _, eventType := range []string{store.EventGrantCreated, store.EventGrantUpdated, store.EventGrantDeleted} {
 		events, err := testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: eventType})
 		mustNoErr(t, err)
 		if len(events) != 1 || events[0].Actor != "admin:test" {
-			t.Errorf("%s: %d Events (actor %s), erwartet 1 von admin:test",
+			t.Errorf("%s: %d events (actor %s), want 1 from admin:test",
 				eventType, len(events), eventActor(events))
 		}
 	}
 }
 
-// eventActor liefert den Actor des ersten Events (für Fehlermeldungen).
+// eventActor returns the actor of the first event (for error messages).
 func eventActor(events []store.AuditEvent) string {
 	if len(events) == 0 {
-		return "<keins>"
+		return "<none>"
 	}
 	return events[0].Actor
 }
@@ -388,19 +388,19 @@ func TestListGrantsForUser(t *testing.T) {
 	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", opsGrant))
 	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", devGrant))
 
-	// Nur der Grant der eigenen Gruppe zählt.
+	// Only the grant of the user's own group counts.
 	grants, err := testStore.ListGrantsForUser(ctx, alice.ID)
 	mustNoErr(t, err)
 	if len(grants) != 1 || grants[0].ID != opsGrant.ID {
-		t.Fatalf("grants = %+v, erwartet nur ops-grant", grants)
+		t.Fatalf("grants = %+v, want only the ops grant", grants)
 	}
 
-	// Gruppen entzogen ⇒ keine Grants mehr.
+	// Groups revoked ⇒ no more grants.
 	mustNoErr(t, testStore.SetUserGroups(ctx, alice.ID, nil))
 	grants, err = testStore.ListGrantsForUser(ctx, alice.ID)
 	mustNoErr(t, err)
 	if len(grants) != 0 {
-		t.Fatalf("grants nach entzug = %+v, erwartet leer", grants)
+		t.Fatalf("grants after revocation = %+v, want empty", grants)
 	}
 }
 
@@ -408,7 +408,7 @@ func TestApplyGrants(t *testing.T) {
 	cleanDB(t)
 	ctx := context.Background()
 
-	// Bestand: zwei Grants für ops (einer bleibt, einer fällt weg).
+	// Inventory: two grants for ops (one stays, one drops).
 	ops := &store.Group{Issuer: "idp", Name: "ops"}
 	mustNoErr(t, testStore.CreateGroup(ctx, ops))
 	keep := &store.AccessGrant{
@@ -423,11 +423,11 @@ func TestApplyGrants(t *testing.T) {
 	mustNoErr(t, testStore.CreateGrant(ctx, "admin:test", drop))
 
 	result, err := testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
-		{ // identisch ⇒ unchanged
+		{ // identical ⇒ unchanged
 			Group: "ops", TagSelector: map[string]string{"env": "prod"},
 			Principals: []string{"deploy"}, MaxValiditySeconds: 3600,
 		},
-		{ // neue Gruppe wird angelegt ⇒ created
+		{ // new group is created ⇒ created
 			Group: "auditors", Principals: []string{"audit"}, MaxValiditySeconds: 7200,
 		},
 	})
@@ -436,13 +436,13 @@ func TestApplyGrants(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 	if _, err := testStore.GetGrant(ctx, drop.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("nicht deklarierter grant existiert noch (err=%v)", err)
+		t.Errorf("undeclared grant still exists (err=%v)", err)
 	}
 	if _, err := testStore.GetGroupByName(ctx, "idp", "auditors"); err != nil {
-		t.Errorf("gruppe auditors nicht angelegt: %v", err)
+		t.Errorf("group auditors was not created: %v", err)
 	}
 
-	// Zweiter Lauf mit geänderten Feldern ⇒ updated, Rest unchanged.
+	// Second run with changed fields ⇒ updated, rest unchanged.
 	result, err = testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
 		{
 			Group: "ops", TagSelector: map[string]string{"env": "prod"},
@@ -452,39 +452,39 @@ func TestApplyGrants(t *testing.T) {
 	})
 	mustNoErr(t, err)
 	if result.Created != 0 || result.Updated != 1 || result.Deleted != 0 || result.Unchanged != 1 {
-		t.Fatalf("zweiter lauf: result = %+v", result)
+		t.Fatalf("second run: result = %+v", result)
 	}
 	updated, err := testStore.GetGrant(ctx, keep.ID)
 	mustNoErr(t, err)
 	if !updated.Sudo || len(updated.Principals) != 2 {
-		t.Fatalf("update nicht übernommen: %+v", updated)
+		t.Fatalf("update not applied: %+v", updated)
 	}
 
-	// Leere Liste räumt alles ab.
+	// An empty list clears everything.
 	result, err = testStore.ApplyGrants(ctx, "admin:test", "idp", nil)
 	mustNoErr(t, err)
 	if result.Deleted != 2 {
-		t.Fatalf("leerer zielzustand: result = %+v", result)
+		t.Fatalf("empty target state: result = %+v", result)
 	}
 	remaining, err := testStore.ListGrants(ctx)
 	mustNoErr(t, err)
 	if len(remaining) != 0 {
-		t.Fatalf("%d grants übrig", len(remaining))
+		t.Fatalf("%d grants remaining", len(remaining))
 	}
 
-	// Ungültige Specs brechen transaktional ab.
+	// Invalid specs abort transactionally.
 	_, err = testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
 		{Group: "ops", Principals: nil, MaxValiditySeconds: 3600},
 	})
 	if !errors.Is(err, store.ErrInvalidGrantSpec) {
-		t.Fatalf("ErrInvalidGrantSpec erwartet, bekommen: %v", err)
+		t.Fatalf("expected ErrInvalidGrantSpec, got: %v", err)
 	}
 	_, err = testStore.ApplyGrants(ctx, "admin:test", "idp", []store.GrantSpec{
 		{Group: "ops", Principals: []string{"deploy"}, MaxValiditySeconds: 3600},
 		{Group: "ops", Principals: []string{"root"}, MaxValiditySeconds: 3600},
 	})
 	if !errors.Is(err, store.ErrInvalidGrantSpec) {
-		t.Fatalf("doppelter schlüssel: ErrInvalidGrantSpec erwartet, bekommen: %v", err)
+		t.Fatalf("duplicate key: expected ErrInvalidGrantSpec, got: %v", err)
 	}
 }
 
@@ -495,7 +495,7 @@ func TestCAKeys(t *testing.T) {
 	k := &store.CAKey{Purpose: store.CertTypeUser, Algorithm: "ed25519", PublicKey: "ssh-ed25519 AAAA... user-ca", EncryptedPrivateKey: []byte{0x01}}
 	mustNoErr(t, testStore.CreateCAKey(ctx, k))
 	if k.State != store.CAKeyStateActive {
-		t.Fatalf("State = %q, erwartet active", k.State)
+		t.Fatalf("state = %q, want active", k.State)
 	}
 
 	k2 := &store.CAKey{Purpose: store.CertTypeUser, PublicKey: "pk2", Algorithm: "ed25519", State: store.CAKeyStateRetiring}
@@ -506,7 +506,7 @@ func TestCAKeys(t *testing.T) {
 	got, err := testStore.GetCAKey(ctx, k.ID)
 	mustNoErr(t, err)
 	if got.PublicKey != k.PublicKey {
-		t.Fatal("GetCAKey liefert falschen Key")
+		t.Fatal("GetCAKey returned the wrong key")
 	}
 
 	userKeys, err := testStore.ListCAKeys(ctx, store.CertTypeUser)
@@ -518,7 +518,7 @@ func TestCAKeys(t *testing.T) {
 	retired, err := testStore.UpdateCAKeyState(ctx, k2.ID, store.CAKeyStateRetired)
 	mustNoErr(t, err)
 	if retired.State != store.CAKeyStateRetired || retired.RetiredAt == nil {
-		t.Fatalf("Retire nicht übernommen: %+v", retired)
+		t.Fatalf("retire not applied: %+v", retired)
 	}
 
 	active, err := testStore.ListActiveCAKeys(ctx, store.CertTypeUser)
@@ -555,14 +555,14 @@ func TestServiceAccountsCRUD(t *testing.T) {
 	got, err = testStore.GetServiceAccountByName(ctx, "gitlab/infra/ansible")
 	mustNoErr(t, err)
 	if got.ID != a.ID {
-		t.Fatal("GetServiceAccountByName liefert falschen Account")
+		t.Fatal("GetServiceAccountByName returned the wrong account")
 	}
 
 	a.Active = false
 	a.ClaimMatcher = map[string]string{"project_path": "infra/ansible"}
 	mustNoErr(t, testStore.UpdateServiceAccount(ctx, a))
 	if a.Active || len(a.ClaimMatcher) != 1 {
-		t.Fatalf("Update nicht übernommen: %+v", a)
+		t.Fatalf("update not applied: %+v", a)
 	}
 
 	all, err := testStore.ListServiceAccounts(ctx)
@@ -587,7 +587,7 @@ func TestCertificates(t *testing.T) {
 	s2, err := testStore.NextCertificateSerial(ctx)
 	mustNoErr(t, err)
 	if s2 <= s1 {
-		t.Fatalf("Serials nicht monoton: %d, %d", s1, s2)
+		t.Fatalf("serials not monotonic: %d, %d", s1, s2)
 	}
 
 	ca := &store.CAKey{Purpose: store.CertTypeUser, Algorithm: "ed25519", PublicKey: "ca-pk"}
@@ -609,7 +609,7 @@ func TestCertificates(t *testing.T) {
 	}
 	mustNoErr(t, testStore.CreateCertificate(ctx, c))
 	if string(c.IssuerContext) != "{}" {
-		t.Fatalf("IssuerContext-Default = %s", c.IssuerContext)
+		t.Fatalf("IssuerContext default = %s", c.IssuerContext)
 	}
 
 	ctxJSON := json.RawMessage(`{"pipeline_id": 42}`)
@@ -624,10 +624,10 @@ func TestCertificates(t *testing.T) {
 	got, err := testStore.GetCertificateBySerial(ctx, s1)
 	mustNoErr(t, err)
 	if got.KeyID != "user:s@idp" || got.UserID == nil || *got.UserID != u.ID {
-		t.Fatalf("Certificate = %+v", got)
+		t.Fatalf("certificate = %+v", got)
 	}
 	if !got.ValidBefore.Equal(c.ValidBefore) {
-		t.Fatalf("ValidBefore = %v, erwartet %v", got.ValidBefore, c.ValidBefore)
+		t.Fatalf("ValidBefore = %v, want %v", got.ValidBefore, c.ValidBefore)
 	}
 
 	all, err := testStore.ListCertificates(ctx, 0)
@@ -641,13 +641,13 @@ func TestCertificates(t *testing.T) {
 		t.Fatalf("ListCertificates(limit 1) = %d", len(one))
 	}
 
-	// Serial ist eindeutig.
+	// Serial is unique.
 	dup := &store.Certificate{
 		Serial: s1, KeyID: "x", CertType: store.CertTypeUser, PublicKey: "x",
 		Principals: []string{"x"}, ValidAfter: now, ValidBefore: now.Add(time.Hour), CAKeyID: ca.ID,
 	}
 	if err := testStore.CreateCertificate(ctx, dup); err == nil {
-		t.Fatal("Unique-Verletzung erwartet")
+		t.Fatal("expected a uniqueness violation")
 	}
 
 	_, err = testStore.GetCertificateBySerial(ctx, 999999)
@@ -672,33 +672,33 @@ func TestCreateCertificateWithAudit(t *testing.T) {
 	event := &store.AuditEvent{EventType: "ca.cert_issued", Actor: "user:s@idp"}
 	mustNoErr(t, testStore.CreateCertificateWithAudit(ctx, cert, event))
 	if cert.ID == uuid.Nil || event.ID == 0 {
-		t.Fatalf("IDs nicht gefüllt: cert=%v event=%d", cert.ID, event.ID)
+		t.Fatalf("IDs not filled: cert=%v event=%d", cert.ID, event.ID)
 	}
 
 	events, err := testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: "ca.cert_issued"})
 	mustNoErr(t, err)
 	if len(events) != 1 {
-		t.Fatalf("1 Audit-Event erwartet, bekommen %d", len(events))
+		t.Fatalf("expected 1 audit event, got %d", len(events))
 	}
 
-	// Rollback-Garantie: schlägt der Zertifikats-Insert fehl (Serial-Duplikat),
-	// darf auch kein Audit-Event geschrieben werden.
+	// Rollback guarantee: if the certificate insert fails (serial duplicate),
+	// no audit event may be written either.
 	dup := &store.Certificate{
 		Serial: serial, KeyID: "x", CertType: store.CertTypeUser, PublicKey: "x",
 		Principals: []string{"x"}, ValidAfter: now, ValidBefore: now.Add(time.Hour), CAKeyID: ca.ID,
 	}
 	if err := testStore.CreateCertificateWithAudit(ctx, dup, &store.AuditEvent{EventType: "ca.cert_issued"}); err == nil {
-		t.Fatal("Unique-Verletzung erwartet")
+		t.Fatal("expected a uniqueness violation")
 	}
 	events, err = testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: "ca.cert_issued"})
 	mustNoErr(t, err)
 	if len(events) != 1 {
-		t.Fatalf("Rollback verletzt: %d Audit-Events", len(events))
+		t.Fatalf("rollback violated: %d audit events", len(events))
 	}
 	certs, err := testStore.ListCertificates(ctx, 0)
 	mustNoErr(t, err)
 	if len(certs) != 1 {
-		t.Fatalf("Rollback verletzt: %d Zertifikate", len(certs))
+		t.Fatalf("rollback violated: %d certificates", len(certs))
 	}
 }
 
@@ -709,12 +709,12 @@ func TestAuditEvents(t *testing.T) {
 	e1 := &store.AuditEvent{EventType: "cert.issued", Actor: "user:alice", Payload: json.RawMessage(`{"serial": 1}`)}
 	mustNoErr(t, testStore.AppendAuditEvent(ctx, e1))
 	if e1.ID == 0 || e1.OccurredAt.IsZero() {
-		t.Fatal("ID/OccurredAt nicht gefüllt")
+		t.Fatal("ID/OccurredAt not filled")
 	}
 	e2 := &store.AuditEvent{EventType: "cert.issued", Actor: "ci:infra"}
 	mustNoErr(t, testStore.AppendAuditEvent(ctx, e2))
 	if string(e2.Payload) != "{}" {
-		t.Fatalf("Payload-Default = %s", e2.Payload)
+		t.Fatalf("payload default = %s", e2.Payload)
 	}
 	e3 := &store.AuditEvent{EventType: "host.enrolled", Actor: "host:web-1"}
 	mustNoErr(t, testStore.AppendAuditEvent(ctx, e3))
@@ -722,7 +722,7 @@ func TestAuditEvents(t *testing.T) {
 	all, err := testStore.ListAuditEvents(ctx, store.AuditFilter{})
 	mustNoErr(t, err)
 	if len(all) != 3 {
-		t.Fatalf("alle Events = %d", len(all))
+		t.Fatalf("all events = %d", len(all))
 	}
 
 	issued, err := testStore.ListAuditEvents(ctx, store.AuditFilter{EventType: "cert.issued"})
@@ -754,8 +754,8 @@ func TestAuditEvents(t *testing.T) {
 	}
 }
 
-// Append-only-Garantie: UPDATE und DELETE schlagen selbst mit direktem
-// DB-Zugriff fehl (Trigger), unabhängig von Rollen-Grants.
+// Append-only guarantee: UPDATE and DELETE fail even via direct DB access
+// (trigger), regardless of role grants.
 func TestAuditEventsAppendOnly(t *testing.T) {
 	cleanDB(t)
 	ctx := context.Background()
@@ -764,19 +764,19 @@ func TestAuditEventsAppendOnly(t *testing.T) {
 	mustNoErr(t, testStore.AppendAuditEvent(ctx, e))
 
 	if _, err := rawPool.Exec(ctx, `UPDATE audit_events SET actor = 'evil' WHERE id = $1`, e.ID); err == nil {
-		t.Fatal("UPDATE muss fehlschlagen")
+		t.Fatal("UPDATE must fail")
 	} else if want := "append-only"; !strings.Contains(err.Error(), want) {
-		t.Fatalf("Fehler ohne %q: %v", want, err)
+		t.Fatalf("error missing %q: %v", want, err)
 	}
 
 	if _, err := rawPool.Exec(ctx, `DELETE FROM audit_events WHERE id = $1`, e.ID); err == nil {
-		t.Fatal("DELETE muss fehlschlagen")
+		t.Fatal("DELETE must fail")
 	}
 
-	// Event unverändert vorhanden.
+	// Event is still present unchanged.
 	all, err := testStore.ListAuditEvents(ctx, store.AuditFilter{})
 	mustNoErr(t, err)
 	if len(all) != 1 || all[0].Actor != "user:alice" {
-		t.Fatalf("Event verändert: %+v", all)
+		t.Fatalf("event changed: %+v", all)
 	}
 }

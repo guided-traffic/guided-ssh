@@ -25,7 +25,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeHostStore implementiert api.HostStore in-memory.
+// fakeHostStore implements api.HostStore in-memory.
 type fakeHostStore struct {
 	tokens     map[string]*store.EnrollmentToken // hex(hash) → token
 	hosts      map[uuid.UUID]*store.Host
@@ -42,7 +42,7 @@ func newFakeHostStore() *fakeHostStore {
 	}
 }
 
-// addToken registriert ein Klartext-Token wie CreateEnrollmentToken (Hash).
+// addToken registers a plaintext token like CreateEnrollmentToken (hash).
 func (f *fakeHostStore) addToken(token string, hostName *string, expires time.Time) {
 	hash := sha256.Sum256([]byte(token))
 	f.tokens[string(hash[:])] = &store.EnrollmentToken{
@@ -87,8 +87,8 @@ func (f *fakeHostStore) ListAuthorizedPrincipals(_ context.Context, _ uuid.UUID,
 	return f.principals[localUser], nil
 }
 
-// newEnrollServer baut CA + Server mit Enrollment und liefert beide; ein
-// optionales hostValidity übersteuert die Laufzeit der Host-Zertifikate.
+// newEnrollServer builds a CA + server with enrollment and returns both; an
+// optional hostValidity overrides the lifetime of host certificates.
 func newEnrollServer(t *testing.T, hosts *fakeHostStore, hostValidity ...time.Duration) (*httptest.Server, *ca.CA) {
 	t.Helper()
 	fs := &fakeStore{}
@@ -114,7 +114,7 @@ func newEnrollServer(t *testing.T, hosts *fakeHostStore, hostValidity ...time.Du
 	return srv, certAuthority
 }
 
-// enrollBody baut einen gültigen Enroll-Request-Body.
+// enrollBody builds a valid enroll request body.
 func enrollBody(t *testing.T, token, hostname string) []byte {
 	t.Helper()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -147,7 +147,7 @@ func enrollBody(t *testing.T, token, hostname string) []byte {
 
 func postEnroll(t *testing.T, url string, body []byte) (int, string) {
 	t.Helper()
-	resp, err := http.Post(url+"/v1/enroll", "application/json", bytes.NewReader(body)) //nolint:gosec // Test-URL
+	resp, err := http.Post(url+"/v1/enroll", "application/json", bytes.NewReader(body)) //nolint:gosec // test URL
 	if err != nil {
 		t.Fatalf("POST /v1/enroll: %v", err)
 	}
@@ -156,7 +156,7 @@ func postEnroll(t *testing.T, url string, body []byte) (int, string) {
 	return resp.StatusCode, string(raw)
 }
 
-func TestEnrollErfolg(t *testing.T) {
+func TestEnrollSuccess(t *testing.T) {
 	hosts := newFakeHostStore()
 	hosts.addToken("tok-1", nil, time.Now().Add(time.Hour))
 	srv, certAuthority := newEnrollServer(t, hosts)
@@ -173,13 +173,13 @@ func TestEnrollErfolg(t *testing.T) {
 		MTLSCA          string `json:"mtls_ca"`
 	}
 	if err := json.Unmarshal([]byte(body), &resp); err != nil {
-		t.Fatalf("antwort: %v", err)
+		t.Fatalf("response: %v", err)
 	}
 
-	// Host-Zertifikat: Typ, Principals (voll + kurz), von Host-CA signiert.
+	// Host certificate: type, principals (full + short), signed by the host CA.
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.HostCertificate))
 	if err != nil {
-		t.Fatalf("host-zertifikat parsen: %v", err)
+		t.Fatalf("parsing host certificate: %v", err)
 	}
 	cert := parsed.(*ssh.Certificate)
 	if cert.CertType != ssh.HostCert {
@@ -187,17 +187,17 @@ func TestEnrollErfolg(t *testing.T) {
 	}
 	want := []string{"web1.example.com", "web1"}
 	if strings.Join(cert.ValidPrincipals, ",") != strings.Join(want, ",") {
-		t.Errorf("principals = %v, erwartet %v", cert.ValidPrincipals, want)
+		t.Errorf("principals = %v, expected %v", cert.ValidPrincipals, want)
 	}
 	if !strings.HasPrefix(resp.UserCABundle, "ssh-ed25519 ") {
-		t.Errorf("user-ca-bundle: %q", resp.UserCABundle)
+		t.Errorf("user ca bundle: %q", resp.UserCABundle)
 	}
 
-	// mTLS-Zertifikat gegen die CA prüfbar, CN = Host-ID.
+	// mTLS certificate verifiable against the CA, CN = host ID.
 	block, _ := pem.Decode([]byte(resp.MTLSCertificate))
 	mtlsCert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		t.Fatalf("mtls-zertifikat: %v", err)
+		t.Fatalf("mtls certificate: %v", err)
 	}
 	if mtlsCert.Subject.CommonName != resp.HostID {
 		t.Errorf("cn = %q, host_id = %q", mtlsCert.Subject.CommonName, resp.HostID)
@@ -207,10 +207,10 @@ func TestEnrollErfolg(t *testing.T) {
 		t.Fatalf("pool: %v", err)
 	}
 	if _, err := mtlsCert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
-		t.Errorf("mtls-kette: %v", err)
+		t.Errorf("mtls chain: %v", err)
 	}
 	if !strings.Contains(resp.MTLSCA, "BEGIN CERTIFICATE") {
-		t.Errorf("mtls_ca fehlt: %q", resp.MTLSCA)
+		t.Errorf("mtls_ca missing: %q", resp.MTLSCA)
 	}
 }
 
@@ -227,36 +227,36 @@ func TestEnrollHostCertValidityOverride(t *testing.T) {
 		HostCertificate string `json:"host_certificate"`
 	}
 	if err := json.Unmarshal([]byte(body), &resp); err != nil {
-		t.Fatalf("antwort: %v", err)
+		t.Fatalf("response: %v", err)
 	}
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.HostCertificate))
 	if err != nil {
-		t.Fatalf("host-zertifikat parsen: %v", err)
+		t.Fatalf("parsing host certificate: %v", err)
 	}
 	cert := parsed.(*ssh.Certificate)
 	if lifetime := cert.ValidBefore - cert.ValidAfter; lifetime != uint64(time.Hour/time.Second) {
-		t.Errorf("laufzeit = %ds, erwartet 3600s", lifetime)
+		t.Errorf("lifetime = %ds, expected 3600s", lifetime)
 	}
 }
 
-func TestEnrollTokenEinmalig(t *testing.T) {
+func TestEnrollTokenSingleUse(t *testing.T) {
 	hosts := newFakeHostStore()
 	hosts.addToken("tok-1", nil, time.Now().Add(time.Hour))
 	srv, _ := newEnrollServer(t, hosts)
 
 	if status, body := postEnroll(t, srv.URL, enrollBody(t, "tok-1", "a.example.com")); status != http.StatusOK {
-		t.Fatalf("erstes enrollment: %d %s", status, body)
+		t.Fatalf("first enrollment: %d %s", status, body)
 	}
 	if status, _ := postEnroll(t, srv.URL, enrollBody(t, "tok-1", "b.example.com")); status != http.StatusForbidden {
-		t.Fatalf("zweites enrollment: status %d, erwartet 403", status)
+		t.Fatalf("second enrollment: status %d, expected 403", status)
 	}
 }
 
-func TestEnrollFehlerfaelle(t *testing.T) {
+func TestEnrollErrorCases(t *testing.T) {
 	hosts := newFakeHostStore()
-	bound := "richtig.example.com"
-	hosts.addToken("gebunden", &bound, time.Now().Add(time.Hour))
-	hosts.addToken("abgelaufen", nil, time.Now().Add(-time.Hour))
+	bound := "correct.example.com"
+	hosts.addToken("bound", &bound, time.Now().Add(time.Hour))
+	hosts.addToken("expired", nil, time.Now().Add(-time.Hour))
 	srv, _ := newEnrollServer(t, hosts)
 
 	cases := []struct {
@@ -264,40 +264,40 @@ func TestEnrollFehlerfaelle(t *testing.T) {
 		body   []byte
 		status int
 	}{
-		{"unbekanntes token", enrollBody(t, "gibtsnicht", "x.example.com"), http.StatusForbidden},
-		{"abgelaufenes token", enrollBody(t, "abgelaufen", "x.example.com"), http.StatusForbidden},
-		{"falscher hostname", enrollBody(t, "gebunden", "falsch.example.com"), http.StatusForbidden},
-		{"kaputter body", []byte("kein json"), http.StatusBadRequest},
+		{"unknown token", enrollBody(t, "doesnotexist", "x.example.com"), http.StatusForbidden},
+		{"expired token", enrollBody(t, "expired", "x.example.com"), http.StatusForbidden},
+		{"wrong hostname", enrollBody(t, "bound", "wrong.example.com"), http.StatusForbidden},
+		{"broken body", []byte("not json"), http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		if status, body := postEnroll(t, srv.URL, tc.body); status != tc.status {
-			t.Errorf("%s: status %d, erwartet %d (%s)", tc.name, status, tc.status, body)
+			t.Errorf("%s: status %d, expected %d (%s)", tc.name, status, tc.status, body)
 		}
 	}
 }
 
-func TestEnrollOhnePflichtfelder(t *testing.T) {
+func TestEnrollMissingRequiredFields(t *testing.T) {
 	hosts := newFakeHostStore()
 	srv, _ := newEnrollServer(t, hosts)
 	body, _ := json.Marshal(map[string]any{"hostname": "x"})
 	if status, _ := postEnroll(t, srv.URL, body); status != http.StatusBadRequest {
-		t.Fatalf("status %d, erwartet 400", status)
+		t.Fatalf("status %d, expected 400", status)
 	}
 }
 
-func TestEnrollKaputterSSHKey(t *testing.T) {
+func TestEnrollBrokenSSHKey(t *testing.T) {
 	hosts := newFakeHostStore()
 	hosts.addToken("tok-1", nil, time.Now().Add(time.Hour))
 	srv, _ := newEnrollServer(t, hosts)
 	body, _ := json.Marshal(map[string]any{
-		"token": "tok-1", "hostname": "x.example.com", "ssh_public_key": "kein key",
+		"token": "tok-1", "hostname": "x.example.com", "ssh_public_key": "not a key",
 	})
 	if status, _ := postEnroll(t, srv.URL, body); status != http.StatusBadRequest {
-		t.Fatalf("status %d, erwartet 400", status)
+		t.Fatalf("status %d, expected 400", status)
 	}
 }
 
-func TestEnrollKaputterCSR(t *testing.T) {
+func TestEnrollBrokenCSR(t *testing.T) {
 	hosts := newFakeHostStore()
 	hosts.addToken("tok-1", nil, time.Now().Add(time.Hour))
 	srv, _ := newEnrollServer(t, hosts)
@@ -306,21 +306,21 @@ func TestEnrollKaputterCSR(t *testing.T) {
 	if err := json.Unmarshal(enrollBody(t, "tok-1", "x.example.com"), &req); err != nil {
 		t.Fatal(err)
 	}
-	req["mtls_csr"] = "kein csr"
+	req["mtls_csr"] = "not a csr"
 	body, _ := json.Marshal(req)
 	if status, _ := postEnroll(t, srv.URL, body); status != http.StatusBadRequest {
-		t.Fatalf("status %d, erwartet 400", status)
+		t.Fatalf("status %d, expected 400", status)
 	}
 }
 
-func TestEnrollOhneHostsDeaktiviert(t *testing.T) {
+func TestEnrollDisabledWithoutHosts(t *testing.T) {
 	srv := newTestServer(t, &fakeStore{})
-	resp, err := http.Post(srv.URL+"/v1/enroll", "application/json", strings.NewReader("{}")) //nolint:gosec // Test-URL
+	resp, err := http.Post(srv.URL+"/v1/enroll", "application/json", strings.NewReader("{}")) //nolint:gosec // test URL
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status %d, erwartet 404 (route nicht registriert)", resp.StatusCode)
+		t.Fatalf("status %d, expected 404 (route not registered)", resp.StatusCode)
 	}
 }

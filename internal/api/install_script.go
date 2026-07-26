@@ -17,39 +17,39 @@ import (
 //go:embed install.sh.tmpl
 var installScriptTemplateSource string
 
-// installScriptTemplate wird beim Paket-Start geparst; ein Syntaxfehler im
-// Template ist ein Programmierfehler und soll sofort auffallen.
+// installScriptTemplate is parsed at package startup; a syntax error in the
+// template is a programming error and should surface immediately.
 var installScriptTemplate = template.Must(template.New("install.sh").Parse(installScriptTemplateSource))
 
-// Zulässige Form der getemplateten Agent-Werte: Arch als case-Pattern, Hash als
-// Vergleichswert der sha256sum-Prüfung.
+// Allowed shape of the templated agent values: arch as a case pattern,
+// hash as the comparison value of the sha256sum check.
 var (
 	archPattern   = regexp.MustCompile(`^[a-z0-9]+$`)
 	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-// installScriptData sind die Werte, die der Server in das Script templatet.
-// Alles bis auf Token und Flags steht damit schon fest — insbesondere der
-// SPKI-Pin und die Binary-Hashes.
+// installScriptData are the values the server templates into the script.
+// Everything except token and flags is already fixed — in particular the
+// SPKI pin and the binary hashes.
 type installScriptData struct {
 	BaseURL  string
 	AgentURL string
 	Version  string
 	Pin      string
-	ArchList string              // Leerzeichen-getrennt, für Fehlermeldungen im Script
-	Agents   []agentManifestItem // nur linux; liefert die Hash-Tabelle
-	Unit     string              // Inhalt der systemd-Unit, statisch (kein Unit-Templating)
+	ArchList string              // space-separated, for error messages in the script
+	Agents   []agentManifestItem // linux only; provides the hash table
+	Unit     string              // content of the systemd unit, static (no unit templating)
 }
 
-// handleInstallScript liefert das getemplatete install.sh. Bei geschlossenem
-// Gate antwortet es mit 503 — es gibt keinen Codepfad, der ein Script ohne Pin
-// oder ohne Agent-URL ausliefert.
+// handleInstallScript returns the templated install.sh. With a closed gate
+// it responds with 503 — there is no code path that serves a script
+// without a pin or without an agent URL.
 func handleInstallScript(gate rolloutGate, agents AgentSource, agentPublicURL, publicBaseURL string, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		st := gate.status(r.Context())
 		if len(st.Missing) > 0 {
 			writeJSON(w, http.StatusServiceUnavailable, rolloutUnavailable{
-				Error:   "host-rollout nicht konfiguriert",
+				Error:   "host rollout not configured",
 				Missing: st.Missing,
 			})
 			return
@@ -64,7 +64,7 @@ func handleInstallScript(gate rolloutGate, agents AgentSource, agentPublicURL, p
 			Unit:     agentdist.UnitFile,
 		})
 		if err != nil {
-			logger.Error("install.sh rendern fehlgeschlagen", "error", err)
+			logger.Error("rendering install.sh failed", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -74,9 +74,9 @@ func handleInstallScript(gate rolloutGate, agents AgentSource, agentPublicURL, p
 	}
 }
 
-// linuxAgents liefert die einbettbaren linux-Binaries; der Agent ist
-// systemd-gebunden und damit linux-only, andere OS-Einträge ignoriert das
-// Script ohnehin.
+// linuxAgents returns the embeddable linux binaries; the agent is
+// systemd-bound and thus linux-only, other OS entries are ignored by the
+// script anyway.
 func linuxAgents(agents AgentSource) []agentManifestItem {
 	var items []agentManifestItem
 	if agents == nil {
@@ -91,10 +91,10 @@ func linuxAgents(agents AgentSource) []agentManifestItem {
 	return items
 }
 
-// renderInstallScript füllt das Template. Die getemplateten Werte landen im
-// Script in einfachen Anführungszeichen; ein einfaches Anführungszeichen im
-// Wert würde das Quoting sprengen, deshalb hier fail-closed abbrechen statt ein
-// kaputtes Script an N Hosts auszuliefern.
+// renderInstallScript fills in the template. The templated values end up
+// in the script inside single quotes; a single quote in the value would
+// break the quoting, so this fails closed here instead of shipping a
+// broken script to N hosts.
 func renderInstallScript(data installScriptData) ([]byte, error) {
 	arches := make([]string, 0, len(data.Agents))
 	for _, agent := range data.Agents {
@@ -102,39 +102,39 @@ func renderInstallScript(data installScriptData) ([]byte, error) {
 	}
 	data.ArchList = strings.Join(arches, " ")
 
-	// Die Unit kommt aus dem quoted Here-Doc (<<'UNIT_EOF', keine Expansion);
-	// nur der Zeilenabschluss muss stimmen, damit der Terminator am Zeilenanfang
-	// steht.
+	// The unit comes from the quoted here-doc (<<'UNIT_EOF', no expansion);
+	// only the line ending needs to be right so the terminator sits at the
+	// start of a line.
 	data.Unit = strings.TrimRight(data.Unit, "\n") + "\n"
 
 	for field, value := range map[string]string{
 		"public-url": data.BaseURL, "agent-url": data.AgentURL,
-		"pin": data.Pin, "version": data.Version, "arch-liste": data.ArchList,
+		"pin": data.Pin, "version": data.Version, "arch-list": data.ArchList,
 	} {
 		if strings.ContainsAny(value, "'\n") {
-			return nil, fmt.Errorf("wert für %s enthält anführungszeichen oder zeilenumbruch: %q", field, value)
+			return nil, fmt.Errorf("value for %s contains a quote or line break: %q", field, value)
 		}
 	}
-	// Arch und Hash sind build-kontrolliert (Dateinamen aus dem Embed, Hex aus
-	// sha256), landen aber ungequotet im case-Pattern bzw. im Vergleichswert —
-	// deshalb strikt statt nur auf Quotes prüfen.
+	// Arch and hash are build-controlled (filenames from the embed, hex
+	// from sha256), but end up unquoted in the case pattern and comparison
+	// value respectively — hence a strict check instead of just quotes.
 	for _, agent := range data.Agents {
 		if !archPattern.MatchString(agent.Arch) {
-			return nil, fmt.Errorf("arch %q ist kein [a-z0-9]+", agent.Arch)
+			return nil, fmt.Errorf("arch %q is not [a-z0-9]+", agent.Arch)
 		}
 		if !sha256Pattern.MatchString(agent.SHA256) {
-			return nil, fmt.Errorf("sha256 für arch %s ist kein 64-stelliger hex-wert: %q", agent.Arch, agent.SHA256)
+			return nil, fmt.Errorf("sha256 for arch %s is not a 64-digit hex value: %q", agent.Arch, agent.SHA256)
 		}
 	}
-	// Der Terminator darf auch nicht in der ersten Zeile stehen — dort fehlt der
-	// führende Umbruch, den der Vergleich sonst voraussetzt.
+	// The terminator also must not appear on the first line — there the
+	// leading line break the comparison otherwise assumes is missing.
 	if strings.Contains("\n"+data.Unit, "\nUNIT_EOF") {
-		return nil, fmt.Errorf("systemd-unit enthält den here-doc-terminator")
+		return nil, fmt.Errorf("systemd unit contains the here-doc terminator")
 	}
 
 	var buf bytes.Buffer
 	if err := installScriptTemplate.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("install.sh templaten: %w", err)
+		return nil, fmt.Errorf("templating install.sh: %w", err)
 	}
 	return buf.Bytes(), nil
 }

@@ -17,8 +17,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// HostStore sind die vom Enrollment und der Agent-API benötigten
-// Store-Methoden (*store.Store erfüllt sie; Tests nutzen einen Fake).
+// HostStore is the set of store methods needed by enrollment and the agent
+// API (*store.Store satisfies it; tests use a fake).
 type HostStore interface {
 	EnrollHost(ctx context.Context, p store.EnrollHostParams) (*store.Host, error)
 	GetHost(ctx context.Context, id uuid.UUID) (*store.Host, error)
@@ -26,25 +26,25 @@ type HostStore interface {
 	ListAuthorizedPrincipals(ctx context.Context, hostID uuid.UUID, localUser string) ([]string, error)
 }
 
-// defaultHostValidity ist die Laufzeit von Host-Zertifikaten (Policy-Maximum
-// des Plans: 30 Tage; der Agent erneuert bei 2/3 der Laufzeit).
+// defaultHostValidity is the lifetime of host certificates (the plan's
+// policy maximum: 30 days; the agent renews at 2/3 of the lifetime).
 const defaultHostValidity = 30 * 24 * time.Hour
 
-// enrollRequest ist der Body von POST /v1/enroll.
+// enrollRequest is the body of POST /v1/enroll.
 type enrollRequest struct {
-	// Token ist das einmalige Enrollment-Token (Klartext).
+	// Token is the one-time enrollment token (plaintext).
 	Token string `json:"token"`
-	// Hostname, unter dem sich der Host registriert.
+	// Hostname the host registers under.
 	Hostname string `json:"hostname"`
-	// SSHPublicKey ist der Host-Key im authorized_keys-Format.
+	// SSHPublicKey is the host key in authorized_keys format.
 	SSHPublicKey string `json:"ssh_public_key"`
-	// MTLSCSR ist der PEM-kodierte CSR für das mTLS-Client-Zertifikat.
+	// MTLSCSR is the PEM-encoded CSR for the mTLS client certificate.
 	MTLSCSR string `json:"mtls_csr"`
-	// Tags aus dem Enrollment (Token-Tags haben Vorrang).
+	// Tags from the enrollment (token tags take precedence).
 	Tags map[string]string `json:"tags,omitempty"`
 }
 
-// enrollResponse ist die Antwort auf ein erfolgreiches Enrollment.
+// enrollResponse is the response to a successful enrollment.
 type enrollResponse struct {
 	HostID          string    `json:"host_id"`
 	HostCertificate string    `json:"host_certificate"`
@@ -54,23 +54,23 @@ type enrollResponse struct {
 	MTLSCA          string    `json:"mtls_ca"`
 }
 
-// handleEnroll registriert einen Host: Token einmalig verbrauchen, Host-
-// SSH-Zertifikat und mTLS-Client-Zertifikat ausstellen, CA-Bundles mitgeben.
-// hostValidity ≤ 0 fällt auf defaultHostValidity zurück.
+// handleEnroll registers a host: consumes the token once, issues the host
+// SSH certificate and mTLS client certificate, and hands out CA bundles.
+// hostValidity ≤ 0 falls back to defaultHostValidity.
 func handleEnroll(certAuthority *ca.CA, hosts HostStore, hostValidity time.Duration, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req enrollRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
-			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			http.Error(w, "request body invalid", http.StatusBadRequest)
 			return
 		}
 		if req.Token == "" || req.Hostname == "" {
-			http.Error(w, "token und hostname sind pflicht", http.StatusBadRequest)
+			http.Error(w, "token and hostname are required", http.StatusBadRequest)
 			return
 		}
 		publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.SSHPublicKey))
 		if err != nil {
-			http.Error(w, "ssh_public_key ungültig (authorized_keys-format erwartet)", http.StatusBadRequest)
+			http.Error(w, "ssh_public_key invalid (authorized_keys format expected)", http.StatusBadRequest)
 			return
 		}
 
@@ -82,40 +82,40 @@ func handleEnroll(certAuthority *ca.CA, hosts HostStore, hostValidity time.Durat
 			Tags:      req.Tags,
 		})
 		if errors.Is(err, store.ErrNotFound) {
-			http.Error(w, "enrollment-token ungültig, verbraucht oder abgelaufen", http.StatusForbidden)
+			http.Error(w, "enrollment token invalid, consumed, or expired", http.StatusForbidden)
 			return
 		}
 		if errors.Is(err, store.ErrTokenHostMismatch) {
-			http.Error(w, "enrollment-token ist an einen anderen hostnamen gebunden", http.StatusForbidden)
+			http.Error(w, "enrollment token is bound to a different hostname", http.StatusForbidden)
 			return
 		}
 		if err != nil {
-			logger.Error("enroll: fehlgeschlagen", "hostname", req.Hostname, "error", err)
+			logger.Error("enroll: failed", "hostname", req.Hostname, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
 		cert, record, err := issueHostCert(r.Context(), certAuthority, host, publicKey, hostValidity)
 		if err != nil {
-			logger.Error("enroll: host-zertifikat fehlgeschlagen", "hostname", host.Name, "error", err)
+			logger.Error("enroll: host certificate failed", "hostname", host.Name, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		mtlsCert, err := certAuthority.IssueAgentCert(r.Context(), host.ID, []byte(req.MTLSCSR))
 		if err != nil {
-			logger.Error("enroll: mtls-zertifikat fehlgeschlagen", "hostname", host.Name, "error", err)
-			http.Error(w, "mtls_csr ungültig", http.StatusBadRequest)
+			logger.Error("enroll: mtls certificate failed", "hostname", host.Name, "error", err)
+			http.Error(w, "mtls_csr invalid", http.StatusBadRequest)
 			return
 		}
 		mtlsCA, err := certAuthority.MTLSCAPEM(r.Context())
 		if err != nil {
-			logger.Error("enroll: mtls-ca laden fehlgeschlagen", "error", err)
+			logger.Error("enroll: loading mtls ca failed", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		userBundle, err := certAuthority.Bundle(r.Context(), store.CertTypeUser)
 		if err != nil {
-			logger.Error("enroll: user-bundle fehlgeschlagen", "error", err)
+			logger.Error("enroll: user bundle failed", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -133,10 +133,9 @@ func handleEnroll(certAuthority *ca.CA, hosts HostStore, hostValidity time.Durat
 	}
 }
 
-// issueHostCert stellt das SSH-Host-Zertifikat aus (Principals: voller Name
-// plus Kurzname, damit Clients beide Varianten verifizieren können).
-// validity ≤ 0 fällt auf defaultHostValidity zurück; das Policy-Maximum
-// (30 Tage) greift immer.
+// issueHostCert issues the SSH host certificate (principals: full name plus
+// short name, so clients can verify either variant). validity ≤ 0 falls
+// back to defaultHostValidity; the policy maximum (30 days) always applies.
 func issueHostCert(ctx context.Context, certAuthority *ca.CA, host *store.Host, publicKey ssh.PublicKey, validity time.Duration) (*ssh.Certificate, *store.Certificate, error) {
 	if validity <= 0 {
 		validity = defaultHostValidity

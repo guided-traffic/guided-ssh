@@ -1,9 +1,9 @@
-// gssh-server ist der API-Server von guided-ssh (CA, OIDC-Endpunkte, Host-API, UI).
-// Phase 2: CA-Bootstrap (Migrationen, CA-Keys) und CA-Bundle-Endpoint;
-// Phase 3: OIDC-Token-Validierung, POST /v1/sign/user, Gruppen-Sync;
-// Phase 5: Host-Enrollment (POST /v1/enroll), Agent-API hinter mTLS,
-// Subkommando enroll-token;
-// Phase 6: Grant-Verwaltung (/v1/admin/grants…, GSSH_ADMIN_GROUP).
+// gssh-server is the API server of guided-ssh (CA, OIDC endpoints, host API, UI).
+// Phase 2: CA bootstrap (migrations, CA keys) and the CA bundle endpoint;
+// Phase 3: OIDC token validation, POST /v1/sign/user, group sync;
+// Phase 5: host enrollment (POST /v1/enroll), agent API behind mTLS,
+// enroll-token subcommand;
+// Phase 6: grant management (/v1/admin/grants…, GSSH_ADMIN_GROUP).
 package main
 
 import (
@@ -39,18 +39,18 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
 
-// Umgebungsvariablen des Servers (Werte kommen im Kubernetes-Deployment
-// aus Secrets, siehe Plan Phase 11).
+// Environment variables of the server (values come from Kubernetes Secrets in
+// the deployment, see plan Phase 11).
 const (
-	// PostgreSQL-Verbindung: einzelne Variablen statt einer DSN, damit die
-	// Werte 1:1 aus einem Kubernetes-Secret kommen können (z. B. dem
-	// App-Secret von CloudNativePG) — kein zusammengesetztes DSN-Secret nötig.
-	envDBHost     = "GSSH_DB_HOST"     // Pflicht
-	envDBPort     = "GSSH_DB_PORT"     // leer ⇒ 5432 (Treiber-Default)
-	envDBUser     = "GSSH_DB_USER"     // Pflicht
-	envDBPassword = "GSSH_DB_PASSWORD" //nolint:gosec // Name der Env-Variable, kein Secret; Pflicht
-	envDBName     = "GSSH_DB_NAME"     // Pflicht (Datenbank-Name)
-	envDBSSLMode  = "GSSH_DB_SSLMODE"  // leer ⇒ prefer (Treiber-Default)
+	// PostgreSQL connection: individual variables instead of a DSN, so the
+	// values can come 1:1 from a Kubernetes Secret (e.g. CloudNativePG's app
+	// secret) — no need for a combined DSN secret.
+	envDBHost     = "GSSH_DB_HOST"     // required
+	envDBPort     = "GSSH_DB_PORT"     // empty ⇒ 5432 (driver default)
+	envDBUser     = "GSSH_DB_USER"     // required
+	envDBPassword = "GSSH_DB_PASSWORD" //nolint:gosec // name of the env var, not a secret; required
+	envDBName     = "GSSH_DB_NAME"     // required (database name)
+	envDBSSLMode  = "GSSH_DB_SSLMODE"  // empty ⇒ prefer (driver default)
 
 	envMasterKey = "GSSH_CA_MASTER_KEY" // Base64, 32 Bytes (AES-256)
 
@@ -59,100 +59,100 @@ const (
 	// all three CAs from mounted files and never writes private key material to
 	// the database. The four key-file variables belong to self-managed mode and
 	// must be unset in managed mode.
-	envCAMode         = "GSSH_CA_MODE"           // managed | self-managed; leer ⇒ managed
+	envCAMode         = "GSSH_CA_MODE"           // managed | self-managed; empty ⇒ managed
 	envCAUserKeyFile  = "GSSH_CA_USER_KEY_FILE"  // OpenSSH private key PEM
 	envCAHostKeyFile  = "GSSH_CA_HOST_KEY_FILE"  // OpenSSH private key PEM
-	envCAMTLSKeyFile  = "GSSH_CA_MTLS_KEY_FILE"  //nolint:gosec // Name der Env-Variable, kein Secret; PKCS#8 PEM
+	envCAMTLSKeyFile  = "GSSH_CA_MTLS_KEY_FILE"  //nolint:gosec // name of the env var, not a secret; PKCS#8 PEM
 	envCAMTLSCertFile = "GSSH_CA_MTLS_CERT_FILE" // X.509 CA certificate PEM
 
-	// OIDC (Phase 3); ohne Issuer bleibt der Sign-Endpoint deaktiviert (503).
-	envOIDCIssuer   = "GSSH_OIDC_ISSUER"    // Issuer-URL des IdP
-	envOIDCClientID = "GSSH_OIDC_CLIENT_ID" // erwartete Audience der ID-Tokens
+	// OIDC (Phase 3); without an issuer the sign endpoint stays disabled (503).
+	envOIDCIssuer   = "GSSH_OIDC_ISSUER"    // issuer URL of the IdP
+	envOIDCClientID = "GSSH_OIDC_CLIENT_ID" // expected audience of the ID tokens
 
-	// GitLab-CI (Phase 7); ohne Issuer bleibt /v1/sign/ci deaktiviert (503).
-	envCIIssuer   = "GSSH_CI_ISSUER"   // GitLab-Basis-URL (OIDC-Issuer)
-	envCIAudience = "GSSH_CI_AUDIENCE" // erwartete Audience, Default guided-ssh
+	// GitLab CI (Phase 7); without an issuer /v1/sign/ci stays disabled (503).
+	envCIIssuer   = "GSSH_CI_ISSUER"   // GitLab base URL (OIDC issuer)
+	envCIAudience = "GSSH_CI_AUDIENCE" // expected audience, default guided-ssh
 
-	// Gruppen-Sync via Keycloak-Admin-API (optional; ohne Client-ID deaktiviert).
-	envKCBaseURL      = "GSSH_KC_BASE_URL"      // Keycloak-Basis-URL
-	envKCRealm        = "GSSH_KC_REALM"         // Realm
-	envKCClientID     = "GSSH_KC_CLIENT_ID"     // Service-Account-Client
-	envKCClientSecret = "GSSH_KC_CLIENT_SECRET" //nolint:gosec // Name der Env-Variable, kein Secret
-	envSyncInterval   = "GSSH_KC_SYNC_INTERVAL" // Go-Duration, Default 5m
+	// Group sync via the Keycloak admin API (optional; disabled without a client ID).
+	envKCBaseURL      = "GSSH_KC_BASE_URL"      // Keycloak base URL
+	envKCRealm        = "GSSH_KC_REALM"         // realm
+	envKCClientID     = "GSSH_KC_CLIENT_ID"     // service-account client
+	envKCClientSecret = "GSSH_KC_CLIENT_SECRET" //nolint:gosec // name of the env var, not a secret
+	envSyncInterval   = "GSSH_KC_SYNC_INTERVAL" // Go duration, default 5m
 
-	// Agent-API (Phase 5): SANs des mTLS-Server-Zertifikats, Komma-getrennt.
-	envAgentTLSNames = "GSSH_AGENT_TLS_NAMES" // Default: localhost,127.0.0.1
+	// Agent API (Phase 5): SANs of the mTLS server certificate, comma-separated.
+	envAgentTLSNames = "GSSH_AGENT_TLS_NAMES" // default: localhost,127.0.0.1
 
-	// Admin-API (Phase 6): IdP-Gruppe der Admins; leer ⇒ Admin-API deaktiviert.
+	// Admin API (Phase 6): IdP group of the admins; empty ⇒ admin API disabled.
 	envAdminGroup = "GSSH_ADMIN_GROUP"
 
-	// Web-UI-Rollen (Phase 8): Auditor darf Audit-Log lesen/exportieren,
-	// Read-only die Ressourcen-Ansichten; Admin schließt beides ein.
+	// Web UI roles (Phase 8): auditor may read/export the audit log,
+	// read-only the resource views; admin includes both.
 	envAuditorGroup  = "GSSH_AUDITOR_GROUP"
 	envReadOnlyGroup = "GSSH_READONLY_GROUP"
 
-	// OIDC-Client der Web-UI; Default ist die Client-ID aus
-	// GSSH_OIDC_CLIENT_ID. Mit gesetztem Client-Secret führt der Server den
-	// Login selbst aus (BFF: Authorization Code + PKCE + Secret, Session-
-	// Cookie); ohne Secret bleiben die /v1/auth-Endpunkte deaktiviert.
+	// OIDC client of the web UI; defaults to the client ID from
+	// GSSH_OIDC_CLIENT_ID. With a client secret set, the server performs the
+	// login itself (BFF: authorization code + PKCE + secret, session
+	// cookie); without a secret the /v1/auth endpoints stay disabled.
 	envUIOIDCClientID     = "GSSH_UI_OIDC_CLIENT_ID"
-	envUIOIDCClientSecret = "GSSH_UI_OIDC_CLIENT_SECRET" //nolint:gosec // Name der Env-Variable, kein Secret
-	envUIOIDCScopes       = "GSSH_UI_OIDC_SCOPES"        // Komma-getrennt; Default openid,profile,email,groups
-	envUIBaseURL          = "GSSH_UI_BASE_URL"           // externe Basis-URL der UI; leer = aus Request ableiten
-	envUISessionTTL       = "GSSH_UI_SESSION_TTL"        // Go-Duration, Default 12h
+	envUIOIDCClientSecret = "GSSH_UI_OIDC_CLIENT_SECRET" //nolint:gosec // name of the env var, not a secret
+	envUIOIDCScopes       = "GSSH_UI_OIDC_SCOPES"        // comma-separated; default openid,profile,email,groups
+	envUIBaseURL          = "GSSH_UI_BASE_URL"           // external base URL of the UI; empty = derive from the request
+	envUISessionTTL       = "GSSH_UI_SESSION_TTL"        // Go duration, default 12h
 
-	// Audit-Streaming (Phase 8): committete Audit-Events als strukturierte
-	// JSON-Logs (SIEM) und optional an einen Webhook.
-	envAuditStream         = "GSSH_AUDIT_STREAM"          // "true" aktiviert Log-Streaming
-	envAuditWebhookURL     = "GSSH_AUDIT_WEBHOOK_URL"     // optionaler Webhook
-	envAuditStreamInterval = "GSSH_AUDIT_STREAM_INTERVAL" // Go-Duration, Default 10s
+	// Audit streaming (Phase 8): committed audit events as structured
+	// JSON logs (SIEM) and optionally to a webhook.
+	envAuditStream         = "GSSH_AUDIT_STREAM"          // "true" enables log streaming
+	envAuditWebhookURL     = "GSSH_AUDIT_WEBHOOK_URL"     // optional webhook
+	envAuditStreamInterval = "GSSH_AUDIT_STREAM_INTERVAL" // Go duration, default 10s
 
-	// Rate-Limiting der Sign-/Enroll-Endpunkte (Phase 10): Requests bzw.
-	// erlaubte Fehlversuche (401/403) pro Client-IP und Minute; "0" bei
-	// GSSH_SIGN_RATE_PER_MINUTE deaktiviert das Rate-Limiting komplett.
-	envRatePerMinute = "GSSH_SIGN_RATE_PER_MINUTE" // Default 60
-	envFailPerMinute = "GSSH_SIGN_FAIL_PER_MINUTE" // Default 10
-	envRateTrustXFF  = "GSSH_RATE_TRUST_PROXY"     // "true": Client-IP aus X-Forwarded-For
+	// Rate limiting of the sign/enroll endpoints (Phase 10): requests, and
+	// allowed failed attempts (401/403), per client IP and minute; "0" on
+	// GSSH_SIGN_RATE_PER_MINUTE disables rate limiting entirely.
+	envRatePerMinute = "GSSH_SIGN_RATE_PER_MINUTE" // default 60
+	envFailPerMinute = "GSSH_SIGN_FAIL_PER_MINUTE" // default 10
+	envRateTrustXFF  = "GSSH_RATE_TRUST_PROXY"     // "true": client IP from X-Forwarded-For
 
-	// Laufzeit ausgestellter Host-Zertifikate (Enrollment + Renew); Go-Duration,
-	// leer = 30 Tage. Kurze Werte machen die Rotation testbar (E2E, Phase 13).
+	// Validity of issued host certificates (enrollment + renew); Go duration,
+	// empty = 30 days. Short values make rotation testable (E2E, Phase 13).
 	envHostCertValidity = "GSSH_HOST_CERT_VALIDITY"
 
-	// One-Command-Host-Install: externe URLs und Pin-Quellen. Fehlt eine
-	// Voraussetzung, bleibt der Host-Rollout deaktiviert (503) — nie ungepinnt.
-	envPublicURL        = "GSSH_PUBLIC_URL"           // externe Public-Basis-URL; leer ⇒ Fallback GSSH_UI_BASE_URL
-	envAgentPublicURL   = "GSSH_AGENT_PUBLIC_URL"     // externe mTLS-Agent-URL; wird nie abgeleitet
-	envPublicPin        = "GSSH_PUBLIC_PIN"           // Pin-Quelle 1: statischer Base64-SPKI-Pin
-	envPublicPinCert    = "GSSH_PUBLIC_PIN_CERT_FILE" // Pin-Quelle 2: PEM-Zertifikat (erster Block = Leaf)
-	envPublicPinRefresh = "GSSH_PUBLIC_PIN_REFRESH"   // Refresh-Intervall des Selbst-Dials, Default 5m
-	envAgentDownloadRPM = "GSSH_AGENT_DOWNLOAD_RPM"   // Binary-Downloads pro Client-IP und Minute, Default 10 ("0" = aus)
+	// One-command host install: external URLs and pin sources. If a
+	// prerequisite is missing, host rollout stays disabled (503) — never unpinned.
+	envPublicURL        = "GSSH_PUBLIC_URL"           // external public base URL; empty ⇒ falls back to GSSH_UI_BASE_URL
+	envAgentPublicURL   = "GSSH_AGENT_PUBLIC_URL"     // external mTLS agent URL; never derived
+	envPublicPin        = "GSSH_PUBLIC_PIN"           // pin source 1: static base64 SPKI pin
+	envPublicPinCert    = "GSSH_PUBLIC_PIN_CERT_FILE" // pin source 2: PEM certificate (first block = leaf)
+	envPublicPinRefresh = "GSSH_PUBLIC_PIN_REFRESH"   // refresh interval of the self-dial, default 5m
+	envAgentDownloadRPM = "GSSH_AGENT_DOWNLOAD_RPM"   // binary downloads per client IP and minute, default 10 ("0" = off)
 )
 
-// defaultAgentDownloadRPM/Burst drosseln den Binary-Download deutlich enger als
-// die Sign-/Enroll-Endpunkte (15–40 MB je Abruf). 10/min stoppt eine
-// Einzelquelle genauso wie ein engerer Wert, würgt aber Bulk-Rollouts hinter
-// Firmen-NAT (eine IP, Ansible-Loop über viele Hosts) nicht ab.
+// defaultAgentDownloadRPM/Burst throttle the binary download considerably
+// tighter than the sign/enroll endpoints (15–40 MB per fetch). 10/min stops a
+// single source just as well as a tighter value, but doesn't choke bulk
+// rollouts behind corporate NAT (one IP, an Ansible loop over many hosts).
 const (
 	defaultAgentDownloadRPM   = 10
 	defaultAgentDownloadBurst = 5
 )
 
-// defaultSyncInterval ist das Standard-Intervall des Gruppen-Syncs.
+// defaultSyncInterval is the default interval of the group sync.
 const defaultSyncInterval = 5 * time.Minute
 
-// defaultUISessionTTL ist die Standard-Lebensdauer der UI-Session; solange
-// bleiben die Gruppen-Claims des Logins wirksam (vergleichbar mit der
-// bisherigen ID-Token-Laufzeit). Deaktivierte Benutzer blockt der Server
-// unabhängig davon bei jedem Request.
+// defaultUISessionTTL is the default lifetime of the UI session; the login's
+// group claims stay in effect for that long (comparable to the previous
+// ID-token lifetime). Disabled users are blocked by the server on every
+// request regardless of this.
 const defaultUISessionTTL = 12 * time.Hour
 
-// defaultUIScopes sind die OIDC-Scopes des UI-Logins; groups liefert die
-// Gruppen-Claims für das Rollen-Mapping (Dex gibt sie nur auf Anfrage heraus).
+// defaultUIScopes are the OIDC scopes of the UI login; groups delivers the
+// group claims for the role mapping (Dex only hands them out on request).
 var defaultUIScopes = []string{"openid", "profile", "email", "groups"}
 
-// hostCertValidityFromEnv parst GSSH_HOST_CERT_VALIDITY; leer ⇒ 0 (Default
-// 30 Tage in internal/api). Ungültige Werte sind ein Konfigurationsfehler
-// (fail-fast statt still 30-Tage-Zertifikate auszustellen).
+// hostCertValidityFromEnv parses GSSH_HOST_CERT_VALIDITY; empty ⇒ 0 (default
+// 30 days in internal/api). Invalid values are a configuration error
+// (fail-fast instead of silently issuing 30-day certificates).
 func hostCertValidityFromEnv() (time.Duration, error) {
 	raw := os.Getenv(envHostCertValidity)
 	if raw == "" {
@@ -160,13 +160,13 @@ func hostCertValidityFromEnv() (time.Duration, error) {
 	}
 	validity, err := time.ParseDuration(raw)
 	if err != nil || validity <= 0 {
-		return 0, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envHostCertValidity, raw)
+		return 0, fmt.Errorf("%s: invalid duration %q (expected a go-duration > 0)", envHostCertValidity, raw)
 	}
 	return validity, nil
 }
 
-// publicBaseURL liefert die externe Basis-URL des Public-Listeners:
-// GSSH_PUBLIC_URL, ersatzweise die UI-Basis-URL. Leer ⇒ Rollout-Gate zu.
+// publicBaseURL returns the external base URL of the public listener:
+// GSSH_PUBLIC_URL, falling back to the UI base URL. Empty ⇒ rollout gate stays closed.
 func publicBaseURL() string {
 	base := os.Getenv(envPublicURL)
 	if base == "" {
@@ -175,11 +175,10 @@ func publicBaseURL() string {
 	return strings.TrimSuffix(base, "/")
 }
 
-// pinConfigFromEnv baut die Pin-Konfiguration des Host-Rollouts. Ein
-// ungültiger statischer Pin oder ein unbrauchbares Refresh-Intervall ist ein
-// Konfigurationsfehler und bricht den Start ab (fail-fast wie bei
-// GSSH_HOST_CERT_VALIDITY) — still ohne Pin weiterzulaufen wäre die
-// gefährlichere Variante.
+// pinConfigFromEnv builds the pin configuration of the host rollout. An
+// invalid static pin or an unusable refresh interval is a configuration
+// error and aborts startup (fail-fast, like GSSH_HOST_CERT_VALIDITY) —
+// silently continuing without a pin would be the more dangerous option.
 func pinConfigFromEnv() (api.PinProviderConfig, error) {
 	cfg := api.PinProviderConfig{
 		StaticPin: os.Getenv(envPublicPin),
@@ -194,14 +193,14 @@ func pinConfigFromEnv() (api.PinProviderConfig, error) {
 	if raw := os.Getenv(envPublicPinRefresh); raw != "" {
 		refresh, err := time.ParseDuration(raw)
 		if err != nil || refresh <= 0 {
-			return api.PinProviderConfig{}, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envPublicPinRefresh, raw)
+			return api.PinProviderConfig{}, fmt.Errorf("%s: invalid duration %q (expected a go-duration > 0)", envPublicPinRefresh, raw)
 		}
 		cfg.Refresh = refresh
 	}
 	return cfg, nil
 }
 
-// Betriebsmodi der CA-Keys (GSSH_CA_MODE).
+// Operating modes of the CA keys (GSSH_CA_MODE).
 const (
 	caModeManaged     = "managed"
 	caModeSelfManaged = "self-managed"
@@ -259,8 +258,8 @@ func main() {
 	os.Exit(run(os.Stdout, os.Stderr, os.Args[1:]))
 }
 
-// run enthält die eigentliche Logik, damit sie testbar bleibt; main ist nur ein
-// dünner Wrapper um Exit-Code-Handling.
+// run holds the actual logic so it stays testable; main is just a thin
+// wrapper around exit-code handling.
 func run(stdout, stderr io.Writer, args []string) int {
 	if len(args) > 0 && args[0] == "enroll-token" {
 		return runEnrollToken(stdout, stderr, args[1:])
@@ -274,10 +273,10 @@ func run(stdout, stderr io.Writer, args []string) int {
 
 	fs := flag.NewFlagSet("gssh-server", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	showVersion := fs.Bool("version", false, "Version ausgeben und beenden")
-	listen := fs.String("listen", "", "Listen-Adresse der HTTP-API (z. B. :8080); leer = nicht starten")
-	agentListen := fs.String("agent-listen", "", "Listen-Adresse der Agent-API mit mTLS (z. B. :8443); leer = deaktiviert")
-	metricsListen := fs.String("metrics-listen", "", "Listen-Adresse des Prometheus-Endpoints /metrics (z. B. :9090); leer = deaktiviert")
+	showVersion := fs.Bool("version", false, "print version and exit")
+	listen := fs.String("listen", "", "listen address of the HTTP API (e.g. :8080); empty = do not start")
+	agentListen := fs.String("agent-listen", "", "listen address of the mTLS agent API (e.g. :8443); empty = disabled")
+	metricsListen := fs.String("metrics-listen", "", "listen address of the Prometheus /metrics endpoint (e.g. :9090); empty = disabled")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -288,22 +287,22 @@ func run(stdout, stderr io.Writer, args []string) int {
 	}
 
 	if *listen == "" {
-		fmt.Fprintln(stderr, "gssh-server: -listen fehlt (z. B. -listen :8080)")
+		fmt.Fprintln(stderr, "gssh-server: -listen is missing (e.g. -listen :8080)")
 		return 2
 	}
 
 	logger := slog.New(slog.NewJSONHandler(stdout, nil))
 	if err := serve(logger, *listen, *agentListen, *metricsListen); err != nil {
-		logger.Error("serverstart fehlgeschlagen", "error", err)
+		logger.Error("server start failed", "error", err)
 		return 1
 	}
 	return 0
 }
 
-// dbConnString baut die PostgreSQL-Verbindungs-URL aus den einzelnen
-// GSSH_DB_*-Variablen. Benutzer und Passwort werden URL-escaped — Sonderzeichen
-// im Passwort sind damit unkritisch. Port und SSL-Mode sind optional und
-// fallen auf die Treiber-Defaults zurück (5432 bzw. prefer).
+// dbConnString builds the PostgreSQL connection URL from the individual
+// GSSH_DB_* variables. User and password are URL-escaped, so special
+// characters in the password are not a problem. Port and SSL mode are
+// optional and fall back to the driver defaults (5432 and prefer).
 func dbConnString() (string, error) {
 	var missing []string
 	for _, v := range []string{envDBHost, envDBUser, envDBPassword, envDBName} {
@@ -312,7 +311,7 @@ func dbConnString() (string, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return "", fmt.Errorf("datenbank-konfiguration unvollständig: %s nicht gesetzt", strings.Join(missing, ", "))
+		return "", fmt.Errorf("database configuration incomplete: %s not set", strings.Join(missing, ", "))
 	}
 	host := os.Getenv(envDBHost)
 	if port := os.Getenv(envDBPort); port != "" {
@@ -330,9 +329,9 @@ func dbConnString() (string, error) {
 	return u.String(), nil
 }
 
-// runMigrate wendet die Datenbank-Migrationen an und beendet sich (Subkommando
-// `gssh-server migrate`, für den Init-Container im Kubernetes-Deployment,
-// Plan Phase 11). Konkurrierende Läufe serialisiert ein Advisory-Lock.
+// runMigrate applies the database migrations and exits (subcommand
+// `gssh-server migrate`, for the init container in the Kubernetes
+// deployment, plan Phase 11). An advisory lock serializes concurrent runs.
 func runMigrate(stdout, stderr io.Writer) int {
 	dsn, err := dbConnString()
 	if err != nil {
@@ -340,22 +339,22 @@ func runMigrate(stdout, stderr io.Writer) int {
 		return 2
 	}
 	if err := store.Migrate(context.Background(), dsn); err != nil {
-		fmt.Fprintf(stderr, "gssh-server: migrationen: %v\n", err)
+		fmt.Fprintf(stderr, "gssh-server: migrations: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, "migrationen angewendet")
+	fmt.Fprintln(stdout, "migrations applied")
 	return 0
 }
 
-// runEnrollToken erzeugt ein einmaliges Enrollment-Token (Subkommando
-// `gssh-server enroll-token`): Klartext geht nach stdout, in der DB liegt
-// nur der Hash.
+// runEnrollToken generates a one-time enrollment token (subcommand
+// `gssh-server enroll-token`): the plaintext goes to stdout, only the hash
+// is stored in the DB.
 func runEnrollToken(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("gssh-server enroll-token", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	name := fs.String("name", "", "optional: Token an diesen Hostnamen binden")
-	tagsFlag := fs.String("tags", "", "Host-Tags, z. B. env=prod,role=web")
-	ttl := fs.Duration("ttl", 24*time.Hour, "Gültigkeitsdauer des Tokens")
+	name := fs.String("name", "", "optional: bind the token to this hostname")
+	tagsFlag := fs.String("tags", "", "host tags, e.g. env=prod,role=web")
+	ttl := fs.Duration("ttl", 24*time.Hour, "validity duration of the token")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -375,15 +374,15 @@ func runEnrollToken(stdout, stderr io.Writer, args []string) int {
 
 	token, record, err := store.NewEnrollmentToken(*name, tags, *ttl)
 	if err != nil {
-		fmt.Fprintf(stderr, "gssh-server: token erzeugen: %v\n", err)
+		fmt.Fprintf(stderr, "gssh-server: generate token: %v\n", err)
 		return 1
 	}
 	if err := st.CreateEnrollmentToken(ctx, record); err != nil {
-		fmt.Fprintf(stderr, "gssh-server: token speichern: %v\n", err)
+		fmt.Fprintf(stderr, "gssh-server: store token: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "%s\n", token)
-	fmt.Fprintf(stderr, "einmaliges enrollment-token, gültig bis %s — der klartext wird nicht gespeichert\n",
+	fmt.Fprintf(stderr, "one-time enrollment token, valid until %s — the plaintext is not stored\n",
 		record.ExpiresAt.Format(time.RFC3339))
 	return 0
 }
@@ -444,7 +443,7 @@ func writeNewFile(path string, data []byte, mode os.FileMode) error {
 	return f.Close()
 }
 
-// parseTags parst "k=v,k2=v2" in eine Map.
+// parseTags parses "k=v,k2=v2" into a map.
 func parseTags(raw string) (map[string]string, error) {
 	tags := map[string]string{}
 	if raw == "" {
@@ -453,15 +452,15 @@ func parseTags(raw string) (map[string]string, error) {
 	for _, pair := range strings.Split(raw, ",") {
 		key, value, found := strings.Cut(pair, "=")
 		if !found || key == "" {
-			return nil, fmt.Errorf("ungültiges tag %q (erwartet key=value)", pair)
+			return nil, fmt.Errorf("invalid tag %q (expected key=value)", pair)
 		}
 		tags[key] = value
 	}
 	return tags, nil
 }
 
-// serve startet die HTTP-API, optional die Agent-API (mTLS), den
-// Metrics-Endpoint und ggf. den Gruppen-Sync; blockiert bis SIGINT/SIGTERM.
+// serve starts the HTTP API, optionally the agent API (mTLS), the metrics
+// endpoint, and — if configured — the group sync; blocks until SIGINT/SIGTERM.
 func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -489,7 +488,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 
 	adminGroup := os.Getenv(envAdminGroup)
 	if adminGroup == "" {
-		logger.Warn("admin-api nicht konfiguriert — grant-verwaltung deaktiviert", "env", envAdminGroup)
+		logger.Warn("admin api not configured — grant management disabled", "env", envAdminGroup)
 	}
 	startAuditStream(ctx, st, logger)
 
@@ -516,8 +515,8 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 				OIDCClientID: uiClientID,
 			},
 			UIAuth: uiAuth,
-			// Host-Rollout (One-Command-Install): Binaries aus dem Image, Pin
-			// und externe URLs. Fehlt etwas, bleibt das Gate zu (503).
+			// Host rollout (one-command install): binaries from the image, the
+			// pin, and external URLs. If anything is missing, the gate stays closed (503).
 			Agents:         agentdist.New(),
 			Pins:           pins,
 			AgentPublicURL: strings.TrimSuffix(os.Getenv(envAgentPublicURL), "/"),
@@ -528,7 +527,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 
 	errCh := make(chan error, 3)
 	go func() { errCh <- server.ListenAndServe() }()
-	logger.Info("gssh-server gestartet", "listen", listen, "version", version.String())
+	logger.Info("gssh-server started", "listen", listen, "version", version.String())
 
 	var agentServer *http.Server
 	if agentListen != "" {
@@ -537,18 +536,18 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 			return err
 		}
 		go func() { errCh <- agentServer.ListenAndServeTLS("", "") }()
-		logger.Info("agent-api gestartet (mtls)", "listen", agentListen)
+		logger.Info("agent api started (mtls)", "listen", agentListen)
 	}
 
-	// Metrics auf eigenem Listener: wird nicht über den Ingress exponiert,
-	// sondern nur vom Prometheus-Scraper erreicht (Phase 11).
+	// Metrics on its own listener: not exposed via the ingress, only reachable
+	// by the Prometheus scraper (Phase 11).
 	var metricsServer *http.Server
 	if metricsListen != "" {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("GET /metrics", metrics.Handler())
 		metricsServer = &http.Server{Addr: metricsListen, Handler: metricsMux, ReadHeaderTimeout: 10 * time.Second}
 		go func() { errCh <- metricsServer.ListenAndServe() }()
-		logger.Info("metrics-endpoint gestartet", "listen", metricsListen)
+		logger.Info("metrics endpoint started", "listen", metricsListen)
 	}
 
 	select {
@@ -567,15 +566,15 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	}
 }
 
-// newAgentServer baut den mTLS-Server der Agent-API: Server-Zertifikat aus
-// der eigenen mTLS-CA, Client-Zertifikate werden gegen dieselbe CA verlangt
-// und verifiziert.
+// newAgentServer builds the mTLS server of the agent API: the server
+// certificate comes from the own mTLS CA, and client certificates are
+// required and verified against the same CA.
 func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, logger *slog.Logger, listen string, hostCertValidity time.Duration) (*http.Server, error) {
 	// In self-managed mode the mTLS CA comes from the mounted files and was
 	// already adopted by setup(); the bootstrap refuses to run there.
 	if !certAuthority.SelfManaged() {
 		if err := certAuthority.EnsureMTLSCA(ctx); err != nil {
-			return nil, fmt.Errorf("mtls-ca bootstrappen: %w", err)
+			return nil, fmt.Errorf("bootstrap mtls ca: %w", err)
 		}
 	}
 	names := strings.Split(os.Getenv(envAgentTLSNames), ",")
@@ -584,7 +583,7 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 	}
 	serverCert, err := certAuthority.IssueServerCert(ctx, names)
 	if err != nil {
-		return nil, fmt.Errorf("agent-server-zertifikat: %w", err)
+		return nil, fmt.Errorf("agent server certificate: %w", err)
 	}
 	pool, err := certAuthority.MTLSCAPool(ctx)
 	if err != nil {
@@ -603,19 +602,19 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 	}, nil
 }
 
-// setupOIDC baut den Token-Verifier, falls OIDC konfiguriert ist; ohne
-// Issuer bleibt der Sign-Endpoint deaktiviert. Eine fehlende Client-ID ist
-// ein Konfigurationsfehler (fail-fast statt Ablehnung aller Tokens zur
-// Laufzeit — Security-Review Phase 10).
+// setupOIDC builds the token verifier if OIDC is configured; without an
+// issuer the sign endpoint stays disabled. A missing client ID is a
+// configuration error (fail-fast instead of rejecting all tokens at
+// runtime — security review Phase 10).
 func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, error) {
 	issuer := os.Getenv(envOIDCIssuer)
 	if issuer == "" {
-		logger.Warn("oidc nicht konfiguriert — /v1/sign/user deaktiviert", "env", envOIDCIssuer)
-		return nil, nil //nolint:nilnil // nil-Interface schaltet den Endpoint gezielt ab
+		logger.Warn("oidc not configured — /v1/sign/user disabled", "env", envOIDCIssuer)
+		return nil, nil //nolint:nilnil // nil interface deliberately disables the endpoint
 	}
 	clientID := os.Getenv(envOIDCClientID)
 	if clientID == "" {
-		return nil, fmt.Errorf("%s ist gesetzt, aber %s fehlt — ohne erwartete audience ist keine token-validierung möglich", envOIDCIssuer, envOIDCClientID)
+		return nil, fmt.Errorf("%s is set, but %s is missing — without an expected audience, token validation is not possible", envOIDCIssuer, envOIDCClientID)
 	}
 	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{
 		IssuerURL: issuer,
@@ -624,12 +623,12 @@ func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, err
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("oidc konfiguriert", "issuer", issuer)
+	logger.Info("oidc configured", "issuer", issuer)
 	return verifier, nil
 }
 
-// setupVerifiers bündelt die OIDC-Konfiguration des Servers: Benutzer- und
-// CI-Token-Verifier, Audience-Separation und den server-seitigen UI-Login.
+// setupVerifiers bundles the server's OIDC configuration: user and CI token
+// verifiers, audience separation, and the server-side UI login.
 func setupVerifiers(ctx context.Context, logger *slog.Logger, uiClientID string) (api.TokenVerifier, api.CITokenVerifier, *api.UIAuthConfig, error) {
 	verifier, err := setupOIDC(ctx, logger)
 	if err != nil {
@@ -649,36 +648,36 @@ func setupVerifiers(ctx context.Context, logger *slog.Logger, uiClientID string)
 	return verifier, ciVerifier, uiAuth, nil
 }
 
-// setupUIAuth baut die Konfiguration des server-seitigen UI-Logins (BFF),
-// falls ein Client-Secret gesetzt ist; ohne Secret bleiben die
-// /v1/auth-Endpunkte deaktiviert (503). Der Session-Schlüssel wird aus dem
-// CA-Master-Key abgeleitet — kein zusätzliches Secret nötig.
+// setupUIAuth builds the configuration of the server-side UI login (BFF)
+// if a client secret is set; without a secret the /v1/auth endpoints stay
+// disabled (503). The session key is derived from the CA master key — no
+// additional secret needed.
 func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*api.UIAuthConfig, error) {
 	secret := os.Getenv(envUIOIDCClientSecret)
 	if secret == "" {
-		logger.Warn("ui-login nicht konfiguriert — /v1/auth deaktiviert", "env", envUIOIDCClientSecret)
-		return nil, nil //nolint:nilnil // nil-Config schaltet die Endpunkte gezielt ab
+		logger.Warn("ui login not configured — /v1/auth disabled", "env", envUIOIDCClientSecret)
+		return nil, nil //nolint:nilnil // nil config deliberately disables the endpoints
 	}
 	issuer := os.Getenv(envOIDCIssuer)
 	if issuer == "" {
-		return nil, fmt.Errorf("%s ist gesetzt, aber %s fehlt", envUIOIDCClientSecret, envOIDCIssuer)
+		return nil, fmt.Errorf("%s is set, but %s is missing", envUIOIDCClientSecret, envOIDCIssuer)
 	}
 	if clientID == "" {
-		return nil, fmt.Errorf("%s ist gesetzt, aber %s fehlt", envUIOIDCClientSecret, envOIDCClientID)
+		return nil, fmt.Errorf("%s is set, but %s is missing", envUIOIDCClientSecret, envOIDCClientID)
 	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
-		return nil, fmt.Errorf("ui-login: oidc-discovery für %s: %w", issuer, err)
+		return nil, fmt.Errorf("ui login: oidc discovery for %s: %w", issuer, err)
 	}
-	// Eigener Verifier: die Audience der UI-Tokens ist die UI-Client-ID,
-	// die von GSSH_OIDC_CLIENT_ID abweichen kann.
+	// Its own verifier: the audience of the UI tokens is the UI client ID,
+	// which can differ from GSSH_OIDC_CLIENT_ID.
 	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{IssuerURL: issuer, ClientID: clientID})
 	if err != nil {
 		return nil, err
 	}
 	masterKey, err := base64.StdEncoding.DecodeString(os.Getenv(envMasterKey))
 	if err != nil {
-		return nil, fmt.Errorf("%s dekodieren: %w", envMasterKey, err)
+		return nil, fmt.Errorf("decode %s: %w", envMasterKey, err)
 	}
 	codec, err := auth.NewSessionCodec(masterKey)
 	if err != nil {
@@ -695,11 +694,11 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*ap
 	if raw := os.Getenv(envUISessionTTL); raw != "" {
 		parsed, err := time.ParseDuration(raw)
 		if err != nil || parsed <= 0 {
-			return nil, fmt.Errorf("%s: ungültige dauer %q (go-duration > 0 erwartet)", envUISessionTTL, raw)
+			return nil, fmt.Errorf("%s: invalid duration %q (expected a go-duration > 0)", envUISessionTTL, raw)
 		}
 		sessionTTL = parsed
 	}
-	logger.Info("ui-login konfiguriert (server-seitiges oidc)", "issuer", issuer, "client_id", clientID, "session_ttl", sessionTTL)
+	logger.Info("ui login configured (server-side oidc)", "issuer", issuer, "client_id", clientID, "session_ttl", sessionTTL)
 	return &api.UIAuthConfig{
 		OAuth: &oauth2.Config{
 			ClientID:     clientID,
@@ -714,17 +713,17 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*ap
 	}, nil
 }
 
-// setupRateLimit baut den Rate-Limiter der Sign-/Enroll-Endpunkte aus der
-// Umgebung; GSSH_SIGN_RATE_PER_MINUTE=0 deaktiviert ihn bewusst (Lasttests).
+// setupRateLimit builds the rate limiter of the sign/enroll endpoints from
+// the environment; GSSH_SIGN_RATE_PER_MINUTE=0 deliberately disables it (load tests).
 func setupRateLimit(logger *slog.Logger) *api.RateLimiter {
 	cfg := api.DefaultRateLimiterConfig()
 	if raw := os.Getenv(envRatePerMinute); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
 		switch {
 		case err != nil || parsed < 0:
-			logger.Warn("ungültige rate, nutze default", "env", envRatePerMinute, "value", raw)
+			logger.Warn("invalid rate, using default", "env", envRatePerMinute, "value", raw)
 		case parsed == 0:
-			logger.Warn("rate-limiting der sign-/enroll-endpunkte deaktiviert", "env", envRatePerMinute)
+			logger.Warn("rate limiting of the sign/enroll endpoints disabled", "env", envRatePerMinute)
 			return nil
 		default:
 			cfg.RequestsPerMinute = parsed
@@ -736,18 +735,18 @@ func setupRateLimit(logger *slog.Logger) *api.RateLimiter {
 			cfg.FailuresPerMinute = parsed
 			cfg.FailureBurst = parsed
 		} else {
-			logger.Warn("ungültige fehlversuchs-rate, nutze default", "env", envFailPerMinute, "value", raw)
+			logger.Warn("invalid failure rate, using default", "env", envFailPerMinute, "value", raw)
 		}
 	}
 	cfg.TrustProxyHeader = os.Getenv(envRateTrustXFF) == "true"
 	return api.NewRateLimiter(cfg)
 }
 
-// setupDownloadRateLimit baut den engeren Limiter des Agent-Binary-Downloads;
-// GSSH_AGENT_DOWNLOAD_RPM=0 schaltet ihn ab. TrustProxyHeader kommt aus
-// derselben Env wie beim regulären Limiter — eine Wahrheit für die Client-IP,
-// sonst sähen hinter dem Ingress alle Requests wie die Proxy-IP aus und das
-// Limit wirkte global statt pro Host.
+// setupDownloadRateLimit builds the tighter limiter of the agent binary
+// download; GSSH_AGENT_DOWNLOAD_RPM=0 turns it off. TrustProxyHeader comes
+// from the same env var as the regular limiter — one source of truth for
+// the client IP, otherwise all requests behind the ingress would look like
+// the proxy IP and the limit would act globally instead of per host.
 func setupDownloadRateLimit(logger *slog.Logger) *api.RateLimiter {
 	cfg := api.RateLimiterConfig{
 		RequestsPerMinute: defaultAgentDownloadRPM,
@@ -758,9 +757,9 @@ func setupDownloadRateLimit(logger *slog.Logger) *api.RateLimiter {
 		parsed, err := strconv.ParseFloat(raw, 64)
 		switch {
 		case err != nil || parsed < 0:
-			logger.Warn("ungültige download-rate, nutze default", "env", envAgentDownloadRPM, "value", raw)
+			logger.Warn("invalid download rate, using default", "env", envAgentDownloadRPM, "value", raw)
 		case parsed == 0:
-			logger.Warn("rate-limiting des agent-downloads deaktiviert", "env", envAgentDownloadRPM)
+			logger.Warn("rate limiting of the agent download disabled", "env", envAgentDownloadRPM)
 			return nil
 		default:
 			cfg.RequestsPerMinute = parsed
@@ -770,10 +769,10 @@ func setupDownloadRateLimit(logger *slog.Logger) *api.RateLimiter {
 	return api.NewRateLimiter(cfg)
 }
 
-// checkAudienceSeparation verhindert Audience-Confusion (Security-Review
-// Phase 10): laufen Benutzer-OIDC und GitLab-CI gegen denselben Issuer,
-// müssen sich die erwarteten Audiences unterscheiden — sonst wären Benutzer-
-// und CI-Tokens an beiden Endpunkten austauschbar.
+// checkAudienceSeparation prevents audience confusion (security review
+// Phase 10): if user OIDC and GitLab CI run against the same issuer, their
+// expected audiences must differ — otherwise user and CI tokens would be
+// interchangeable at both endpoints.
 func checkAudienceSeparation() error {
 	issuer := os.Getenv(envOIDCIssuer)
 	if issuer == "" || issuer != os.Getenv(envCIIssuer) {
@@ -784,18 +783,18 @@ func checkAudienceSeparation() error {
 		ciAudience = auth.DefaultCIAudience
 	}
 	if ciAudience == os.Getenv(envOIDCClientID) {
-		return fmt.Errorf("gleicher issuer und gleiche audience für benutzer-oidc und gitlab-ci (%s/%s) — tokens wären an beiden sign-endpunkten austauschbar", envOIDCClientID, envCIAudience)
+		return fmt.Errorf("same issuer and same audience for user oidc and gitlab ci (%s/%s) — tokens would be interchangeable at both sign endpoints", envOIDCClientID, envCIAudience)
 	}
 	return nil
 }
 
-// setupCIOIDC baut den Verifier für GitLab-Job-Tokens, falls konfiguriert;
-// ohne Issuer bleibt /v1/sign/ci deaktiviert.
+// setupCIOIDC builds the verifier for GitLab job tokens if configured;
+// without an issuer /v1/sign/ci stays disabled.
 func setupCIOIDC(ctx context.Context, logger *slog.Logger) (api.CITokenVerifier, error) {
 	issuer := os.Getenv(envCIIssuer)
 	if issuer == "" {
-		logger.Warn("gitlab-ci nicht konfiguriert — /v1/sign/ci deaktiviert", "env", envCIIssuer)
-		return nil, nil //nolint:nilnil // nil-Interface schaltet den Endpoint gezielt ab
+		logger.Warn("gitlab ci not configured — /v1/sign/ci disabled", "env", envCIIssuer)
+		return nil, nil //nolint:nilnil // nil interface deliberately disables the endpoint
 	}
 	verifier, err := auth.NewCIVerifier(ctx, auth.CIVerifierConfig{
 		IssuerURL: issuer,
@@ -804,12 +803,12 @@ func setupCIOIDC(ctx context.Context, logger *slog.Logger) (api.CITokenVerifier,
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("gitlab-ci konfiguriert", "issuer", issuer)
+	logger.Info("gitlab ci configured", "issuer", issuer)
 	return verifier, nil
 }
 
-// startAuditStream startet das Audit-Streaming (strukturierte JSON-Logs auf
-// stdout und/oder Webhook), falls konfiguriert.
+// startAuditStream starts audit streaming (structured JSON logs to stdout
+// and/or a webhook) if configured.
 func startAuditStream(ctx context.Context, st *store.Store, logger *slog.Logger) {
 	streamLogs := os.Getenv(envAuditStream) == "true"
 	webhookURL := os.Getenv(envAuditWebhookURL)
@@ -821,20 +820,20 @@ func startAuditStream(ctx context.Context, st *store.Store, logger *slog.Logger)
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			cfg.Interval = parsed
 		} else {
-			logger.Warn("ungültiges audit-stream-intervall, nutze default", "value", raw)
+			logger.Warn("invalid audit stream interval, using default", "value", raw)
 		}
 	}
 	streamer := auditstream.New(st, cfg)
 	go streamer.Run(ctx)
-	logger.Info("audit-streaming gestartet", "logs", streamLogs, "webhook", webhookURL != "")
+	logger.Info("audit streaming started", "logs", streamLogs, "webhook", webhookURL != "")
 }
 
-// startGroupSync startet den periodischen Gruppen-Sync via
-// Keycloak-Admin-API, falls konfiguriert.
+// startGroupSync starts the periodic group sync via the Keycloak admin API
+// if configured.
 func startGroupSync(ctx context.Context, st *store.Store, logger *slog.Logger) {
 	clientID := os.Getenv(envKCClientID)
 	if clientID == "" {
-		logger.Warn("gruppen-sync nicht konfiguriert — offboarding wirkt nur über token-ablauf", "env", envKCClientID)
+		logger.Warn("group sync not configured — offboarding only takes effect via token expiry", "env", envKCClientID)
 		return
 	}
 	interval := defaultSyncInterval
@@ -842,7 +841,7 @@ func startGroupSync(ctx context.Context, st *store.Store, logger *slog.Logger) {
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			interval = parsed
 		} else {
-			logger.Warn("ungültiges sync-intervall, nutze default", "value", raw, "default", interval)
+			logger.Warn("invalid sync interval, using default", "value", raw, "default", interval)
 		}
 	}
 	source := auth.NewKeycloakSource(ctx, auth.KeycloakConfig{
@@ -853,31 +852,31 @@ func startGroupSync(ctx context.Context, st *store.Store, logger *slog.Logger) {
 	})
 	syncer := auth.NewSyncer(st, source, logger)
 	go syncer.Run(ctx, interval)
-	logger.Info("gruppen-sync gestartet", "issuer", source.Issuer(), "interval", interval)
+	logger.Info("group sync started", "issuer", source.Issuer(), "interval", interval)
 }
 
-// setupStore baut die Verbindungs-URL aus der Umgebung, migriert die
-// Datenbank und öffnet den Store.
+// setupStore builds the connection URL from the environment, migrates the
+// database, and opens the store.
 func setupStore(ctx context.Context) (*store.Store, error) {
 	dsn, err := dbConnString()
 	if err != nil {
 		return nil, err
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
-		return nil, fmt.Errorf("migrationen: %w", err)
+		return nil, fmt.Errorf("migrations: %w", err)
 	}
 	return store.New(ctx, dsn)
 }
 
-// setup liest die Einstellungen aus der Umgebung, migriert die Datenbank und
-// bootstrapt die CA (inkl. CA-Keys, falls noch keine existieren).
+// setup reads the settings from the environment, migrates the database, and
+// bootstraps the CA (including CA keys, if none exist yet).
 // In self-managed mode the mounted key files replace the bootstrap: they are
 // loaded before the database is touched and adopted afterwards (D2/D4).
 // GSSH_CA_MASTER_KEY stays mandatory in both modes (D7).
 func setup(ctx context.Context) (*ca.CA, *store.Store, error) {
 	masterKey, err := base64.StdEncoding.DecodeString(os.Getenv(envMasterKey))
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s dekodieren: %w", envMasterKey, err)
+		return nil, nil, fmt.Errorf("decode %s: %w", envMasterKey, err)
 	}
 	mode, keyPaths, err := caModeFromEnv()
 	if err != nil {
@@ -909,7 +908,7 @@ func setup(ctx context.Context) (*ca.CA, *store.Store, error) {
 	}
 	if err := certAuthority.EnsureCAKeys(ctx); err != nil {
 		st.Close()
-		return nil, nil, fmt.Errorf("ca-keys bootstrappen: %w", err)
+		return nil, nil, fmt.Errorf("bootstrap ca keys: %w", err)
 	}
 	return certAuthority, st, nil
 }

@@ -15,18 +15,19 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 )
 
-// fakeIDP ist ein minimaler OIDC-Provider für Unit-Tests: Discovery, JWKS,
-// Authorize (leitet sofort mit Code zurück), Token- und Device-Endpoint.
+// fakeIDP is a minimal OIDC provider for unit tests: discovery, JWKS,
+// authorize (redirects immediately with a code), token, and device
+// endpoint.
 type fakeIDP struct {
 	t      *testing.T
 	server *httptest.Server
 	key    *rsa.PrivateKey
 
-	// deviceStillPending zählt, wie oft der Token-Endpoint im Device-Flow
-	// noch "authorization_pending" liefern soll.
+	// deviceStillPending counts how many more times the token endpoint
+	// should still return "authorization_pending" in the device flow.
 	deviceStillPending atomic.Int32
-	// lastCodeVerifier ist der zuletzt beim Code-Exchange gesehene
-	// PKCE-Verifier.
+	// lastCodeVerifier is the PKCE verifier last seen during the code
+	// exchange.
 	lastCodeVerifier atomic.Value
 }
 
@@ -38,12 +39,12 @@ const (
 	fakeUserCode     = "ABCD-EFGH"
 )
 
-// newFakeIDP startet den Fake-IdP; Cleanup übernimmt t.
+// newFakeIDP starts the fake IdP; cleanup is handled by t.
 func newFakeIDP(t *testing.T) *fakeIDP {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		t.Fatalf("rsa-key erzeugen: %v", err)
+		t.Fatalf("generating rsa key: %v", err)
 	}
 	idp := &fakeIDP{t: t, key: key}
 
@@ -67,7 +68,7 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 		q := r.URL.Query()
 		redirect, err := url.Parse(q.Get("redirect_uri"))
 		if err != nil {
-			http.Error(w, "redirect_uri fehlt", http.StatusBadRequest)
+			http.Error(w, "redirect_uri missing", http.StatusBadRequest)
 			return
 		}
 		values := redirect.Query()
@@ -95,22 +96,22 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 
 func (idp *fakeIDP) Issuer() string { return idp.server.URL }
 
-// handleToken bedient Code-Exchange und Device-Flow-Polling.
+// handleToken serves the code exchange and device flow polling.
 func (idp *fakeIDP) handleToken(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "form ungültig", http.StatusBadRequest)
+		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
 	switch r.Form.Get("grant_type") {
 	case "authorization_code":
 		if r.Form.Get("code") != fakeAuthCode {
-			http.Error(w, "code ungültig", http.StatusBadRequest)
+			http.Error(w, "invalid code", http.StatusBadRequest)
 			return
 		}
 		idp.lastCodeVerifier.Store(r.Form.Get("code_verifier"))
 	case "urn:ietf:params:oauth:grant-type:device_code":
 		if r.Form.Get("device_code") != fakeDeviceCode {
-			http.Error(w, "device_code ungültig", http.StatusBadRequest)
+			http.Error(w, "invalid device_code", http.StatusBadRequest)
 			return
 		}
 		if idp.deviceStillPending.Add(-1) >= 0 {
@@ -125,11 +126,11 @@ func (idp *fakeIDP) handleToken(w http.ResponseWriter, r *http.Request) {
 			id, secret = r.Form.Get("client_id"), r.Form.Get("client_secret")
 		}
 		if id != fakeClientID || secret != fakeClientSecret {
-			http.Error(w, "client-credentials ungültig", http.StatusUnauthorized)
+			http.Error(w, "invalid client credentials", http.StatusUnauthorized)
 			return
 		}
 	default:
-		http.Error(w, "grant_type nicht unterstützt", http.StatusBadRequest)
+		http.Error(w, "unsupported grant_type", http.StatusBadRequest)
 		return
 	}
 	writeJSON(idp.t, w, map[string]any{
@@ -140,8 +141,8 @@ func (idp *fakeIDP) handleToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// IDToken signiert ein ID-Token mit Standard-Claims; overrides überschreibt
-// bzw. ergänzt einzelne Claims (Wert nil entfernt den Claim).
+// IDToken signs an ID token with standard claims; overrides replaces or
+// adds individual claims (a nil value removes the claim).
 func (idp *fakeIDP) IDToken(overrides map[string]any) string {
 	idp.t.Helper()
 	claims := map[string]any{
@@ -160,22 +161,22 @@ func (idp *fakeIDP) IDToken(overrides map[string]any) string {
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
-		idp.t.Fatalf("claims marshalen: %v", err)
+		idp.t.Fatalf("marshaling claims: %v", err)
 	}
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: idp.key},
 		(&jose.SignerOptions{}).WithHeader("kid", "test-key"),
 	)
 	if err != nil {
-		idp.t.Fatalf("signer bauen: %v", err)
+		idp.t.Fatalf("building signer: %v", err)
 	}
 	jws, err := signer.Sign(payload)
 	if err != nil {
-		idp.t.Fatalf("token signieren: %v", err)
+		idp.t.Fatalf("signing token: %v", err)
 	}
 	raw, err := jws.CompactSerialize()
 	if err != nil {
-		idp.t.Fatalf("token serialisieren: %v", err)
+		idp.t.Fatalf("serializing token: %v", err)
 	}
 	return raw
 }
@@ -184,6 +185,6 @@ func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		t.Errorf("json schreiben: %v", err)
+		t.Errorf("writing json: %v", err)
 	}
 }

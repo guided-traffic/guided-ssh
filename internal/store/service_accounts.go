@@ -8,11 +8,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// EventServiceAccountUpdated ist das Audit-Event einer Service-Account-Änderung
-// über die Admin-API (Phase 8): der Not-Aus-Schalter ist nachvollziehbar.
+// EventServiceAccountUpdated is the audit event of a service account change
+// via the admin API (phase 8): the kill switch is traceable.
 const EventServiceAccountUpdated = "service_account.updated"
 
-// CreateServiceAccount legt eine maschinelle Identität an und füllt ID und Zeitstempel.
+// CreateServiceAccount creates a machine identity and fills in the ID and timestamp.
 func (s *Store) CreateServiceAccount(ctx context.Context, a *ServiceAccount) error {
 	created, err := queryOne[ServiceAccount](ctx, s.pool, `
 		INSERT INTO service_accounts (name, kind, issuer, claim_matcher, active)
@@ -26,14 +26,14 @@ func (s *Store) CreateServiceAccount(ctx context.Context, a *ServiceAccount) err
 	return nil
 }
 
-// KindGitLabCI kennzeichnet Service-Accounts, die pro GitLab-Projekt bei der
-// ersten CI-Ausstellung angelegt werden (Phase 7).
+// KindGitLabCI marks service accounts that are created per GitLab project on
+// the first CI issuance (phase 7).
 const KindGitLabCI = "gitlab-ci"
 
-// EnsureCIServiceAccount stellt den Service-Account eines GitLab-Projekts
-// sicher (Name = project_path) und liefert ihn zurück. Ein bestehender
-// Account behält seinen active-Status — active = false wirkt damit als
-// Not-Aus pro Projekt.
+// EnsureCIServiceAccount ensures the service account of a GitLab project
+// exists (name = project_path) and returns it. An existing account keeps
+// its active status — active = false thus acts as a per-project kill
+// switch.
 func (s *Store) EnsureCIServiceAccount(ctx context.Context, issuer, projectPath string) (*ServiceAccount, error) {
 	return queryOne[ServiceAccount](ctx, s.pool, `
 		INSERT INTO service_accounts (name, kind, issuer, claim_matcher, active)
@@ -43,22 +43,22 @@ func (s *Store) EnsureCIServiceAccount(ctx context.Context, issuer, projectPath 
 		projectPath, KindGitLabCI, issuer, map[string]string{"project_path": projectPath})
 }
 
-// GetServiceAccount liefert eine maschinelle Identität per ID.
+// GetServiceAccount returns a machine identity by ID.
 func (s *Store) GetServiceAccount(ctx context.Context, id uuid.UUID) (*ServiceAccount, error) {
 	return queryOne[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts WHERE id = $1`, id)
 }
 
-// GetServiceAccountByName liefert eine maschinelle Identität per Name.
+// GetServiceAccountByName returns a machine identity by name.
 func (s *Store) GetServiceAccountByName(ctx context.Context, name string) (*ServiceAccount, error) {
 	return queryOne[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts WHERE name = $1`, name)
 }
 
-// ListServiceAccounts liefert alle maschinellen Identitäten.
+// ListServiceAccounts returns all machine identities.
 func (s *Store) ListServiceAccounts(ctx context.Context) ([]ServiceAccount, error) {
 	return queryAll[ServiceAccount](ctx, s.pool, `SELECT * FROM service_accounts ORDER BY name`)
 }
 
-// UpdateServiceAccount aktualisiert die veränderlichen Felder einer maschinellen Identität.
+// UpdateServiceAccount updates the mutable fields of a machine identity.
 func (s *Store) UpdateServiceAccount(ctx context.Context, a *ServiceAccount) error {
 	updated, err := queryOne[ServiceAccount](ctx, s.pool, `
 		UPDATE service_accounts
@@ -73,8 +73,8 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, a *ServiceAccount) err
 	return nil
 }
 
-// SetServiceAccountActive setzt den active-Status (Not-Aus pro Projekt) und
-// schreibt transaktional ein Audit-Event mit dem Actor.
+// SetServiceAccountActive sets the active status (per-project kill switch)
+// and writes an audit event with the actor transactionally.
 func (s *Store) SetServiceAccountActive(ctx context.Context, actor string, id uuid.UUID, active bool) (*ServiceAccount, error) {
 	var updated *ServiceAccount
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -106,7 +106,7 @@ func (s *Store) SetServiceAccountActive(ctx context.Context, actor string, id uu
 	return updated, nil
 }
 
-// DeleteServiceAccount entfernt eine maschinelle Identität.
+// DeleteServiceAccount removes a machine identity.
 func (s *Store) DeleteServiceAccount(ctx context.Context, id uuid.UUID) error {
 	return s.execAffectingOne(ctx, `DELETE FROM service_accounts WHERE id = $1`, id)
 }

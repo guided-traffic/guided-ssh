@@ -1,7 +1,3 @@
-// Package admincli implementiert das Admin-CLI gssh-admin (Phase 6):
-// Grant-Verwaltung (CRUD) und deklarativer YAML-Abgleich gegen die Admin-API
-// des gssh-servers. Authentifizierung wie gssh: OIDC-ID-Token (PKCE bzw.
-// Device-Flow), alternativ via GSSH_ID_TOKEN/--token.
 package admincli
 
 import (
@@ -18,7 +14,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
-// Grant spiegelt die API-Repräsentation einer Zugriffsregel
+// Grant mirrors the API representation of an access rule
 // (internal/api grantJSON).
 type Grant struct {
 	ID                 string            `json:"id,omitempty"`
@@ -30,8 +26,8 @@ type Grant struct {
 	MaxValiditySeconds int64             `json:"max_validity_seconds"`
 }
 
-// CIGrant spiegelt die API-Repräsentation einer CI-Zugriffsregel
-// (internal/api ciGrantJSON, Phase 7).
+// CIGrant mirrors the API representation of a CI access rule
+// (internal/api ciGrantJSON, phase 7).
 type CIGrant struct {
 	ID                 string            `json:"id,omitempty"`
 	Project            string            `json:"project,omitempty"`
@@ -43,7 +39,7 @@ type CIGrant struct {
 	MaxValiditySeconds int64             `json:"max_validity_seconds"`
 }
 
-// ApplyResult spiegelt die Antwort von POST /v1/admin/grants/apply.
+// ApplyResult mirrors the response of POST /v1/admin/grants/apply.
 type ApplyResult struct {
 	Created   int `json:"created"`
 	Updated   int `json:"updated"`
@@ -51,14 +47,14 @@ type ApplyResult struct {
 	Unchanged int `json:"unchanged"`
 }
 
-// client spricht die Admin-API mit Bearer-Token (SPKI-Pinning wie gssh).
+// client talks to the admin API with a bearer token (SPKI pinning like gssh).
 type client struct {
 	baseURL string
 	token   string
 	http    *http.Client
 }
 
-// newClient baut den API-Client aus der gemeinsamen CLI-Konfiguration.
+// newClient builds the API client from the shared CLI configuration.
 func newClient(cfg *cli.Config, token string) (*client, error) {
 	pin, err := cfg.Pin()
 	if err != nil {
@@ -75,8 +71,8 @@ func newClient(cfg *cli.Config, token string) (*client, error) {
 	}, nil
 }
 
-// do führt einen Admin-API-Call aus und dekodiert die Antwort nach target
-// (nil = Antwort verwerfen).
+// do performs an admin API call and decodes the response into target
+// (nil = discard the response).
 func (c *client) do(ctx context.Context, method, path string, payload, target any) error {
 	var body io.Reader
 	if payload != nil {
@@ -96,18 +92,18 @@ func (c *client) do(ctx context.Context, method, path string, payload, target an
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("admin-api erreichen: %w", err)
+		return fmt.Errorf("reach admin API: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("admin-api: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return fmt.Errorf("admin API: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	if target == nil {
 		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
-		return fmt.Errorf("admin-antwort dekodieren: %w", err)
+		return fmt.Errorf("decode admin response: %w", err)
 	}
 	return nil
 }

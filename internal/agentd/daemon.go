@@ -20,21 +20,21 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// minFresh: jünger gecachte Principals werden ohne API-Roundtrip beantwortet
-// (sshd kann pro Login mehrfach fragen).
+// minFresh: principals cached more recently than this are answered without
+// an API roundtrip (sshd can ask multiple times per login).
 const minFresh = 10 * time.Second
 
-// apiTimeout begrenzt Principals-Abfragen im Auth-Pfad (sshd wartet).
+// apiTimeout bounds principals lookups on the auth path (sshd is waiting).
 const apiTimeout = 5 * time.Second
 
-// cacheEntry ist ein Principals-Cache-Eintrag.
+// cacheEntry is a principals cache entry.
 type cacheEntry struct {
 	Principals []string  `json:"principals"`
 	FetchedAt  time.Time `json:"fetched_at"`
 }
 
-// Daemon ist der laufende Host-Agent: Zertifikatserneuerung, Bundle-Pflege
-// und Principals-Cache mit Unix-Socket für den sshd-Helper.
+// Daemon is the running host agent: certificate renewal, bundle maintenance,
+// and principals cache with a unix socket for the sshd helper.
 type Daemon struct {
 	cfg    *Config
 	paths  Paths
@@ -43,14 +43,14 @@ type Daemon struct {
 
 	mu         sync.Mutex
 	cache      map[string]cacheEntry
-	recentAuth map[string][]authRec // guarded by mu; Serial→Session-Korrelation (Phase 9)
+	recentAuth map[string][]authRec // guarded by mu; serial→session correlation (phase 9)
 
-	// token schützt die schreibenden Socket-Endpunkte; leer ⇒ Session-Audit aus.
+	// token protects the writable socket endpoints; empty ⇒ session audit off.
 	token   string
-	spoolMu sync.Mutex // serialisiert Zugriffe auf die Spool-Datei
+	spoolMu sync.Mutex // serializes access to the spool file
 }
 
-// NewDaemon lädt Konfiguration und mTLS-Material aus dem State-Verzeichnis.
+// NewDaemon loads the configuration and mTLS material from the state directory.
 func NewDaemon(stateDir string, logger *slog.Logger) (*Daemon, error) {
 	cfg, err := LoadConfig(stateDir)
 	if err != nil {
@@ -72,12 +72,12 @@ func NewDaemon(stateDir string, logger *slog.Logger) (*Daemon, error) {
 	return d, nil
 }
 
-// sessionAuditEnabled ist wahr, wenn Session-Audit aktiv und das Token geladen ist.
+// sessionAuditEnabled is true when session audit is active and the token is loaded.
 func (d *Daemon) sessionAuditEnabled() bool {
 	return d.cfg.SessionAudit && d.token != ""
 }
 
-// Run startet Socket-Server und Pflege-Schleifen; blockiert bis ctx endet.
+// Run starts the socket server and maintenance loops; blocks until ctx ends.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.loadCache()
 
@@ -88,9 +88,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	server := &http.Server{Handler: d.socketHandler(), ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Serve(listener) }()
-	d.logger.Info("gssh-agentd gestartet", "socket", d.cfg.SocketPath, "host", d.cfg.HostName)
+	d.logger.Info("gssh-agentd started", "socket", d.cfg.SocketPath, "host", d.cfg.HostName)
 
-	// Initiale Pflege, danach periodisch.
+	// Initial maintenance, then periodic.
 	d.refreshBundle(ctx)
 	d.renewIfNeeded(ctx)
 	d.rotateMTLSIfNeeded(ctx)
@@ -99,13 +99,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer renewTicker.Stop()
 	defer bundleTicker.Stop()
 
-	// Session-Flush nur bei aktivem Audit; sonst ein toter Kanal.
+	// Session flush only with audit enabled; otherwise a dead channel.
 	var flushC <-chan time.Time
 	if d.sessionAuditEnabled() {
 		flushTicker := time.NewTicker(sessionFlushInterval)
 		defer flushTicker.Stop()
 		flushC = flushTicker.C
-		d.flushSpool(ctx) // Rückstand aus vorherigem Lauf sofort abarbeiten
+		d.flushSpool(ctx) // work off any backlog from a previous run immediately
 	}
 
 	for {
@@ -127,40 +127,40 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 }
 
-// listen öffnet den Unix-Socket (alte Socket-Datei wird ersetzt; 0666, damit
-// der AuthorizedPrincipalsCommandUser verbinden kann — der Socket liefert nur
-// öffentliche Principals-Listen).
+// listen opens the unix socket (an old socket file is replaced; 0666 so
+// AuthorizedPrincipalsCommandUser can connect — the socket only serves
+// public principals lists).
 func (d *Daemon) listen() (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(d.cfg.SocketPath), 0o755); err != nil { //nolint:gosec // Socket-Verzeichnis muss für sshd traversierbar sein
+	if err := os.MkdirAll(filepath.Dir(d.cfg.SocketPath), 0o755); err != nil { //nolint:gosec // socket directory must be traversable for sshd
 		return nil, err
 	}
 	_ = os.Remove(d.cfg.SocketPath)
 	listener, err := net.Listen("unix", d.cfg.SocketPath)
 	if err != nil {
-		return nil, fmt.Errorf("socket %s öffnen: %w", d.cfg.SocketPath, err)
+		return nil, fmt.Errorf("opening socket %s: %w", d.cfg.SocketPath, err)
 	}
-	if err := os.Chmod(d.cfg.SocketPath, 0o666); err != nil { //nolint:gosec // nur lesende Principals-Auskunft
+	if err := os.Chmod(d.cfg.SocketPath, 0o666); err != nil { //nolint:gosec // read-only principals lookup only
 		_ = listener.Close()
 		return nil, err
 	}
 	return listener, nil
 }
 
-// socketHandler bedient den Principals-Helper: Cache-first mit TTL,
-// fail-closed wenn API und Cache nicht helfen.
+// socketHandler serves the principals helper: cache-first with TTL,
+// fail-closed when neither the API nor the cache can help.
 func (d *Daemon) socketHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /principals", func(w http.ResponseWriter, r *http.Request) {
 		user := r.URL.Query().Get("user")
 		if user == "" {
-			http.Error(w, "query-parameter user fehlt", http.StatusBadRequest)
+			http.Error(w, "missing query parameter user", http.StatusBadRequest)
 			return
 		}
 		principals, err := d.principals(r.Context(), user)
 		if err != nil {
-			// Fail-closed: keine Antwort ⇒ der Helper verweigert den Login.
-			d.logger.Warn("principals nicht verfügbar (fail-closed)", "user", user, "error", err)
-			http.Error(w, "principals nicht verfügbar", http.StatusServiceUnavailable)
+			// Fail-closed: no response ⇒ the helper denies the login.
+			d.logger.Warn("principals unavailable (fail-closed)", "user", user, "error", err)
+			http.Error(w, "principals unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -176,8 +176,9 @@ func (d *Daemon) socketHandler() http.Handler {
 	return mux
 }
 
-// principals liefert die Principals eines lokalen Benutzers: frischer Cache
-// direkt, sonst API mit kurzem Timeout, bei API-Fehler Cache bis CacheTTL.
+// principals returns the principals of a local user: fresh cache directly,
+// otherwise the API with a short timeout, and on API error the cache until
+// CacheTTL.
 func (d *Daemon) principals(ctx context.Context, user string) ([]string, error) {
 	d.mu.Lock()
 	entry, cached := d.cache[user]
@@ -197,14 +198,14 @@ func (d *Daemon) principals(ctx context.Context, user string) ([]string, error) 
 		return principals, nil
 	}
 	if cached && time.Since(entry.FetchedAt) < time.Duration(d.cfg.CacheTTL) {
-		d.logger.Warn("api nicht erreichbar — principals aus cache", "user", user, "age", time.Since(entry.FetchedAt))
+		d.logger.Warn("api unreachable — serving principals from cache", "user", user, "age", time.Since(entry.FetchedAt))
 		return entry.Principals, nil
 	}
-	return nil, fmt.Errorf("api nicht erreichbar und cache abgelaufen: %w", err)
+	return nil, fmt.Errorf("api unreachable and cache expired: %w", err)
 }
 
-// renewIfNeeded erneuert das Host-Zertifikat, sobald 2/3 der Laufzeit
-// verstrichen sind (oder keines existiert).
+// renewIfNeeded renews the host certificate once 2/3 of its validity has
+// elapsed (or none exists).
 func (d *Daemon) renewIfNeeded(ctx context.Context) {
 	certPath := HostCertPath(d.cfg.SSHKeyPath)
 	if !needsRenewal(certPath, time.Now()) {
@@ -212,23 +213,23 @@ func (d *Daemon) renewIfNeeded(ctx context.Context) {
 	}
 	publicKey, err := os.ReadFile(d.cfg.SSHKeyPath)
 	if err != nil {
-		d.logger.Error("host-key lesen fehlgeschlagen", "path", d.cfg.SSHKeyPath, "error", err)
+		d.logger.Error("reading host key failed", "path", d.cfg.SSHKeyPath, "error", err)
 		return
 	}
 	certLine, err := d.api.Renew(ctx, strings.TrimSpace(string(publicKey)))
 	if err != nil {
-		d.logger.Error("zertifikat erneuern fehlgeschlagen", "error", err)
+		d.logger.Error("renewing certificate failed", "error", err)
 		return
 	}
-	if err := os.WriteFile(certPath, []byte(certLine+"\n"), 0o644); err != nil { //nolint:gosec // öffentliches Zertifikat
-		d.logger.Error("zertifikat schreiben fehlgeschlagen", "path", certPath, "error", err)
+	if err := os.WriteFile(certPath, []byte(certLine+"\n"), 0o644); err != nil { //nolint:gosec // public certificate
+		d.logger.Error("writing certificate failed", "path", certPath, "error", err)
 		return
 	}
-	d.logger.Info("host-zertifikat erneuert", "path", certPath)
+	d.logger.Info("host certificate renewed", "path", certPath)
 	d.runReloadCommand()
 }
 
-// needsRenewal: kein Zertifikat, nicht parsebar oder 2/3 der Laufzeit vorbei.
+// needsRenewal: no certificate, unparsable, or 2/3 of validity elapsed.
 func needsRenewal(certPath string, now time.Time) bool {
 	raw, err := os.ReadFile(certPath)
 	if err != nil {
@@ -248,54 +249,54 @@ func needsRenewal(certPath string, now time.Time) bool {
 	return now.After(renewAt)
 }
 
-// rotateMTLSIfNeeded rotiert das mTLS-Client-Zertifikat, sobald 2/3 seiner
-// Laufzeit verstrichen sind (Phase 10): frisches Schlüsselpaar + CSR über den
-// noch gültigen mTLS-Kanal einreichen, Dateien ersetzen, Client umschalten.
-// Fehler sind unkritisch — das alte Zertifikat bleibt bis zur nächsten
-// Prüfung (RenewInterval) gültig.
+// rotateMTLSIfNeeded rotates the mTLS client certificate once 2/3 of its
+// validity has elapsed (phase 10): submit a fresh key pair + CSR over the
+// still-valid mTLS channel, replace the files, switch the client over.
+// Errors are non-critical — the old certificate stays valid until the next
+// check (RenewInterval).
 func (d *Daemon) rotateMTLSIfNeeded(ctx context.Context) {
 	if !mtlsNeedsRotation(d.paths.AgentCertFile(), time.Now()) {
 		return
 	}
 	priv, csrPEM, err := newMTLSKeyAndCSR()
 	if err != nil {
-		d.logger.Error("mtls-rotation: schlüssel erzeugen fehlgeschlagen", "error", err)
+		d.logger.Error("mtls rotation: generating key failed", "error", err)
 		return
 	}
 	certPEM, err := d.api.RenewMTLS(ctx, string(csrPEM))
 	if err != nil {
-		d.logger.Error("mtls-rotation: erneuerung fehlgeschlagen", "error", err)
+		d.logger.Error("mtls rotation: renewal failed", "error", err)
 		return
 	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
-		d.logger.Error("mtls-rotation: schlüssel serialisieren fehlgeschlagen", "error", err)
+		d.logger.Error("mtls rotation: serializing key failed", "error", err)
 		return
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 	pair, err := tls.X509KeyPair([]byte(certPEM), keyPEM)
 	if err != nil {
-		d.logger.Error("mtls-rotation: server lieferte unbrauchbares zertifikat", "error", err)
+		d.logger.Error("mtls rotation: server returned an unusable certificate", "error", err)
 		return
 	}
-	// Schlüssel vor Zertifikat schreiben (je atomar via Rename); das winzige
-	// Fenster eines inkonsistenten Paars heilt der nächste Rotationslauf.
+	// Write the key before the certificate (each atomic via rename); the
+	// tiny window of an inconsistent pair is healed by the next rotation run.
 	if err := writeFileAtomic(d.paths.AgentKeyFile(), keyPEM, 0o600); err != nil {
-		d.logger.Error("mtls-rotation: schlüssel schreiben fehlgeschlagen", "error", err)
+		d.logger.Error("mtls rotation: writing key failed", "error", err)
 		return
 	}
 	if err := writeFileAtomic(d.paths.AgentCertFile(), []byte(certPEM), 0o644); err != nil {
-		d.logger.Error("mtls-rotation: zertifikat schreiben fehlgeschlagen", "error", err)
+		d.logger.Error("mtls rotation: writing certificate failed", "error", err)
 		return
 	}
 	if setter, ok := d.api.(interface{ setClientCert(tls.Certificate) }); ok {
 		setter.setClientCert(pair)
 	}
-	d.logger.Info("mtls-client-zertifikat rotiert", "path", d.paths.AgentCertFile())
+	d.logger.Info("mtls client certificate rotated", "path", d.paths.AgentCertFile())
 }
 
-// mtlsNeedsRotation: 2/3 der Laufzeit vorbei — oder die Datei ist unlesbar,
-// dann repariert eine Rotation über das noch geladene Zertifikat den Zustand.
+// mtlsNeedsRotation: 2/3 of validity elapsed — or the file is unreadable, in
+// which case a rotation repairs the state via the still-loaded certificate.
 func mtlsNeedsRotation(certPath string, now time.Time) bool {
 	raw, err := os.ReadFile(certPath)
 	if err != nil {
@@ -313,7 +314,7 @@ func mtlsNeedsRotation(certPath string, now time.Time) bool {
 	return now.After(rotateAt)
 }
 
-// writeFileAtomic schreibt über eine Temp-Datei + Rename im selben Verzeichnis.
+// writeFileAtomic writes via a temp file + rename in the same directory.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, mode); err != nil {
@@ -322,12 +323,12 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-// refreshBundle hält die TrustedUserCAKeys-Datei aktuell (nur bei Änderung
-// schreiben; sshd liest die Datei bei jeder Authentifizierung neu).
+// refreshBundle keeps the TrustedUserCAKeys file up to date (writes only on
+// change; sshd re-reads the file on every authentication).
 func (d *Daemon) refreshBundle(ctx context.Context) {
 	bundle, err := d.api.Bundle(ctx)
 	if err != nil {
-		d.logger.Warn("ca-bundle abrufen fehlgeschlagen", "error", err)
+		d.logger.Warn("fetching ca bundle failed", "error", err)
 		return
 	}
 	path := UserCAPath(d.cfg.SSHDir)
@@ -335,37 +336,36 @@ func (d *Daemon) refreshBundle(ctx context.Context) {
 	if string(current) == bundle {
 		return
 	}
-	if err := os.WriteFile(path, []byte(bundle), 0o644); err != nil { //nolint:gosec // öffentliche CA-Keys
-		d.logger.Error("ca-bundle schreiben fehlgeschlagen", "path", path, "error", err)
+	if err := os.WriteFile(path, []byte(bundle), 0o644); err != nil { //nolint:gosec // public ca keys
+		d.logger.Error("writing ca bundle failed", "path", path, "error", err)
 		return
 	}
-	d.logger.Info("user-ca-bundle aktualisiert", "path", path)
+	d.logger.Info("user ca bundle updated", "path", path)
 }
 
-// runReloadCommand führt das konfigurierte Reload-Kommando aus (sshd liest
-// HostCertificate nur beim Start).
+// runReloadCommand executes the configured reload command (sshd reads
+// HostCertificate only at startup).
 func (d *Daemon) runReloadCommand() {
 	if d.cfg.ReloadCommand == "" {
 		return
 	}
-	cmd := exec.Command("sh", "-c", d.cfg.ReloadCommand) //nolint:gosec // bewusst konfigurierbar (root-eigene config, 0600)
+	cmd := exec.Command("sh", "-c", d.cfg.ReloadCommand) //nolint:gosec // deliberately configurable (root-owned config, 0600)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		d.logger.Error("reload-kommando fehlgeschlagen", "cmd", d.cfg.ReloadCommand, "error", err, "output", string(out))
+		d.logger.Error("reload command failed", "cmd", d.cfg.ReloadCommand, "error", err, "output", string(out))
 	}
 }
 
-// certTime wandelt SSH-Zertifikatszeiten (uint64) in time.Time (siehe
-// internal/cli — hier dupliziert statt geteilt, beide Nutzer sind klein).
+// certTime converts SSH certificate times (uint64) to time.Time (see
+// internal/cli — duplicated here rather than shared, both users are small).
 func certTime(sec uint64) time.Time {
 	const maxCertUnix = 1 << 40
 	if sec > maxCertUnix {
 		sec = maxCertUnix
 	}
-	return time.Unix(int64(sec), 0) //nolint:gosec // durch maxCertUnix begrenzt
+	return time.Unix(int64(sec), 0) //nolint:gosec // bounded by maxCertUnix
 }
 
-// loadCache lädt den persistierten Principals-Cache (Fail-closed-Puffer über
-// Neustarts hinweg).
+// loadCache loads the persisted principals cache (fail-closed buffer across restarts).
 func (d *Daemon) loadCache() {
 	raw, err := os.ReadFile(d.paths.CacheFile())
 	if err != nil {
@@ -373,7 +373,7 @@ func (d *Daemon) loadCache() {
 	}
 	var cache map[string]cacheEntry
 	if err := json.Unmarshal(raw, &cache); err != nil {
-		d.logger.Warn("principals-cache unlesbar — ignoriert", "error", err)
+		d.logger.Warn("principals cache unreadable — ignored", "error", err)
 		return
 	}
 	d.mu.Lock()
@@ -381,7 +381,7 @@ func (d *Daemon) loadCache() {
 	d.mu.Unlock()
 }
 
-// persistCache schreibt den Cache auf Platte (Best Effort).
+// persistCache writes the cache to disk (best effort).
 func (d *Daemon) persistCache() {
 	d.mu.Lock()
 	raw, err := json.Marshal(d.cache)
@@ -390,6 +390,6 @@ func (d *Daemon) persistCache() {
 		return
 	}
 	if err := os.WriteFile(d.paths.CacheFile(), raw, 0o600); err != nil {
-		d.logger.Warn("principals-cache schreiben fehlgeschlagen", "error", err)
+		d.logger.Warn("writing principals cache failed", "error", err)
 	}
 }

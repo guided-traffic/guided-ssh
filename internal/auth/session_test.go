@@ -28,7 +28,7 @@ func TestSessionCodecRoundtrip(t *testing.T) {
 	}
 }
 
-func TestSessionCodecLehntManipulationAb(t *testing.T) {
+func TestSessionCodecRejectsTampering(t *testing.T) {
 	codec, err := auth.NewSessionCodec(testMasterKey())
 	if err != nil {
 		t.Fatalf("NewSessionCodec: %v", err)
@@ -38,14 +38,14 @@ func TestSessionCodecLehntManipulationAb(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 	for name, value := range map[string]string{
-		"manipuliert":   sealed[:len(sealed)-2] + "xx",
-		"kein base64":   "%%%",
-		"zu kurz":       "AAAA",
-		"leer":          "",
-		"fremder codec": mustSealWithKey(t, bytes.Repeat([]byte{9}, 32), "payload"),
+		"tampered":      sealed[:len(sealed)-2] + "xx",
+		"not base64":    "%%%",
+		"too short":     "AAAA",
+		"empty":         "",
+		"foreign codec": mustSealWithKey(t, bytes.Repeat([]byte{9}, 32), "payload"),
 	} {
 		if _, err := codec.Open(value); !errors.Is(err, auth.ErrInvalidSession) {
-			t.Errorf("%s: Open = %v, erwartet ErrInvalidSession", name, err)
+			t.Errorf("%s: Open = %v, expected ErrInvalidSession", name, err)
 		}
 	}
 }
@@ -63,8 +63,8 @@ func mustSealWithKey(t *testing.T, key []byte, plaintext string) string {
 	return sealed
 }
 
-func TestSessionCodecKurzerKey(t *testing.T) {
+func TestSessionCodecShortKey(t *testing.T) {
 	if _, err := auth.NewSessionCodec(make([]byte, 16)); err == nil {
-		t.Error("NewSessionCodec mit 16-byte-key: Fehler erwartet")
+		t.Error("NewSessionCodec with 16-byte key: expected error")
 	}
 }

@@ -1,13 +1,13 @@
 //go:build loadtest
 
-// Package load enthält den Lasttest des Sign-Endpoints (Plan Phase 13).
+// Package load contains the load test for the sign endpoint (plan Phase 13).
 //
-// Ziel (docs/teststrategie.md): ≥ 50 Zertifikate/s über 15 s mit 16 parallelen
-// Clients, fehlerfrei; gemessen gegen die echte API mit echtem Postgres
-// (Testcontainer), Software-Signer und OIDC-Token-Validierung — ohne
-// Rate-Limiting (das würde den Test, nicht den Server messen).
+// Goal (docs/test-strategy.md): ≥ 50 certificates/s over 15 s with 16
+// parallel clients, error-free; measured against the real API with real
+// Postgres (testcontainer), software signer, and OIDC token validation —
+// without rate limiting (which would measure the test, not the server).
 //
-// Aufruf: make loadtest. Schalter: GSSH_LOAD_TARGET_RATE (Default 50),
+// Invocation: make loadtest. Switches: GSSH_LOAD_TARGET_RATE (default 50),
 // GSSH_LOAD_WORKERS (16), GSSH_LOAD_DURATION (15s).
 package load
 
@@ -42,7 +42,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeIDP ist ein minimaler OIDC-Issuer (Discovery + JWKS + RS256-Tokens).
+// fakeIDP is a minimal OIDC issuer (discovery + JWKS + RS256 tokens).
 type fakeIDP struct {
 	t      *testing.T
 	server *httptest.Server
@@ -78,7 +78,7 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	return idp
 }
 
-// idToken signiert ein ID-Token für einen Lasttest-Benutzer.
+// idToken signs an ID token for a load test user.
 func (idp *fakeIDP) idToken(user string) string {
 	idp.t.Helper()
 	payload, err := json.Marshal(map[string]any{
@@ -115,8 +115,8 @@ func (idp *fakeIDP) idToken(user string) string {
 func TestSignEndpointLast(t *testing.T) {
 	ctx := context.Background()
 
-	// ── Postgres + Store + CA (echte Persistenz — jede Signatur schreibt
-	// transaktional certificates + audit_events) ─────────────────────────
+	// ── Postgres + store + CA (real persistence — every signature writes
+	// certificates + audit_events transactionally) ────────────────────────
 	pgCtr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("guidedssh"),
 		tcpostgres.WithUsername("guidedssh"),
@@ -134,7 +134,7 @@ func TestSignEndpointLast(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
-		t.Fatalf("migrationen: %v", err)
+		t.Fatalf("migrations: %v", err)
 	}
 	st, err := store.New(ctx, dsn)
 	if err != nil {
@@ -154,7 +154,7 @@ func TestSignEndpointLast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ── Fake-IdP + echter Verifier + Grant für Gruppe dev ────────────────
+	// ── Fake IdP + real verifier + grant for group dev ───────────────────
 	idp := newFakeIDP(t)
 	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{IssuerURL: idp.server.URL, ClientID: "gssh-cli"})
 	if err != nil {
@@ -185,8 +185,8 @@ func TestSignEndpointLast(t *testing.T) {
 		Transport: &http.Transport{MaxIdleConns: workers * 2, MaxIdleConnsPerHost: workers * 2},
 	}
 
-	// Warmup: ein Request pro Worker legt Benutzer/Gruppen an und füllt
-	// Verbindungs- und JWKS-Caches — zählt nicht in die Messung.
+	// Warmup: one request per worker creates users/groups and fills
+	// connection and JWKS caches — not counted in the measurement.
 	tokens := make([]string, workers)
 	bodies := make([][]byte, workers)
 	for i := range tokens {
@@ -211,7 +211,7 @@ func TestSignEndpointLast(t *testing.T) {
 		}
 	}
 
-	// ── Messung ──────────────────────────────────────────────────────────
+	// ── Measurement ──────────────────────────────────────────────────────
 	var wg sync.WaitGroup
 	latencies := make([][]time.Duration, workers)
 	errors := make([]int, workers)
@@ -243,20 +243,20 @@ func TestSignEndpointLast(t *testing.T) {
 	}
 	sort.Slice(all, func(a, b int) bool { return all[a] < all[b] })
 	rate := float64(len(all)) / elapsed.Seconds()
-	t.Logf("sign/user: %d zertifikate in %s = %.1f zert/s (%d worker, %d fehler)",
+	t.Logf("sign/user: %d certificates in %s = %.1f certs/s (%d workers, %d errors)",
 		len(all), elapsed.Round(time.Millisecond), rate, workers, totalErrors)
 	if len(all) > 0 {
-		t.Logf("latenz: p50 %s, p95 %s, max %s",
+		t.Logf("latency: p50 %s, p95 %s, max %s",
 			all[len(all)/2].Round(time.Millisecond),
 			all[len(all)*95/100].Round(time.Millisecond),
 			all[len(all)-1].Round(time.Millisecond))
 	}
 
 	if totalErrors > 0 {
-		t.Fatalf("%d fehlgeschlagene sign-requests", totalErrors)
+		t.Fatalf("%d failed sign requests", totalErrors)
 	}
 	if rate < targetRate {
-		t.Fatalf("durchsatz %.1f zert/s unter ziel %.0f zert/s", rate, targetRate)
+		t.Fatalf("throughput %.1f certs/s below target %.0f certs/s", rate, targetRate)
 	}
 }
 

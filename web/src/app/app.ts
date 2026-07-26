@@ -26,7 +26,7 @@ export class App implements OnInit {
     void this.session.init();
   }
 
-  /** Harter Reload als Ausweg, wenn die Login-Prüfung fehlgeschlagen ist. */
+  /** Hard reload as a fallback when the login check has failed. */
   reload(): void {
     window.location.reload();
   }

@@ -11,18 +11,18 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # Versionierte Binaries + deb/rpm-Pakete als Release-Assets (Phase 13);
-  # die Version kommt über git describe aus dem Release-Tag (Makefile).
+  # Versioned binaries + deb/rpm packages as release assets (Phase 13);
+  # the version comes from git describe via the release tag (Makefile).
   binaries:
-    name: Release-Binaries anhängen
+    name: Attach release binaries
     runs-on: self-hosted
     permissions:
-      contents: write # Assets an das GitHub-Release hängen
+      contents: write # attach assets to the GitHub release
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # git describe braucht Tags für die Versionsinfo
+          fetch-depth: 0 # git describe needs tags for the version info
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -35,21 +35,21 @@ jobs:
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
 
-      - name: Cross-Platform-Binaries bauen (Version aus git-Tag)
+      - name: Build cross-platform binaries (version from git tag)
         run: make cross
 
-      - name: nfpm installieren und Pakete bauen (deb/rpm)
+      - name: Install nfpm and build packages (deb/rpm)
         run: |
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           export PATH="$(go env GOPATH)/bin:$PATH"
           make packages
 
-      - name: Checksummen erzeugen
+      - name: Generate checksums
         run: |
           cd bin && sha256sum gssh-* > ../dist/SHA256SUMS
           cd ../dist && sha256sum *.deb *.rpm >> SHA256SUMS
 
-      - name: Assets an das Release hängen
+      - name: Attach assets to the release
         uses: softprops/action-gh-release@v3
         with:
           files: |
@@ -91,7 +91,7 @@ jobs:
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.source=https://github.com/guided-traffic/guided-ssh
 
-      - name: Build-Datum ermitteln
+      - name: Determine build date
         id: buildinfo
         run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
@@ -110,22 +110,23 @@ jobs:
           provenance: true
           sbom: true
 
-  # Helm-Chart als gh-pages-Helm-Repo veröffentlichen, im selben Release-Lauf wie
-  # Binaries und Image. Statt chart-releaser (das eigene guided-ssh-*-Releases
-  # anlegt und die .tgz nur als Release-Assets ablegt) wird das Paket direkt auf
-  # den gh-pages-Branch committet und die index.yaml auf die GitHub-Pages-URLs
-  # gezeigt — Vorbild: valkey-operator/.github/workflows/build.yml (release-helm-gh).
+  # Publish the Helm chart as a gh-pages Helm repo, in the same release run as
+  # the binaries and image. Instead of chart-releaser (which creates its own
+  # guided-ssh-*-releases and only drops the .tgz as release assets), the
+  # package is committed directly to the gh-pages branch and index.yaml points
+  # at the GitHub Pages URLs — modeled on
+  # valkey-operator/.github/workflows/build.yml (release-helm-gh).
   #
-  # version + appVersion kommen aus dem Release-Tag; appVersion ist der Default-
-  # Image-Tag (_helpers.tpl: default .Chart.AppVersion .Values.image.tag) — das
-  # Chart zeigt so auf das gleichnamige Image dieses Releases. Das Paket wird
-  # zusätzlich an das auslösende vX.Y.Z-Release gehängt.
+  # version + appVersion come from the release tag; appVersion is the default
+  # image tag (_helpers.tpl: default .Chart.AppVersion .Values.image.tag) — this
+  # way the chart points at the same-named image of this release. The package
+  # is additionally attached to the triggering vX.Y.Z release.
   helm-chart:
     name: Release Helm Chart (gh-pages)
     needs: build
     runs-on: self-hosted
     permissions:
-      contents: write # gh-pages-Branch schreiben + Chart ans Release hängen
+      contents: write # write the gh-pages branch + attach the chart to the release
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -135,23 +136,23 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v5
 
-      # Chart-Version = App-Version aus dem Release-Tag (vX.Y.Z ⇒ X.Y.Z). version
-      # steuert die Repo-Chart-Version, appVersion den Default-Image-Tag. Die Werte
-      # in Chart.yaml sind nur Lint-Baseline (ct check-version-increment) und werden
-      # hier zur Release-Zeit überschrieben.
-      - name: Chart-Version + appVersion aus Release-Tag setzen
+      # Chart version = app version from the release tag (vX.Y.Z ⇒ X.Y.Z). version
+      # controls the repo chart version, appVersion the default image tag. The
+      # values in Chart.yaml are only a lint baseline (ct check-version-increment)
+      # and are overwritten here at release time.
+      - name: Set chart version + appVersion from release tag
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           VERSION="${TAG#v}"
-          echo "Release-Chart-Version: ${VERSION}"
+          echo "Release chart version: ${VERSION}"
           sed -i -E "s/^version:.*/version: ${VERSION}/" deploy/helm/guided-ssh/Chart.yaml
           sed -i -E "s/^appVersion:.*/appVersion: \"${VERSION}\"/" deploy/helm/guided-ssh/Chart.yaml
 
-      - name: Subchart-Dependencies auflösen
+      - name: Resolve subchart dependencies
         run: helm dependency build deploy/helm/guided-ssh
 
-      - name: Helm-Paket erstellen
+      - name: Create Helm package
         run: |
           cd deploy/helm
           helm package guided-ssh/
@@ -164,24 +165,24 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
-      - name: Chart-Paket zwischenspeichern
+      - name: Cache chart package
         run: |
           mkdir -p /tmp/helm-charts
           cp -r deploy/helm/repo/* /tmp/helm-charts/
 
-      - name: gh-pages-Branch auschecken
+      - name: Check out gh-pages branch
         uses: actions/checkout@v7
         with:
           ref: gh-pages
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auf GitHub Pages veröffentlichen
+      - name: Publish to GitHub Pages
         run: |
-          # Neue Charts ins Root-Verzeichnis kopieren
+          # Copy new charts into the root directory
           cp /tmp/helm-charts/*.tgz .
 
-          # index.yaml mit existierendem Index mergen, falls vorhanden
+          # Merge index.yaml with the existing index, if present
           if [ -f index.yaml ]; then
             mkdir -p temp-repo
             cp *.tgz temp-repo/
@@ -196,7 +197,7 @@ jobs:
           git commit -m "Release Helm chart for $GITHUB_REF_NAME"
           git push --force origin gh-pages
 
-      - name: Chart ans Release hängen
+      - name: Attach chart to the release
         uses: softprops/action-gh-release@v3
         with:
           files: |

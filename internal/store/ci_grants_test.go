@@ -13,7 +13,7 @@ func TestWildcardMatch(t *testing.T) {
 		{"", "", true},
 		{"main", "main", true},
 		{"main", "master", false},
-		{"*", "beliebig/mit/slash", true},
+		{"*", "anything/with/slash", true},
 		{"release/*", "release/1.2", true},
 		{"release/*", "release/", true},
 		{"release/*", "release", false},
@@ -27,7 +27,7 @@ func TestWildcardMatch(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := wildcardMatch(c.pattern, c.value); got != c.want {
-			t.Errorf("wildcardMatch(%q, %q) = %t, erwartet %t", c.pattern, c.value, got, c.want)
+			t.Errorf("wildcardMatch(%q, %q) = %t, want %t", c.pattern, c.value, got, c.want)
 		}
 	}
 }
@@ -41,40 +41,40 @@ func TestCIGrantMatches(t *testing.T) {
 		match CIMatch
 		want  bool
 	}{
-		{"exaktes projekt", CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true}, base, true},
-		{"namespace-präfix", CIGrant{ProjectPath: "infra", ProtectedOnly: true}, base, true},
-		{"kein präfix an wortgrenze", CIGrant{ProjectPath: "inf", ProtectedOnly: true}, base, false},
-		{"fremdes projekt", CIGrant{ProjectPath: "andere/app", ProtectedOnly: true}, base, false},
+		{"exact project", CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true}, base, true},
+		{"namespace prefix", CIGrant{ProjectPath: "infra", ProtectedOnly: true}, base, true},
+		{"no prefix at word boundary", CIGrant{ProjectPath: "inf", ProtectedOnly: true}, base, false},
+		{"unrelated project", CIGrant{ProjectPath: "other/app", ProtectedOnly: true}, base, false},
 		{
-			"protected verlangt, ref unprotected",
+			"protected required, ref unprotected",
 			CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true},
 			CIMatch{ProjectPath: "infra/ansible", Ref: "main", RefProtected: false},
 			false,
 		},
 		{
-			"unprotected erlaubt",
+			"unprotected allowed",
 			CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: false},
 			CIMatch{ProjectPath: "infra/ansible", Ref: "feature/x", RefProtected: false},
 			true,
 		},
 		{
-			"ref-muster passt",
+			"ref pattern matches",
 			CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true, RefPattern: "release/*"},
 			CIMatch{ProjectPath: "infra/ansible", Ref: "release/1.2", RefProtected: true},
 			true,
 		},
 		{
-			"ref-muster passt nicht",
+			"ref pattern does not match",
 			CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true, RefPattern: "release/*"},
 			base, false,
 		},
 		{
-			"environment verlangt, job ohne environment",
+			"environment required, job without environment",
 			CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true, EnvironmentPattern: "prod"},
 			base, false,
 		},
 		{
-			"environment passt",
+			"environment matches",
 			CIGrant{ProjectPath: "infra/ansible", ProtectedOnly: true, EnvironmentPattern: "prod*"},
 			CIMatch{ProjectPath: "infra/ansible", Ref: "main", RefProtected: true, Environment: "prod-eu"},
 			true,
@@ -82,7 +82,7 @@ func TestCIGrantMatches(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := c.grant.Matches(c.match); got != c.want {
-			t.Errorf("%s: Matches = %t, erwartet %t", c.name, got, c.want)
+			t.Errorf("%s: Matches = %t, want %t", c.name, got, c.want)
 		}
 	}
 }
@@ -90,20 +90,20 @@ func TestCIGrantMatches(t *testing.T) {
 func TestValidateCIGrantSpec(t *testing.T) {
 	valid := CIGrantSpec{ProjectPath: "infra/ansible", Principals: []string{"deploy"}, MaxValiditySeconds: 3600}
 	if err := validateCIGrantSpec(0, valid); err != nil {
-		t.Errorf("gültige spec abgelehnt: %v", err)
+		t.Errorf("valid spec rejected: %v", err)
 	}
 	cases := []struct {
 		name string
 		spec CIGrantSpec
 	}{
-		{"ohne projekt", CIGrantSpec{Principals: []string{"deploy"}, MaxValiditySeconds: 3600}},
-		{"ohne principals", CIGrantSpec{ProjectPath: "x", MaxValiditySeconds: 3600}},
-		{"ohne laufzeit", CIGrantSpec{ProjectPath: "x", Principals: []string{"deploy"}}},
+		{"without project", CIGrantSpec{Principals: []string{"deploy"}, MaxValiditySeconds: 3600}},
+		{"without principals", CIGrantSpec{ProjectPath: "x", MaxValiditySeconds: 3600}},
+		{"without validity", CIGrantSpec{ProjectPath: "x", Principals: []string{"deploy"}}},
 	}
 	for _, c := range cases {
 		err := validateCIGrantSpec(1, c.spec)
 		if !errors.Is(err, ErrInvalidGrantSpec) {
-			t.Errorf("%s: err = %v, erwartet ErrInvalidGrantSpec", c.name, err)
+			t.Errorf("%s: err = %v, want ErrInvalidGrantSpec", c.name, err)
 		}
 	}
 }

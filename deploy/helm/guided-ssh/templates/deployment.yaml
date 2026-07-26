@@ -34,10 +34,10 @@ spec:
       {{- if or .Values.migrations.enabled .Values.internalDatabase.enabled }}
       initContainers:
         {{- if .Values.internalDatabase.enabled }}
-        # Interne Test-Datenbank als nativer Sidecar (restartPolicy Always,
-        # Kubernetes >= 1.29): startet vor migrate/Server, läuft danach weiter.
-        # Nur im Pod erreichbar (listen_addresses=127.0.0.1); Daten ephemeral
-        # im emptyDir — NIEMALS produktiv einsetzen.
+        # Internal test database as a native sidecar (restartPolicy Always,
+        # Kubernetes >= 1.29): starts before migrate/server, keeps running afterward.
+        # Only reachable within the pod (listen_addresses=127.0.0.1); data is ephemeral
+        # in the emptyDir — NEVER use in production.
         - name: db
           image: {{ .Values.internalDatabase.image }}
           imagePullPolicy: {{ .Values.internalDatabase.pullPolicy }}
@@ -50,21 +50,21 @@ spec:
               value: {{ include "guided-ssh.internalDBPassword" . }}
             - name: POSTGRES_DB
               value: {{ include "guided-ssh.internalDBName" . }}
-            # Unterverzeichnis: initdb verlangt 0700/0750 auf PGDATA — der
-            # emptyDir-Mount selbst ist durch fsGroup gruppenbeschreibbar.
+            # Subdirectory: initdb requires 0700/0750 on PGDATA — the
+            # emptyDir mount itself is group-writable via fsGroup.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
-          # migrate/Server starten erst, wenn Postgres Verbindungen annimmt
-          # (während initdb lauscht nur ein Socket-only-Tempserver — die
-          # TCP-Probe schlägt dann bewusst fehl).
+          # migrate/server only start once Postgres accepts connections
+          # (while initdb runs, only a socket-only temp server listens — the
+          # TCP probe deliberately fails then).
           startupProbe:
             exec:
               command: ["pg_isready", "-h", "127.0.0.1", "-U", {{ include "guided-ssh.internalDBUser" . | quote }}]
             periodSeconds: 2
             failureThreshold: 60
-          # postgres-Image läuft als uid 70 (alpine); Schreibrecht auf den
-          # emptyDir kommt über die fsGroup als Supplementary-Group. Kein
-          # readOnlyRootFilesystem: das Image braucht /var/run/postgresql.
+          # The postgres image runs as uid 70 (alpine); write access to the
+          # emptyDir comes via fsGroup as a supplementary group. No
+          # readOnlyRootFilesystem: the image needs /var/run/postgresql.
           securityContext:
             runAsUser: 70
             runAsGroup: 70
@@ -83,8 +83,8 @@ spec:
               mountPath: /var/lib/postgresql/data
         {{- end }}
         {{- if .Values.migrations.enabled }}
-        # Migrationen laufen vor dem Server; ein Postgres-Advisory-Lock
-        # serialisiert parallele Init-Container mehrerer Replikas.
+        # Migrations run before the server; a Postgres advisory lock
+        # serializes parallel init containers across multiple replicas.
         - name: migrate
           image: {{ include "guided-ssh.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -116,13 +116,13 @@ spec:
             - name: GSSH_CA_MASTER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "secrets.ca.existingSecret ist Pflicht (Secret mit dem CA-Master-Key, siehe README)" .Values.secrets.ca.existingSecret }}
+                  name: {{ required "secrets.ca.existingSecret is required (a Secret with the CA master key, see README)" .Values.secrets.ca.existingSecret }}
                   key: {{ .Values.secrets.ca.keys.masterKey }}
             {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
             {{- with .Values.secrets.ca.selfManaged }}
-            # Self-managed: alle drei CAs kommen aus dem gemounteten Secret,
-            # die Datenbank hält kein privates Schlüsselmaterial. Rotation =
-            # neuen Key committen (siehe README).
+            # Self-managed: all three CAs come from the mounted secret,
+            # the database holds no private key material. Rotation =
+            # commit a new key (see README).
             - name: GSSH_CA_MODE
               value: self-managed
             - name: GSSH_CA_USER_KEY_FILE
@@ -221,8 +221,8 @@ spec:
               readOnly: true
             {{- end }}
             {{- if $publicPinFile }}
-            # Ohne subPath: nur so aktualisiert das Kubelet den Mount nach einer
-            # Cert-Rotation (der Server liest die Datei bei jedem Pin-Abruf neu).
+            # Without subPath: only this way does the kubelet update the mount after a
+            # cert rotation (the server re-reads the file on every pin fetch).
             - name: public-tls
               mountPath: {{ include "guided-ssh.publicPinDir" . }}
               readOnly: true
@@ -231,15 +231,15 @@ spec:
       {{- if or .Values.internalDatabase.enabled (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile }}
       volumes:
         {{- if .Values.internalDatabase.enabled }}
-        # Ephemeral: Pod-Neustart = leere Datenbank (Test-Umgebung).
+        # Ephemeral: pod restart = empty database (test environment).
         - name: internal-db-data
           emptyDir: {}
         {{- end }}
         {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
         {{- with .Values.secrets.ca.selfManaged }}
-        # Nur die vier CA-Dateien projizieren (nicht das ganze Secret): der
-        # CA-Master-Key darf im selben Secret liegen, ohne als Datei zu landen.
-        # 0440 + podSecurityContext.fsGroup ⇒ nur der Server-Prozess liest sie.
+        # Only project the four CA files (not the whole secret): the
+        # CA master key may live in the same secret without ending up as a file.
+        # 0440 + podSecurityContext.fsGroup ⇒ only the server process reads them.
         - name: ca-keys
           secret:
             secretName: {{ .existingSecret }}
@@ -256,8 +256,8 @@ spec:
         {{- end }}
         {{- end }}
         {{- if $publicPinFile }}
-        # Nur tls.crt projizieren — der private Schlüssel des Ingress-Zertifikats
-        # hat im Server-Container nichts zu suchen.
+        # Only project tls.crt — the private key of the ingress certificate
+        # has no business being in the server container.
         - name: public-tls
           secret:
             secretName: {{ .Values.hostRollout.pin.certSecretName }}

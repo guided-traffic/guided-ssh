@@ -1,48 +1,48 @@
-# Zugriffssteuerung (Grants)
+# Access Control (Grants)
 
-Ein **Grant** verknüpft eine IdP-Gruppe über einen Tag-Selektor mit
-Ziel-Principals auf den Hosts:
+A **grant** links an IdP group, via a tag selector, to target principals
+on the hosts:
 
-> Gruppe × Tag-Selektor → Ziel-Principals (z. B. `deploy`, `root`), sudo
-> ja/nein, maximale Zertifikatslaufzeit
+> Group × tag selector → target principals (e.g. `deploy`, `root`), sudo
+> yes/no, maximum certificate validity
 
-Entscheidungsgrundlage: [ADR-018](adr/018-grants-additiv.md).
+Design rationale: [ADR-018](adr/018-grants-additive.md).
 
-## Auswertung an zwei Stellen
+## Evaluated in two places
 
-1. **Bei der Zertifikatsausstellung** (`POST /v1/sign/user`): Benutzer ohne
-   mindestens einen Grant (über ihre Gruppen) bekommen kein Zertifikat (403).
-   Die gewünschte Laufzeit wird auf das Maximum über alle Grants des
-   Benutzers gekappt; zusätzlich gilt das Policy-Maximum des Servers (16 h).
-   Die Zertifikats-Principals bleiben Identitäts-Principals (Username,
-   E-Mail).
-2. **Auf dem Host** (`AuthorizedPrincipalsCommand`, fail-closed, ADR-017):
-   Für den lokalen Benutzer `%u` liefert der Server die Identitäts-Principals
-   aller aktiven Mitglieder von Gruppen, deren Grant `%u` als Ziel-Principal
-   enthält und deren Tag-Selektor auf die Host-Tags passt
-   (Selektor ⊆ Tags; leerer Selektor = alle Hosts).
+1. **At certificate issuance** (`POST /v1/sign/user`): users without at
+   least one grant (via their groups) receive no certificate (403).
+   The requested validity is capped to the maximum across all of the
+   user's grants; the server's policy maximum (16 h) also applies.
+   The certificate's principals remain identity principals (username,
+   email).
+2. **On the host** (`AuthorizedPrincipalsCommand`, fail-closed, ADR-017):
+   for the local user `%u`, the server returns the identity principals
+   of all active members of groups whose grant includes `%u` as a target
+   principal and whose tag selector matches the host tags
+   (selector ⊆ tags; an empty selector = all hosts).
 
-## Konfliktregeln: additiv, kein deny
+## Conflict rules: additive, no deny
 
-Es gibt **keine deny-Regeln**. Jeder Grant erweitert Zugriff; die Wirkung
-mehrerer Grants ist die Vereinigung:
+There are **no deny rules**. Every grant expands access; the effect of
+multiple grants is their union:
 
-- Zugriff: erlaubt, sobald **ein** Grant passt.
-- Laufzeit: **Maximum** der `max_validity` über die Grants des Benutzers.
-- sudo: wahr, sobald **ein** passender Grant es setzt (Durchsetzung Phase 9).
+- Access: allowed as soon as **one** grant matches.
+- Validity: the **maximum** of `max_validity` across the user's grants.
+- sudo: true as soon as **one** matching grant sets it (enforcement in Phase 9).
 
-Entzug funktioniert ausschließlich über das Entfernen von Grants oder
-Gruppenmitgliedschaften (IdP-Sync). Wirkung: Ausstellung beim nächsten Login,
-Host-ACLs innerhalb der Cache-TTL (Default 5 m); bereits ausgestellte
-Zertifikate laufen regulär ab.
+Revocation works exclusively through removing grants or group memberships
+(IdP sync). Effect: issuance takes effect at the next login, host ACLs
+within the cache TTL (default 5 m); already-issued certificates expire
+normally.
 
-## Verwaltung: gssh-admin
+## Management: gssh-admin
 
-Voraussetzung auf dem Server: `GSSH_ADMIN_GROUP` (IdP-Gruppe der Admins;
-unkonfiguriert ⇒ Admin-API deaktiviert). `gssh-admin` nutzt dieselbe
-Konfigurationsdatei wie `gssh` (`~/.config/guided-ssh/config.yaml`) und
-authentifiziert per OIDC (Browser, `--device`, oder Token via
-`--token`/`GSSH_ID_TOKEN`, z. B. in CI).
+Server-side prerequisite: `GSSH_ADMIN_GROUP` (IdP group of admins;
+unconfigured ⇒ admin API disabled). `gssh-admin` uses the same
+configuration file as `gssh` (`~/.config/guided-ssh/config.yaml`) and
+authenticates via OIDC (browser, `--device`, or a token via
+`--token`/`GSSH_ID_TOKEN`, e.g. in CI).
 
 ```console
 gssh-admin grant list
@@ -52,22 +52,22 @@ gssh-admin grant update <id> --principals deploy,root --sudo=true
 gssh-admin grant delete <id>
 ```
 
-Jede Änderung erzeugt ein Audit-Event (`grant.created/updated/deleted`) mit
-dem Admin als Actor.
+Every change produces an audit event (`grant.created/updated/deleted`) with
+the admin as actor.
 
-## Deklarative Pflege (GitOps)
+## Declarative management (GitOps)
 
-`gssh-admin apply -f grants.yaml` gleicht den Bestand vollständig mit der
-Datei ab — sie ist der Zielzustand. Grants werden über (Issuer, Gruppe,
-Tag-Selektor) identifiziert: neue werden angelegt, abweichende aktualisiert,
-**nicht mehr deklarierte gelöscht**. Unbekannte Gruppen werden angelegt; der
-IdP-Sync verknüpft Mitglieder, sobald die Gruppe dort existiert.
+`gssh-admin apply -f grants.yaml` fully reconciles the current state with
+the file — it is the desired state. Grants are identified by (issuer, group,
+tag selector): new ones are created, differing ones updated,
+**ones no longer declared are deleted**. Unknown groups are created; the
+IdP sync links members once the group exists there.
 
 ```yaml
-# grants.yaml — Zielzustand aller Zugriffsregeln
+# grants.yaml — desired state of all access rules
 grants:
   - group: deployers
-    tags:            # Selektor ⊆ Host-Tags; weglassen = alle Hosts
+    tags:            # selector ⊆ host tags; omit = all hosts
       env: prod
     principals: [deploy]
     max_validity: 8h
@@ -75,27 +75,28 @@ grants:
     principals: [root]
     sudo: true
     max_validity: 4h
-    # issuer: https://idp.example/realms/x   # optional, Default: Token-Issuer
+    # issuer: https://idp.example/realms/x   # optional, default: token issuer
 ```
 
-Empfohlener Workflow: `grants.yaml` im Git-Repository pflegen, Änderungen per
-Review mergen, `gssh-admin apply` in der Pipeline (Token via `GSSH_ID_TOKEN`).
+Recommended workflow: maintain `grants.yaml` in the Git repository, merge
+changes via review, run `gssh-admin apply` in the pipeline (token via
+`GSSH_ID_TOKEN`).
 
-## Bastion-Muster (ProxyJump)
+## Bastion pattern (ProxyJump)
 
-Bastion und Ziel-Hosts sind gewöhnliche enrollte Hosts; der Zugriff wird
-**getrennt** gesteuert, weil sshd auf jedem Hop eigenständig autorisiert:
+The bastion and target hosts are ordinary enrolled hosts; access is
+controlled **separately**, because sshd authorizes independently on each hop:
 
-1. Bastion mit eigenem Tag enrollen (z. B. `role=bastion`), Ziel-Hosts mit
-   ihren Tags (z. B. `env=prod`).
-2. Zwei Grants vergeben — der Bastion-Grant gewährt bewusst nur einen
-   unprivilegierten Login:
+1. Enroll the bastion with its own tag (e.g. `role=bastion`), target hosts
+   with their tags (e.g. `env=prod`).
+2. Grant two grants — the bastion grant deliberately grants only an
+   unprivileged login:
 
 ```yaml
 grants:
   - group: deployers
     tags: {role: bastion}
-    principals: [jump]      # unprivilegierter Benutzer auf der Bastion
+    principals: [jump]      # unprivileged user on the bastion
     max_validity: 8h
   - group: deployers
     tags: {env: prod}
@@ -103,8 +104,8 @@ grants:
     max_validity: 8h
 ```
 
-3. Client-Seite (`~/.ssh/config`); dasselbe Zertifikat authentifiziert beide
-   Hops, der ssh-agent wird nicht weitergereicht:
+3. Client side (`~/.ssh/config`); the same certificate authenticates both
+   hops, the ssh-agent is not forwarded:
 
 ```ssh-config
 Host bastion.example.com
@@ -115,6 +116,6 @@ Host *.prod.example.com
   ProxyJump bastion.example.com
 ```
 
-Wer die Bastion-Berechtigung verliert, verliert damit auch den Weg zu den
-Zielen — unabhängig vom Ziel-Grant. Ein `ForwardAgent` ist nicht nötig
-(ProxyJump tunnelt die TCP-Verbindung, der Agent bleibt lokal).
+Anyone who loses bastion authorization also loses the path to the targets
+— regardless of the target grant. A `ForwardAgent` is not needed
+(ProxyJump tunnels the TCP connection, the agent stays local).

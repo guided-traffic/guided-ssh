@@ -9,7 +9,7 @@ export interface CiGrant {
   principals: Array<string>;
 
   /**
-   * GitLab-Projekt- oder Namespace-Pfad
+   * GitLab project or namespace path
    */
   project: string;
   protected_only: boolean;

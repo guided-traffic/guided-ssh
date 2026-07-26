@@ -1,58 +1,57 @@
-# ADR-016: CLI `gssh` — Agent-only-Schlüssel, stdlib-Subkommandos, SPKI-Pinning, Match-exec-Integration
+# ADR-016: CLI `gssh` — agent-only keys, stdlib subcommands, SPKI pinning, Match-exec integration
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Phase 4 liefert das Benutzer-CLI: `gssh login` (SSO-Flow, ephemerales
-Schlüsselpaar, Zertifikat in den `ssh-agent`), transparente Integration in
-natives `ssh`, `status`/`logout`, eine Konfigurationsdatei mit
-Fingerprint-Pinning sowie Cross-Platform-Builds. Der Plan verlangt explizit:
-keine Persistenz von Schlüsseln oder Zertifikaten auf Platte.
+Phase 4 delivers the user CLI: `gssh login` (SSO flow, ephemeral key pair,
+certificate loaded into the `ssh-agent`), transparent integration with native
+`ssh`, `status`/`logout`, a configuration file with fingerprint pinning, and
+cross-platform builds. The plan explicitly requires: no persistence of keys
+or certificates to disk.
 
-## Entscheidung
+## Decision
 
-- **Kommandostruktur**: Subkommandos (`login`, `ssh`, `status`, `logout`,
-  `integrate`, `version`) mit stdlib `flag` pro Subkommando — kein
-  cobra/urfave (keine neue Abhängigkeit, fünf Kommandos rechtfertigen kein
-  Framework). Logik liegt testbar in `internal/cli`; `cmd/gssh` ist ein
-  Einzeiler.
-- **Agent-only**: Pro Login entsteht ein frisches Ed25519-Schlüsselpaar im
-  Speicher; Private Key + Zertifikat gehen ausschließlich per
-  `SSH_AUTH_SOCK` in den Agenten (`AddedKey` mit `LifetimeSecs` =
-  Restlaufzeit des Zertifikats — der Agent räumt selbst auf). Einträge
-  tragen den Comment-Präfix `guided-ssh`, darüber finden `status`, `logout`
-  und der Auto-Login die eigenen Einträge. Verlust des Agenten ⇒ einfach neu
-  anmelden.
-- **Transparentes `ssh`**: `Match exec`-Integration statt ProxyCommand.
-  `gssh integrate` gibt den Schnipsel aus
-  (`Match host "<muster>" exec "gssh login --if-needed"`); der Login ist
-  Seiteneffekt der Config-Auswertung, natives `ssh` bleibt der Transport.
-  ProxyCommand müsste den Kanal selbst stellen (stdio-Proxy, bricht
-  ControlMaster, mehr Code). Zusätzlich `gssh ssh <args…>` als Wrapper
-  (Auto-Login, dann `exec ssh` mit unveränderten Argumenten).
-- **Erneuerung**: Auto-Login erneuert, wenn die Restlaufzeit < 5 Minuten ist
-  (Clock-Skew, Verbindungsaufbau).
-- **Konfiguration**: `~/.config/guided-ssh/config.yaml` (XDG), yaml.v3 (im
-  Modul bereits transitiv vorhanden). Felder: `api_url`, `issuer`,
-  `client_id`, optional `scopes`, `pin_sha256`, `validity`. Pfad-Override:
-  `--config` bzw. `GSSH_CONFIG` (letzteres nötig, weil `gssh ssh` alle
-  Argumente unverändert an ssh durchreicht).
-- **Fingerprint-Pinning**: `pin_sha256` = Base64-kodierter SHA-256 über den
-  SubjectPublicKeyInfo des API-Serverzertifikats (wie HPKP /
-  `curl --pinnedpubkey`). Gesetzt ersetzt der Pin die CA-/Hostname-Prüfung
-  vollständig (`VerifyPeerCertificate`) — deckt selbstsignierte Deployments
-  ab. Gilt nur für die gssh-API; der IdP wird normal über System-CAs
-  validiert.
+- **Command structure**: subcommands (`login`, `ssh`, `status`, `logout`,
+  `integrate`, `version`) with stdlib `flag` per subcommand — no
+  cobra/urfave (no new dependency; five commands don't justify a framework).
+  Logic lives testably in `internal/cli`; `cmd/gssh` is a one-liner.
+- **Agent-only**: each login generates a fresh Ed25519 key pair in memory;
+  the private key + certificate go exclusively via `SSH_AUTH_SOCK` into the
+  agent (`AddedKey` with `LifetimeSecs` = remaining certificate validity —
+  the agent cleans up on its own). Entries carry the comment prefix
+  `guided-ssh`, which is how `status`, `logout`, and auto-login find their
+  own entries. Losing the agent ⇒ simply log in again.
+- **Transparent `ssh`**: `Match exec` integration instead of ProxyCommand.
+  `gssh integrate` prints the snippet
+  (`Match host "<pattern>" exec "gssh login --if-needed"`); the login is a
+  side effect of config evaluation, while native `ssh` remains the
+  transport. ProxyCommand would have to provide the channel itself
+  (stdio proxy, breaks ControlMaster, more code). Additionally, `gssh ssh
+  <args…>` as a wrapper (auto-login, then `exec ssh` with unmodified
+  arguments).
+- **Renewal**: auto-login renews when the remaining validity is < 5 minutes
+  (clock skew, connection setup).
+- **Configuration**: `~/.config/guided-ssh/config.yaml` (XDG), yaml.v3
+  (already a transitive dependency in the module). Fields: `api_url`,
+  `issuer`, `client_id`, optionally `scopes`, `pin_sha256`, `validity`. Path
+  override: `--config` or `GSSH_CONFIG` (the latter needed because `gssh ssh`
+  passes all arguments through to ssh unchanged).
+- **Fingerprint pinning**: `pin_sha256` = base64-encoded SHA-256 over the
+  SubjectPublicKeyInfo of the API server certificate (like HPKP /
+  `curl --pinnedpubkey`). When set, the pin fully replaces CA/hostname
+  verification (`VerifyPeerCertificate`) — covering self-signed deployments.
+  Applies only to the gssh API; the IdP is validated normally via system CAs.
 
-## Konsequenzen
+## Consequences
 
-- Keine neuen direkten Abhängigkeiten außer yaml.v3 (war schon transitiv).
-- `ssh-add -l` zeigt die Einträge als `guided-ssh user:<sub>@<issuer>`;
-  fremde Agent-Einträge werden nie angefasst.
-- Die Match-exec-Ausgaben unterdrückt ssh; der Browser-Flow funktioniert
-  trotzdem, headless-Umgebungen nutzen vorher `gssh login --device`.
-- `gssh status` liefert Exit-Code 1 ohne gültiges Zertifikat (skriptbar).
-- Windows (named-pipe-Agent) ist bewusst außen vor; Zielplattformen laut
-  Plan: linux/amd64, linux/arm64, darwin/arm64 (`make cross`, läuft in CI).
+- No new direct dependencies besides yaml.v3 (already transitive).
+- `ssh-add -l` shows the entries as `guided-ssh user:<sub>@<issuer>`;
+  foreign agent entries are never touched.
+- ssh suppresses the Match-exec output; the browser flow still works,
+  while headless environments use `gssh login --device` beforehand.
+- `gssh status` returns exit code 1 without a valid certificate (scriptable).
+- Windows (named-pipe agent) is deliberately out of scope; target platforms
+  per the plan: linux/amd64, linux/arm64, darwin/arm64 (`make cross`, runs
+  in CI).

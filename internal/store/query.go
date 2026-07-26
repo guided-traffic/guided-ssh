@@ -6,14 +6,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// querier abstrahiert Pool und Transaktion, damit Repository-Helfer in beiden
-// Kontexten laufen (pgxpool.Pool und pgx.Tx erfüllen das Interface).
+// querier abstracts a pool and a transaction, so repository helpers run in
+// both contexts (pgxpool.Pool and pgx.Tx both satisfy the interface).
 type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// queryOne führt eine Query aus, die genau eine Zeile liefert, und mappt sie
-// per Spaltenname auf T. Keine Zeile ⇒ ErrNotFound.
+// queryOne runs a query that returns exactly one row and maps it onto T by
+// column name. No row ⇒ ErrNotFound.
 func queryOne[T any](ctx context.Context, q querier, sql string, args ...any) (*T, error) {
 	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
@@ -26,7 +26,7 @@ func queryOne[T any](ctx context.Context, q querier, sql string, args ...any) (*
 	return &v, nil
 }
 
-// queryAll führt eine Query aus und mappt alle Zeilen per Spaltenname auf T.
+// queryAll runs a query and maps all rows onto T by column name.
 func queryAll[T any](ctx context.Context, q querier, sql string, args ...any) ([]T, error) {
 	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
@@ -35,8 +35,8 @@ func queryAll[T any](ctx context.Context, q querier, sql string, args ...any) ([
 	return pgx.CollectRows(rows, pgx.RowToStructByName[T])
 }
 
-// execAffectingOne führt ein Statement aus, das genau eine Zeile treffen muss
-// (UPDATE/DELETE per Schlüssel). Keine getroffene Zeile ⇒ ErrNotFound.
+// execAffectingOne runs a statement that must affect exactly one row
+// (UPDATE/DELETE by key). No affected row ⇒ ErrNotFound.
 func (s *Store) execAffectingOne(ctx context.Context, sql string, args ...any) error {
 	tag, err := s.pool.Exec(ctx, sql, args...)
 	if err != nil {

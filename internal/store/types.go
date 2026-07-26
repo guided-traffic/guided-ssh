@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// User ist ein aus dem IdP synchronisierter Benutzer.
+// User is a user synchronized from the IdP.
 type User struct {
 	ID        uuid.UUID `db:"id"`
 	Issuer    string    `db:"issuer"`
@@ -21,7 +21,7 @@ type User struct {
 	UpdatedAt time.Time `db:"updated_at"`
 }
 
-// Group ist eine IdP-Gruppe.
+// Group is an IdP group.
 type Group struct {
 	ID         uuid.UUID `db:"id"`
 	Issuer     string    `db:"issuer"`
@@ -30,7 +30,7 @@ type Group struct {
 	CreatedAt  time.Time `db:"created_at"`
 }
 
-// Host ist ein verwalteter SSH-Host.
+// Host is a managed SSH host.
 type Host struct {
 	ID         uuid.UUID  `db:"id"`
 	Name       string     `db:"name"`
@@ -41,8 +41,8 @@ type Host struct {
 	UpdatedAt  time.Time  `db:"updated_at"`
 }
 
-// AccessGrant verknüpft eine IdP-Gruppe über einen Tag-Selektor mit
-// Ziel-Principals, sudo-Flag und maximaler Zertifikatslaufzeit.
+// AccessGrant links an IdP group, via a tag selector, to target principals,
+// a sudo flag, and a maximum certificate validity.
 type AccessGrant struct {
 	ID                 uuid.UUID         `db:"id"`
 	GroupID            uuid.UUID         `db:"group_id"`
@@ -54,28 +54,28 @@ type AccessGrant struct {
 	UpdatedAt          time.Time         `db:"updated_at"`
 }
 
-// MaxValidity ist die maximale Zertifikatslaufzeit als Duration.
+// MaxValidity is the maximum certificate validity as a Duration.
 func (g *AccessGrant) MaxValidity() time.Duration {
 	return time.Duration(g.MaxValiditySeconds) * time.Second
 }
 
-// Zustände eines CA-Keys.
+// States of a CA key.
 const (
 	CAKeyStateActive   = "active"
 	CAKeyStateRetiring = "retiring"
 	CAKeyStateRetired  = "retired"
 )
 
-// Zertifikatstypen bzw. CA-Key-Zwecke.
+// Certificate types / CA key purposes.
 const (
 	CertTypeUser = "user"
 	CertTypeHost = "host"
-	// CAPurposeMTLS ist die X.509-CA für mTLS-Client-Zertifikate der
-	// Host-Agenten (Phase 5); kein SSH-Zertifikatstyp.
+	// CAPurposeMTLS is the X.509 CA for mTLS client certificates of the
+	// host agents (phase 5); not an SSH certificate type.
 	CAPurposeMTLS = "mtls"
 )
 
-// CAKey ist ein Signierschlüssel der CA.
+// CAKey is a signing key of the CA.
 type CAKey struct {
 	ID                  uuid.UUID  `db:"id"`
 	Purpose             string     `db:"purpose"`
@@ -87,7 +87,7 @@ type CAKey struct {
 	RetiredAt           *time.Time `db:"retired_at"`
 }
 
-// ServiceAccount ist eine maschinelle Identität (z. B. GitLab-CI-Projekt).
+// ServiceAccount is a machine identity (e.g. a GitLab CI project).
 type ServiceAccount struct {
 	ID           uuid.UUID         `db:"id"`
 	Name         string            `db:"name"`
@@ -99,7 +99,7 @@ type ServiceAccount struct {
 	UpdatedAt    time.Time         `db:"updated_at"`
 }
 
-// Certificate ist ein ausgestelltes SSH-Zertifikat (Metadaten, nie der Private Key).
+// Certificate is an issued SSH certificate (metadata only, never the private key).
 type Certificate struct {
 	ID               uuid.UUID       `db:"id"`
 	Serial           int64           `db:"serial"`
@@ -117,9 +117,9 @@ type Certificate struct {
 	CreatedAt        time.Time       `db:"created_at"`
 }
 
-// HostSession ist eine auf dem Host beobachtete SSH-Session (Phase 9). Der
-// Host-Agent meldet Start und Ende; cert_serial korreliert sie mit dem
-// ausgestellten Zertifikat (und darüber user_id). ended_at NULL = aktiv.
+// HostSession is an SSH session observed on the host (phase 9). The host
+// agent reports its start and end; cert_serial correlates it with the
+// issued certificate (and thereby with user_id). ended_at NULL = active.
 type HostSession struct {
 	ID         uuid.UUID  `db:"id"`
 	HostID     uuid.UUID  `db:"host_id"`
@@ -135,7 +135,7 @@ type HostSession struct {
 	CreatedAt  time.Time  `db:"created_at"`
 }
 
-// AuditEvent ist ein Eintrag im Append-only-Audit-Log.
+// AuditEvent is an entry in the append-only audit log.
 type AuditEvent struct {
 	ID         int64           `db:"id"`
 	OccurredAt time.Time       `db:"occurred_at"`

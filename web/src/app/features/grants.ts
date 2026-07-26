@@ -28,18 +28,18 @@ import { SessionService } from '../core/session.service';
     <div class="page">
       <div class="page-header">
         <div>
-          <h1>Zugriffsregeln</h1>
+          <h1>Access Rules</h1>
           <div class="page-sub">
-            IdP-Gruppe × Tag-Selektor → Principals · additiv, kein deny (ADR-018)
+            IdP group × tag selector → principals · additive, no deny (ADR-018)
           </div>
         </div>
         <div>
           <button mat-stroked-button (click)="load()" [disabled]="loading()">
-            <mat-icon svgIcon="refresh" />Aktualisieren
+            <mat-icon svgIcon="refresh" />Refresh
           </button>
           @if (session.isAdmin()) {
             <button mat-flat-button (click)="edit(null)" style="margin-left: 8px">
-              <mat-icon svgIcon="add" />Neue Regel
+              <mat-icon svgIcon="add" />New Rule
             </button>
           }
         </div>
@@ -49,23 +49,23 @@ import { SessionService } from '../core/session.service';
         @if (loading()) {
           <div class="empty-state"><mat-spinner diameter="28" /></div>
         } @else if (grants().length === 0) {
-          <div class="empty-state">Keine Zugriffsregeln definiert.</div>
+          <div class="empty-state">No access rules defined.</div>
         } @else {
           <table mat-table [dataSource]="grants()">
             <ng-container matColumnDef="group">
-              <th mat-header-cell *matHeaderCellDef>Gruppe</th>
+              <th mat-header-cell *matHeaderCellDef>Group</th>
               <td mat-cell *matCellDef="let g">
                 <div>{{ g.group }}</div>
                 <div class="dim mono" style="font-size: 11px">{{ g.issuer }}</div>
               </td>
             </ng-container>
             <ng-container matColumnDef="selector">
-              <th mat-header-cell *matHeaderCellDef>Host-Selektor</th>
+              <th mat-header-cell *matHeaderCellDef>Host Selector</th>
               <td mat-cell *matCellDef="let g">
                 @for (tag of tagList(g.tag_selector); track tag) {
                   <span class="tag-chip">{{ tag }}</span>
                 } @empty {
-                  <span class="pill accent">alle Hosts</span>
+                  <span class="pill accent">all hosts</span>
                 }
               </td>
             </ng-container>
@@ -76,21 +76,21 @@ import { SessionService } from '../core/session.service';
             <ng-container matColumnDef="sudo">
               <th mat-header-cell *matHeaderCellDef>sudo</th>
               <td mat-cell *matCellDef="let g">
-                <span [class]="g.sudo ? 'pill warn' : 'pill muted'">{{ g.sudo ? 'ja' : 'nein' }}</span>
+                <span [class]="g.sudo ? 'pill warn' : 'pill muted'">{{ g.sudo ? 'yes' : 'no' }}</span>
               </td>
             </ng-container>
             <ng-container matColumnDef="validity">
-              <th mat-header-cell *matHeaderCellDef>Max. Laufzeit</th>
+              <th mat-header-cell *matHeaderCellDef>Max. Validity</th>
               <td mat-cell *matCellDef="let g">{{ formatSeconds(g.max_validity_seconds) }}</td>
             </ng-container>
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef></th>
               <td mat-cell *matCellDef="let g" style="white-space: nowrap; text-align: right">
                 @if (session.isAdmin()) {
-                  <button mat-icon-button aria-label="Bearbeiten" (click)="edit(g)">
+                  <button mat-icon-button aria-label="Edit" (click)="edit(g)">
                     <mat-icon svgIcon="edit" />
                   </button>
-                  <button mat-icon-button aria-label="Löschen" (click)="remove(g)">
+                  <button mat-icon-button aria-label="Delete" (click)="remove(g)">
                     <mat-icon svgIcon="delete" />
                   </button>
                 }
@@ -139,13 +139,13 @@ export class GrantsPage implements OnInit {
   }
 
   remove(grant: Grant): void {
-    if (!confirm(`Zugriffsregel für „${grant.group}“ wirklich löschen?`)) {
+    if (!confirm(`Really delete the access rule for "${grant.group}"?`)) {
       return;
     }
     this.api
       .invoke(deleteGrant, { id: grant.id })
       .then(() => this.load())
-      .catch(() => this.snackBar.open('Löschen fehlgeschlagen', 'OK', { duration: 4000 }));
+      .catch(() => this.snackBar.open('Delete failed', 'OK', { duration: 4000 }));
   }
 }
 
@@ -160,39 +160,39 @@ export class GrantsPage implements OnInit {
     MatButtonModule,
   ],
   template: `
-    <h2 mat-dialog-title>{{ grant ? 'Zugriffsregel bearbeiten' : 'Neue Zugriffsregel' }}</h2>
+    <h2 mat-dialog-title>{{ grant ? 'Edit Access Rule' : 'New Access Rule' }}</h2>
     <mat-dialog-content>
       <div class="dialog-form">
         <mat-form-field appearance="outline">
-          <mat-label>IdP-Gruppe</mat-label>
+          <mat-label>IdP group</mat-label>
           <input matInput [(ngModel)]="group" [disabled]="grant !== null" required />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Issuer (leer = eigener IdP)</mat-label>
+          <mat-label>Issuer (empty = own IdP)</mat-label>
           <input matInput [(ngModel)]="issuer" [disabled]="grant !== null" />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Host-Tag-Selektor (key=value, …)</mat-label>
+          <mat-label>Host tag selector (key=value, …)</mat-label>
           <input matInput [(ngModel)]="tagSelector" placeholder="env=prod, role=web" />
-          <mat-hint>leer = alle Hosts</mat-hint>
+          <mat-hint>empty = all hosts</mat-hint>
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Principals (Komma-getrennt)</mat-label>
+          <mat-label>Principals (comma-separated)</mat-label>
           <input matInput [(ngModel)]="principals" placeholder="deploy, root" required />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Maximale Laufzeit (Stunden)</mat-label>
+          <mat-label>Maximum validity (hours)</mat-label>
           <input matInput type="number" min="1" [(ngModel)]="validityHours" required />
         </mat-form-field>
-        <mat-checkbox [(ngModel)]="sudo">sudo erlauben</mat-checkbox>
+        <mat-checkbox [(ngModel)]="sudo">allow sudo</mat-checkbox>
         @if (error()) {
           <div class="pill danger">{{ error() }}</div>
         }
       </div>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Abbrechen</button>
-      <button mat-flat-button (click)="save()" [disabled]="saving()">Speichern</button>
+      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-flat-button (click)="save()" [disabled]="saving()">Save</button>
     </mat-dialog-actions>
   `,
   styles: `
@@ -245,11 +245,11 @@ export class GrantDialog {
       return;
     }
     if (!this.grant && !body.group) {
-      this.error.set('Gruppe fehlt');
+      this.error.set('Group is missing');
       return;
     }
     if (body.principals.length === 0) {
-      this.error.set('Mindestens ein Principal erforderlich');
+      this.error.set('At least one principal is required');
       return;
     }
     this.saving.set(true);
@@ -258,7 +258,7 @@ export class GrantDialog {
       : this.api.invoke(createGrant, { body });
     call
       .then(() => this.ref.close(true))
-      .catch(() => this.error.set('Speichern fehlgeschlagen'))
+      .catch(() => this.error.set('Save failed'))
       .finally(() => this.saving.set(false));
   }
 }

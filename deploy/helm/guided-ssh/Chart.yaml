@@ -5,9 +5,9 @@ description: >-
   certificates via OIDC, host enrollment with mTLS agents, GitLab CI
   certificates, audit log and web UI.
 type: application
-# Lint-Baseline (ct check-version-increment). Beim Release werden version und
-# appVersion aus dem git-Tag gesetzt (siehe .github/workflows/build.yml, Job
-# helm-chart); die veröffentlichte Chart-Version = App-Version = Image-Tag.
+# Lint baseline (ct check-version-increment). On release, version and
+# appVersion are set from the git tag (see .github/workflows/build.yml, job
+# helm-chart); the published chart version = app version = image tag.
 version: 0.0.1
 appVersion: "0.0.1"
 kubeVersion: ">=1.27.0-0"
@@ -23,8 +23,8 @@ keywords:
   - oidc
   - security
 dependencies:
-  # Nur für Entwicklung/Tests (postgresql.enabled=true); produktiv wird eine
-  # externe PostgreSQL bzw. CloudNativePG angebunden — siehe README.
+  # Only for development/testing (postgresql.enabled=true); in production an
+  # external PostgreSQL or CloudNativePG is connected instead — see README.
   - name: postgresql
     version: "18.8.0"
     repository: oci://registry-1.docker.io/bitnamicharts

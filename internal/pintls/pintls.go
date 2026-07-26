@@ -1,6 +1,6 @@
-// Package pintls stellt SPKI-Fingerprint-Pinning für TLS-Clients bereit
-// (genutzt von gssh und gssh-agentd, siehe ADR-016): der Base64-kodierte
-// SHA-256 des SubjectPublicKeyInfo ersetzt die CA-/Hostname-Prüfung.
+// Package pintls provides SPKI fingerprint pinning for TLS clients (used by
+// gssh and gssh-agentd, see ADR-016): the base64-encoded SHA-256 of the
+// SubjectPublicKeyInfo replaces CA/hostname verification.
 package pintls
 
 import (
@@ -14,44 +14,43 @@ import (
 	"net/http"
 )
 
-// FromCertificate liefert den Base64-SPKI-SHA-256-Pin eines Zertifikats —
-// exakt der Wert, den DecodePin erwartet und Verifier prüft. Einzige Quelle
-// der Berechnung (Server-Pin-Provider, Tests, Doku-Snippets).
+// FromCertificate returns a certificate's base64 SPKI-SHA-256 pin — exactly
+// the value DecodePin expects and Verifier checks. The single source of
+// this computation (server pin provider, tests, doc snippets).
 func FromCertificate(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
 	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
-// DecodePin dekodiert und validiert einen Base64-SPKI-SHA-256-Pin.
+// DecodePin decodes and validates a base64 SPKI-SHA-256 pin.
 func DecodePin(encoded string) ([]byte, error) {
 	pin, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("pin ist kein gültiges base64: %w", err)
+		return nil, fmt.Errorf("pin is not valid base64: %w", err)
 	}
 	if len(pin) != sha256.Size {
-		return nil, fmt.Errorf("pin muss %d bytes lang sein (sha-256), ist %d", sha256.Size, len(pin))
+		return nil, fmt.Errorf("pin must be %d bytes long (sha-256), is %d", sha256.Size, len(pin))
 	}
 	return pin, nil
 }
 
-// Transport liefert einen http.Transport, der das Serverzertifikat
-// ausschließlich über den gepinnten SPKI-Hash verifiziert; Chain- und
-// Hostname-Prüfung entfallen bewusst (der Pin ersetzt das CA-Vertrauen).
+// Transport returns an http.Transport that verifies the server certificate
+// solely via the pinned SPKI hash; chain and hostname verification are
+// deliberately skipped (the pin replaces CA trust).
 func Transport(pin []byte) *http.Transport {
 	return &http.Transport{TLSClientConfig: &tls.Config{
 		MinVersion: tls.VersionTLS12,
-		// Pinning ersetzt die CA-/Hostname-Prüfung; verifiziert wird über den
-		// SPKI-Pin in VerifyConnection.
-		InsecureSkipVerify: true, //nolint:gosec // Pin-Prüfung erfolgt in VerifyConnection (siehe unten).
+		// Pinning replaces CA/hostname verification; verification happens
+		// via the SPKI pin in VerifyConnection.
+		InsecureSkipVerify: true, //nolint:gosec // Pin verification happens in VerifyConnection (see below).
 		VerifyConnection:   Verifier(pin),
 	}}
 }
 
-// Verifier akzeptiert die Verbindung, sobald ein präsentiertes Zertifikat
-// den gepinnten SPKI-Hash trägt. Als VerifyConnection läuft die Prüfung auf
-// vollständigen wie wiederaufgenommenen Handshakes (anders als
-// VerifyPeerCertificate, das bei Session-Resumption übersprungen würde und so
-// den Pin umgehen ließe).
+// Verifier accepts the connection as soon as a presented certificate carries
+// the pinned SPKI hash. As VerifyConnection, the check runs on both full and
+// resumed handshakes (unlike VerifyPeerCertificate, which would be skipped
+// on session resumption and could let the pin be bypassed).
 func Verifier(pin []byte) func(tls.ConnectionState) error {
 	return func(cs tls.ConnectionState) error {
 		for _, cert := range cs.PeerCertificates {
@@ -60,6 +59,6 @@ func Verifier(pin []byte) func(tls.ConnectionState) error {
 				return nil
 			}
 		}
-		return errors.New("serverzertifikat entspricht nicht dem gepinnten fingerprint")
+		return errors.New("server certificate does not match the pinned fingerprint")
 	}
 }

@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// runCIGrantCmd verzweigt in die ci-grant-Subkommandos (Phase 7).
+// runCIGrantCmd dispatches to the ci-grant subcommands (phase 7).
 func runCIGrantCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "gssh-admin: ci-grant braucht ein subkommando (list, create, update, delete)")
+		fmt.Fprintln(stderr, "gssh-admin: ci-grant requires a subcommand (list, create, update, delete)")
 		return 2
 	}
 	sub, rest := args[0], args[1:]
@@ -27,7 +27,7 @@ func runCIGrantCmd(ctx context.Context, args []string, stdout, stderr io.Writer)
 	case "delete":
 		return runCIGrantDelete(ctx, rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "gssh-admin: unbekanntes ci-grant-subkommando %q\n", sub)
+		fmt.Fprintf(stderr, "gssh-admin: unknown ci-grant subcommand %q\n", sub)
 		return 2
 	}
 }
@@ -52,10 +52,10 @@ func runCIGrantList(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-// printCIGrants gibt CI-Grants tabellarisch aus.
+// printCIGrants prints CI grants as a table.
 func printCIGrants(w io.Writer, grants []CIGrant) {
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tPROJEKT\tREF\tPROTECTED\tENV\tTAGS\tPRINCIPALS\tMAX-LAUFZEIT")
+	fmt.Fprintln(tw, "ID\tPROJECT\tREF\tPROTECTED\tENV\tTAGS\tPRINCIPALS\tMAX-VALIDITY")
 	for _, g := range grants {
 		ref := g.RefPattern
 		if ref == "" {
@@ -77,7 +77,7 @@ func printCIGrants(w io.Writer, grants []CIGrant) {
 	_ = tw.Flush()
 }
 
-// ciGrantFlags sind die inhaltlichen Flags von ci-grant create/update.
+// ciGrantFlags are the content flags shared by ci-grant create/update.
 type ciGrantFlags struct {
 	refPattern    string
 	protectedOnly bool
@@ -88,12 +88,12 @@ type ciGrantFlags struct {
 }
 
 func (c *ciGrantFlags) register(fs *flag.FlagSet) {
-	fs.StringVar(&c.refPattern, "ref", "", "ref-glob, z. B. main oder release/* (leer = alle refs)")
-	fs.BoolVar(&c.protectedOnly, "protected-only", true, "nur geschützte refs (ref_protected)")
-	fs.StringVar(&c.environment, "environment", "", "environment-glob (leer = keine bedingung)")
-	fs.StringVar(&c.tags, "tags", "", "tag-selektor, z. B. env=prod,role=web (leer = alle hosts)")
-	fs.StringVar(&c.principals, "principals", "", "ziel-principals, z. B. deploy (pflicht bei create)")
-	fs.DurationVar(&c.maxValidity, "max-validity", time.Hour, "maximale zertifikatslaufzeit")
+	fs.StringVar(&c.refPattern, "ref", "", "ref glob, e.g. main or release/* (empty = all refs)")
+	fs.BoolVar(&c.protectedOnly, "protected-only", true, "protected refs only (ref_protected)")
+	fs.StringVar(&c.environment, "environment", "", "environment glob (empty = no condition)")
+	fs.StringVar(&c.tags, "tags", "", "tag selector, e.g. env=prod,role=web (empty = all hosts)")
+	fs.StringVar(&c.principals, "principals", "", "target principals, e.g. deploy (required for create)")
+	fs.DurationVar(&c.maxValidity, "max-validity", time.Hour, "maximum certificate validity")
 }
 
 func runCIGrantCreate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -103,13 +103,13 @@ func runCIGrantCreate(ctx context.Context, args []string, stdout, stderr io.Writ
 	common.register(fs)
 	var grantFlags ciGrantFlags
 	grantFlags.register(fs)
-	project := fs.String("project", "", "gitlab-projekt- oder gruppen-pfad (pflicht)")
+	project := fs.String("project", "", "gitlab project or group path (required)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	principals := splitList(grantFlags.principals)
 	if *project == "" || len(principals) == 0 {
-		fmt.Fprintln(stderr, "gssh-admin: --project und --principals sind pflicht")
+		fmt.Fprintln(stderr, "gssh-admin: --project and --principals are required")
 		return 2
 	}
 	tags, err := parseTags(grantFlags.tags)
@@ -132,7 +132,7 @@ func runCIGrantCreate(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "ci-grant angelegt: %s (projekt %s)\n", created.ID, created.Project)
+	fmt.Fprintf(stdout, "ci-grant created: %s (project %s)\n", created.ID, created.Project)
 	return 0
 }
 
@@ -188,7 +188,7 @@ func runCIGrantUpdate(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "ci-grant aktualisiert: %s (projekt %s)\n", updated.ID, updated.Project)
+	fmt.Fprintf(stdout, "ci-grant updated: %s (project %s)\n", updated.ID, updated.Project)
 	return 0
 }
 
@@ -212,6 +212,6 @@ func runCIGrantDelete(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err := apiClient.deleteCIGrant(ctx, id); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "ci-grant gelöscht: %s\n", id)
+	fmt.Fprintf(stdout, "ci-grant deleted: %s\n", id)
 	return 0
 }

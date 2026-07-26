@@ -2,107 +2,107 @@
 
 ![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fguided-traffic%2Fguided-ssh%2Fmain%2F.github%2Fbadges%2Fcoverage.json)
 
-Zertifikatsbasierte SSH-Zugriffsplattform: kurzlebige SSH-Zertifikate statt statischer
-`authorized_keys`, Single Sign-On über den bestehenden Identity Provider, maschinelle
-Zugänge für CI-Pipelines (GitLab) und vollständige Auditierbarkeit aller Zugriffe.
-Betrieb in Kubernetes via Helm, verwaltet über GitOps (FluxCD).
+Certificate-based SSH access platform: short-lived SSH certificates instead of static
+`authorized_keys`, single sign-on against the existing identity provider, machine
+access for CI pipelines (GitLab), and full auditability of every access.
+Runs on Kubernetes via Helm, managed through GitOps (FluxCD).
 
-Plan und Fortschritt: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
+Plan and progress: [INITIAL_PROJECT_PLAN.md](INITIAL_PROJECT_PLAN.md)
 
-## Repository-Struktur
+## Repository layout
 
-| Pfad | Inhalt |
+| Path | Contents |
 |---|---|
-| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (Benutzer-CLI), `gssh-agentd` (Host-Agent), `gssh-admin` (Admin-CLI) |
-| `internal/` | Go-Pakete (nicht öffentlich importierbar) |
-| `api/` | [OpenAPI-Spezifikation](api/openapi.yaml) — Single Source of Truth der REST-API |
-| `web/` | Angular-Frontend, eingebettet ins Go-Binary ([docs/web-ui.md](docs/web-ui.md)) |
-| `deploy/helm/` | Helm-Chart (ab Phase 11) |
-| `docs/` | [Teststrategie](docs/teststrategie.md), [Bedrohungsmodell](docs/bedrohungsmodell.md), [Zugriffssteuerung](docs/grants.md), [GitLab-CI](docs/gitlab-ci.md), [Web-UI](docs/web-ui.md), [CI-Runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
-| `hack/` | Hilfsskripte für Build und CI |
+| `cmd/` | Binaries — `gssh-server` (API/CA), `gssh` (user CLI), `gssh-agentd` (host agent), `gssh-admin` (admin CLI) |
+| `internal/` | Go packages (not importable externally) |
+| `api/` | [OpenAPI specification](api/openapi.yaml) — single source of truth for the REST API |
+| `web/` | Angular frontend, embedded in the Go binary ([docs/web-ui.md](docs/web-ui.md)) |
+| `deploy/helm/` | Helm chart (from phase 11) |
+| `docs/` | [Test strategy](docs/test-strategy.md), [threat model](docs/threat-model.md), [access control](docs/grants.md), [GitLab CI](docs/gitlab-ci.md), [web UI](docs/web-ui.md), [CI runner](docs/ci-runner.md), [ADRs](docs/adr/README.md) |
+| `hack/` | Helper scripts for build and CI |
 
 ## gssh-server
 
-API-Server mit integrierter Zertifizierungsstelle (CA). Beim Start laufen die
-Datenbank-Migrationen; fehlen CA-Keys, werden sie erzeugt (je ein Ed25519-Key
-für Benutzer- und Host-Zertifikate, Private Keys AES-256-GCM-verschlüsselt in
-der Datenbank, siehe [ADR-014](docs/adr/014-software-signer-aes-gcm.md)).
-Alternativ liefert der Betreiber die CA-Keys selbst als Dateien
-(`GSSH_CA_MODE=self-managed`) — dann schreibt der Server kein privates
-Schlüsselmaterial in die Datenbank
+API server with an integrated certificate authority (CA). Database migrations run
+at startup; if CA keys are missing, they are generated (one Ed25519 key each
+for user and host certificates, private keys AES-256-GCM-encrypted in
+the database, see [ADR-014](docs/adr/014-software-signer-aes-gcm.md)).
+Alternatively, the operator supplies the CA keys as files
+(`GSSH_CA_MODE=self-managed`) — in that case the server writes no private
+key material to the database
 ([docs/self-managed-ca.md](docs/self-managed-ca.md)).
 
 ```sh
-gssh-server -listen :8080                      # HTTP-API starten
-gssh-server -listen :8080 -agent-listen :8443  # zusätzlich Agent-API (mTLS)
-gssh-server enroll-token -tags env=prod -ttl 24h  # einmaliges Enrollment-Token
-gssh-server -version                           # Version ausgeben
+gssh-server -listen :8080                      # start the HTTP API
+gssh-server -listen :8080 -agent-listen :8443  # also start the agent API (mTLS)
+gssh-server enroll-token -tags env=prod -ttl 24h  # one-time enrollment token
+gssh-server -version                           # print the version
 ```
 
-Konfiguration über Umgebungsvariablen:
+Configuration via environment variables:
 
-| Variable | Bedeutung |
+| Variable | Meaning |
 |---|---|
-| `GSSH_DB_HOST` / `GSSH_DB_PORT` | PostgreSQL-Host (Pflicht) und Port (Default 5432) |
-| `GSSH_DB_USER` / `GSSH_DB_PASSWORD` | Datenbank-Benutzer und -Passwort (Pflicht) |
-| `GSSH_DB_NAME` | Datenbank-Name (Pflicht) |
-| `GSSH_DB_SSLMODE` | `sslmode` der Verbindung (Default `prefer`) |
-| `GSSH_CA_MASTER_KEY` | Master-Key für die CA-Key-Verschlüsselung: 32 Bytes, Base64 (z. B. `head -c 32 /dev/urandom \| base64`); in beiden CA-Modi Pflicht |
-| `GSSH_CA_MODE` | `managed` (Default) oder `self-managed`; letzteres erfordert die vier `GSSH_CA_*_FILE`-Variablen, die im Modus `managed` umgekehrt nicht gesetzt sein dürfen |
-| `GSSH_CA_USER_KEY_FILE` / `GSSH_CA_HOST_KEY_FILE` | OpenSSH-Private-Key-PEM der Benutzer- bzw. Host-CA (nur `self-managed`) |
-| `GSSH_CA_MTLS_KEY_FILE` / `GSSH_CA_MTLS_CERT_FILE` | PKCS#8-PEM und X.509-CA-Zertifikat der Agent-mTLS-CA (nur `self-managed`) |
-| `GSSH_AGENT_TLS_NAMES` | SANs des mTLS-Server-Zertifikats der Agent-API (Komma-getrennt; Default `localhost,127.0.0.1`) |
-| `GSSH_ADMIN_GROUP` | IdP-Gruppe, deren Mitglieder die Admin-API (`/v1/admin/…`) nutzen dürfen; leer ⇒ Admin-API deaktiviert |
-| `GSSH_AGENT_PUBLIC_URL` | Externe mTLS-Agent-URL für enrollte Hosts (Host-Rollout, wird nie abgeleitet) |
-| `GSSH_PUBLIC_URL` | Externe Public-Basis-URL (Host-Rollout: `install_command` und Pin-Dial); leer ⇒ `GSSH_UI_BASE_URL` |
-| `GSSH_PUBLIC_PIN` / `GSSH_PUBLIC_PIN_CERT_FILE` | Pin-Quellen des Host-Rollouts: Base64-SPKI-Pin bzw. PEM-Zertifikat; ohne beides dialt der Server seine Public-URL selbst an |
-| `GSSH_PUBLIC_PIN_REFRESH` | Refresh-Intervall des Pin-Selbst-Dials (Go-Duration, Default 5m) |
-| `GSSH_AGENT_DOWNLOAD_RPM` | Binary-Downloads pro Client-IP und Minute (Default 10, `0` = aus) |
+| `GSSH_DB_HOST` / `GSSH_DB_PORT` | PostgreSQL host (required) and port (default 5432) |
+| `GSSH_DB_USER` / `GSSH_DB_PASSWORD` | Database user and password (required) |
+| `GSSH_DB_NAME` | Database name (required) |
+| `GSSH_DB_SSLMODE` | Connection `sslmode` (default `prefer`) |
+| `GSSH_CA_MASTER_KEY` | Master key for CA key encryption: 32 bytes, base64 (e.g. `head -c 32 /dev/urandom \| base64`); required in both CA modes |
+| `GSSH_CA_MODE` | `managed` (default) or `self-managed`; the latter requires the four `GSSH_CA_*_FILE` variables, which conversely must not be set in `managed` mode |
+| `GSSH_CA_USER_KEY_FILE` / `GSSH_CA_HOST_KEY_FILE` | OpenSSH private-key PEM of the user and host CA respectively (`self-managed` only) |
+| `GSSH_CA_MTLS_KEY_FILE` / `GSSH_CA_MTLS_CERT_FILE` | PKCS#8 PEM and X.509 CA certificate of the agent mTLS CA (`self-managed` only) |
+| `GSSH_AGENT_TLS_NAMES` | SANs of the agent API's mTLS server certificate (comma-separated; default `localhost,127.0.0.1`) |
+| `GSSH_ADMIN_GROUP` | IdP group whose members may use the admin API (`/v1/admin/…`); empty ⇒ admin API disabled |
+| `GSSH_AGENT_PUBLIC_URL` | External mTLS agent URL for enrolled hosts (host rollout, never derived) |
+| `GSSH_PUBLIC_URL` | External public base URL (host rollout: `install_command` and pin dial); empty ⇒ `GSSH_UI_BASE_URL` |
+| `GSSH_PUBLIC_PIN` / `GSSH_PUBLIC_PIN_CERT_FILE` | Pin sources for the host rollout: base64 SPKI pin or PEM certificate; without either, the server dials its own public URL |
+| `GSSH_PUBLIC_PIN_REFRESH` | Refresh interval for the pin self-dial (Go duration, default 5m) |
+| `GSSH_AGENT_DOWNLOAD_RPM` | Binary downloads per client IP and minute (default 10, `0` = off) |
 
-Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
+Endpoints (phase 2 — sign endpoints follow from phase 3):
 
-| Endpoint | Bedeutung |
+| Endpoint | Meaning |
 |---|---|
 | `GET /healthz` | Liveness |
-| `GET /v1/ca/bundle/user` | Public Keys der Benutzer-CA (authorized_keys-Format) — Inhalt für `TrustedUserCAKeys` auf Hosts |
-| `GET /v1/ca/bundle/host` | Public Keys der Host-CA — für `@cert-authority`-Einträge in `known_hosts` |
+| `GET /v1/ca/bundle/user` | Public keys of the user CA (authorized_keys format) — content for `TrustedUserCAKeys` on hosts |
+| `GET /v1/ca/bundle/host` | Public keys of the host CA — for `@cert-authority` entries in `known_hosts` |
 
-Die Bundles enthalten alle aktiven und in Ablösung befindlichen Keys
-(Übergangsfenster bei Key-Rotation).
+The bundles contain all active keys and any keys being phased out
+(overlap window during key rotation).
 
-## gssh (Benutzer-CLI)
+## gssh (user CLI)
 
-SSO-Login gegen den IdP, kurzlebiges SSH-Zertifikat vom Server — Schlüsselpaar
-und Zertifikat leben ausschließlich im `ssh-agent`, nichts wird auf Platte
-persistiert ([ADR-016](docs/adr/016-cli-gssh-agent-only.md)).
+SSO login against the IdP, short-lived SSH certificate from the server — key pair
+and certificate live exclusively in the `ssh-agent`; nothing is
+persisted to disk ([ADR-016](docs/adr/016-cli-gssh-agent-only.md)).
 
 ```sh
-gssh login               # SSO im Browser, Zertifikat in den ssh-agent
-gssh login --device      # Device-Flow (headless, ohne Browser)
-gssh ssh <host> …        # wie ssh, mit Auto-Login bei fehlendem Zertifikat
-gssh status              # Zertifikatsstatus; Exit-Code 1 ohne gültiges Zertifikat
-gssh logout              # guided-ssh-Einträge aus dem Agenten entfernen
-gssh integrate           # ssh_config-Schnipsel für transparentes natives ssh
-gssh ci-login            # GitLab-CI: Job-Token gegen CI-Zertifikat tauschen
+gssh login               # SSO in the browser, certificate into the ssh-agent
+gssh login --device      # device flow (headless, no browser)
+gssh ssh <host> …        # like ssh, with auto-login if no certificate is present
+gssh status              # certificate status; exit code 1 without a valid certificate
+gssh logout              # remove guided-ssh entries from the agent
+gssh integrate           # ssh_config snippet for transparent native ssh
+gssh ci-login            # GitLab CI: exchange job token for a CI certificate
 ```
 
-`gssh ci-login` läuft ohne Konfigurationsdatei (Flags/`GSSH_API_URL`,
-Job-Token aus `GSSH_CI_TOKEN` via `id_tokens`) — Details und Referenz-Pipeline
+`gssh ci-login` runs without a configuration file (flags/`GSSH_API_URL`,
+job token from `GSSH_CI_TOKEN` via `id_tokens`) — details and a reference pipeline
 in [docs/gitlab-ci.md](docs/gitlab-ci.md).
 
-Konfiguration in `~/.config/guided-ssh/config.yaml` (Override: `--config`
-bzw. `GSSH_CONFIG`):
+Configuration in `~/.config/guided-ssh/config.yaml` (override: `--config`
+or `GSSH_CONFIG`):
 
 ```yaml
 api_url: https://gssh.example.com
 issuer: https://idp.example.com/realms/example
 client_id: gssh-cli
 # optional:
-# pin_sha256: <Base64-SHA-256 des Server-SPKI — ersetzt die CA-Prüfung>
-# validity: 8h        # gewünschte Laufzeit (Policy-Maximum des Servers greift)
+# pin_sha256: <base64 SHA-256 of the server SPKI — replaces the CA check>
+# validity: 8h        # desired validity (server policy maximum takes precedence)
 ```
 
-Pin ermitteln:
+Determining the pin:
 
 ```sh
 openssl s_client -connect gssh.example.com:443 </dev/null 2>/dev/null \
@@ -110,17 +110,17 @@ openssl s_client -connect gssh.example.com:443 </dev/null 2>/dev/null \
   | openssl dgst -sha256 -binary | base64
 ```
 
-Transparente Integration in natives `ssh` (`gssh integrate >> ~/.ssh/config`):
+Transparent integration into native `ssh` (`gssh integrate >> ~/.ssh/config`):
 
 ```
 Match host "*.example.com" exec "gssh login --if-needed"
 ```
 
-## gssh-admin (Admin-CLI)
+## gssh-admin (admin CLI)
 
-Verwaltet die Zugriffsregeln (Grants) über die Admin-API
-([docs/grants.md](docs/grants.md), [ADR-018](docs/adr/018-grants-additiv.md)).
-Nutzt dieselbe Konfigurationsdatei wie `gssh`; Voraussetzung serverseitig:
+Manages the access rules (grants) via the admin API
+([docs/grants.md](docs/grants.md), [ADR-018](docs/adr/018-grants-additive.md)).
+Uses the same configuration file as `gssh`; server-side prerequisite:
 `GSSH_ADMIN_GROUP`.
 
 ```sh
@@ -129,101 +129,101 @@ gssh-admin grant create --group deployers --tags env=prod \
     --principals deploy --max-validity 8h
 gssh-admin grant update <id> --principals deploy,root
 gssh-admin grant delete <id>
-gssh-admin ci-grant list          # CI-Zugriffsregeln (GitLab-Pipelines)
+gssh-admin ci-grant list          # CI access rules (GitLab pipelines)
 gssh-admin ci-grant create --project infra/ansible --ref main \
     --tags env=prod --principals deploy --max-validity 1h
-gssh-admin apply -f grants.yaml   # deklarativer Vollabgleich (GitOps, inkl. ci_grants)
+gssh-admin apply -f grants.yaml   # declarative full reconciliation (GitOps, incl. ci_grants)
 ```
 
-Authentifizierung: OIDC wie `gssh` (Browser bzw. `--device`), alternativ
-fertiges ID-Token via `--token` oder `GSSH_ID_TOKEN` (CI).
+Authentication: OIDC like `gssh` (browser or `--device`), alternatively
+a ready-made ID token via `--token` or `GSSH_ID_TOKEN` (CI).
 
-## gssh-agentd (Host-Agent)
+## gssh-agentd (host agent)
 
-Registriert einen Host bei der CA und hält ihn aktuell
-([ADR-017](docs/adr/017-host-enrollment-mtls.md)): Host-Zertifikat
-(automatische Erneuerung bei 2/3 der Laufzeit), `TrustedUserCAKeys`-Bundle
-und der `AuthorizedPrincipalsCommand`-Helper mit Fail-closed-Cache — bei
-nicht erreichbarer API tragen gecachte Principals bis zur `cache_ttl`,
-danach wird der Login verweigert.
+Registers a host with the CA and keeps it up to date
+([ADR-017](docs/adr/017-host-enrollment-mtls.md)): host certificate
+(automatic renewal at 2/3 of its validity), the `TrustedUserCAKeys` bundle,
+and the `AuthorizedPrincipalsCommand` helper with a fail-closed cache — if
+the API is unreachable, cached principals remain valid until `cache_ttl`,
+after which login is refused.
 
 ```sh
-# 1. Token auf dem Server erzeugen
+# 1. Create a token on the server
 gssh-server enroll-token -tags env=prod,role=web -ttl 24h
 
-# 2. Auf dem Host registrieren (schreibt sshd_config.d/guided-ssh.conf,
-#    Host-Zertifikat und CA-Bundle; nutzt den vorhandenen sshd-Host-Key)
+# 2. Register on the host (writes sshd_config.d/guided-ssh.conf,
+#    host certificate and CA bundle; uses the existing sshd host key)
 gssh-agentd enroll --server https://gssh.example.com \
   --agent-url https://gssh.example.com:8443 --token gssh-et-…
 
-# 3. Dienst starten (systemd-Unit im Paket enthalten)
+# 3. Start the service (systemd unit included in the package)
 systemctl enable --now gssh-agentd
 ```
 
-State liegt unter `/var/lib/guided-ssh/` (mTLS-Client-Zertifikat,
-Konfiguration, Principals-Cache). Pakete (deb/rpm via nfpm) und
-Install-Skript: [deploy/packaging/](deploy/packaging/), Build mit
+State lives under `/var/lib/guided-ssh/` (mTLS client certificate,
+configuration, principals cache). Packages (deb/rpm via nfpm) and
+install script: [deploy/packaging/](deploy/packaging/), build with
 `make cross packages`.
 
-## Host-Rollout (`internal/agentdist`)
+## Host rollout (`internal/agentdist`)
 
-Der Server liefert den Agenten selbst aus (One-Command-Install, Nutzersicht:
-[README](README.md#one-command-host-install)). `internal/agentdist` ist die
-Quelle dafür:
+The server serves the agent itself (one-command install, user-facing docs:
+[README](README.md#one-command-host-install)). `internal/agentdist` is the
+source for that:
 
-- `bin/` enthält die Agent-Binaries `gssh-agentd-<os>-<arch>`, per `go:embed
-  all:bin` ins Server-Binary eingebettet. Im Repo ist das Verzeichnis leer
-  (`.gitkeep`, gitignored) — gefüllt wird es allein im Docker-Build (Stage
-  `agentbuild`, gleiche `-ldflags` wie der Server ⇒ harter Version-Lockstep).
-- `gssh-agentd.service` ist die einzige Unit-Quelle im Repo; deb/rpm
-  (`nfpm.yaml`) und das getemplatete `install.sh` zeigen beide hierher.
-- `Source` (`New` / `NewFromFS`) liefert Liste, Größe und Hex-SHA-256 je
-  Binary; `NewFromFS` existiert für Tests und E2E, in denen das Embed leer ist.
+- `bin/` holds the agent binaries `gssh-agentd-<os>-<arch>`, embedded into the
+  server binary via `go:embed all:bin`. In the repo the directory is empty
+  (`.gitkeep`, gitignored) — it is populated only during the Docker build (stage
+  `agentbuild`, same `-ldflags` as the server ⇒ hard version lockstep).
+- `gssh-agentd.service` is the single unit source in the repo; both the deb/rpm
+  (`nfpm.yaml`) and the templated `install.sh` reference it.
+- `Source` (`New` / `NewFromFS`) provides the list, size, and hex SHA-256 of each
+  binary; `NewFromFS` exists for tests and E2E cases where the embed is empty.
 
-**Dev-Build-Degradation:** ein `go build`/`make build` außerhalb des
-Docker-Builds enthält keine Binaries. Das Rollout-Gate meldet dann `binaries`
-als fehlende Bedingung: Manifest (`GET /v1/agents`) antwortet weiter mit 200
-und zeigt den Grund, Download, `GET /install.sh` und der Token-Mint antworten
-mit `503`, der UI-Button bleibt deaktiviert. Lokal einbetten:
+**Dev build degradation:** a `go build`/`make build` outside the
+Docker build contains no binaries. The rollout gate then reports `binaries`
+as the missing condition: the manifest (`GET /v1/agents`) still responds with 200
+and shows the reason, while download, `GET /install.sh`, and token minting respond
+with `503`, and the UI button stays disabled. To embed locally:
 
 ```sh
-make cross                                   # baut u. a. bin/gssh-agentd-linux-amd64
+make cross                                   # builds bin/gssh-agentd-linux-amd64, among others
 cp bin/gssh-agentd-linux-amd64 internal/agentdist/bin/
-make build                                   # Server mit eingebettetem Agenten
+make build                                   # server with the agent embedded
 ```
 
-E2E-Smoke der ganzen Kette (Token → `install.sh` → Download → Hash-Check →
-Enroll → laufender Agent) im sshd-Fixture-Container:
+E2E smoke test of the whole chain (token → `install.sh` → download → hash check →
+enroll → running agent) in the sshd fixture container:
 
 ```sh
 go test -tags integration ./internal/agentd/ -run InstallScript
 ```
 
-Der Test baut den Agenten selbst, hängt ihn per `agentdist.NewFromFS` ein und
-nutzt eine statische Pin-Quelle aus dem Test-TLS-Zertifikat. Der
-`systemctl`-Zweig läuft dort nicht (`--no-systemd`) — bewusste, dokumentierte
-CI-Lücke (siehe README).
+The test builds the agent itself, wires it in via `agentdist.NewFromFS`, and
+uses a static pin source from the test TLS certificate. The
+`systemctl` branch does not run there (`--no-systemd`) — a deliberate, documented
+CI gap (see README).
 
-## Entwicklung
+## Development
 
-Voraussetzungen: Go ≥ 1.26, golangci-lint ≥ 2.x, Docker (Image-Builds, später Testcontainer).
+Prerequisites: Go ≥ 1.26, golangci-lint ≥ 2.x, Docker (image builds, later test containers).
 
 ```sh
-make build     # Binaries nach bin/ (statisch, versioniert)
+make build     # binaries into bin/ (static, versioned)
 make cross     # gssh (linux/amd64, linux/arm64, darwin/arm64) + gssh-agentd (linux)
-make packages  # deb/rpm für gssh-agentd (braucht nfpm)
-make test      # Unit-Tests mit Race-Detector
-make cover   # Tests + Coverage-Gate (>= 80 %)
+make packages  # deb/rpm for gssh-agentd (requires nfpm)
+make test      # unit tests with race detector
+make cover   # tests + coverage gate (>= 80 %)
 make lint    # golangci-lint
-make fmt     # Formatierung (gofumpt/goimports)
-make image   # Container-Image lokal bauen
+make fmt     # formatting (gofumpt/goimports)
+make image   # build the container image locally
 ```
 
-CI (GitHub Actions, self-hosted Runner — Anforderungen: [docs/ci-runner.md](docs/ci-runner.md)):
-Lint, Test mit Coverage-Gate, Build, Container-Image (Push nach `docker.io/guidedtraffic`
-auf `main` und Tags; Tagging SemVer + `sha-<commit>`).
+CI (GitHub Actions, self-hosted runner — requirements: [docs/ci-runner.md](docs/ci-runner.md)):
+lint, test with coverage gate, build, container image (push to `docker.io/guidedtraffic`
+on `main` and tags; tagging SemVer + `sha-<commit>`).
 
-## Lizenz und Versionierung
+## License and versioning
 
-Apache-2.0 ([LICENSE](LICENSE)). Semantic Versioning über Git-Tags `vX.Y.Z` —
-Details in [ADR-011](docs/adr/011-versionierung-und-lizenz.md).
+Apache-2.0 ([LICENSE](LICENSE)). Semantic versioning via git tags `vX.Y.Z` —
+details in [ADR-011](docs/adr/011-versioning-and-license.md).

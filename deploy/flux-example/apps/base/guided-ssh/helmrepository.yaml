@@ -1,5 +1,5 @@
-# Helm-Repository des Projekts: GitHub Pages, gefüllt vom
-# chart-release-Workflow (siehe deploy/helm/guided-ssh/README.md).
+# Helm repository of the project: GitHub Pages, populated by the
+# chart-release workflow (see deploy/helm/guided-ssh/README.md).
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:

@@ -1,65 +1,64 @@
-# ADR-017: Host-Enrollment mit Einmal-Token, eigene mTLS-Mini-PKI, Fail-closed-Principals
+# ADR-017: Host enrollment with one-time token, dedicated mTLS mini-PKI, fail-closed principals
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Phase 5 braucht: Host-Enrollment (Vertrauens-Bootstrap), einen Host-Agenten
-(`gssh-agentd`) für Zertifikatserneuerung und CA-Bundle-Pflege sowie den
-`AuthorizedPrincipalsCommand`-Pfad mit Fail-closed-Verhalten. ADR-008 setzt
-mTLS für Host-Agenten.
+Phase 5 needs: host enrollment (trust bootstrap), a host agent
+(`gssh-agentd`) for certificate renewal and CA bundle maintenance, and the
+`AuthorizedPrincipalsCommand` path with fail-closed behavior. ADR-008
+mandates mTLS for host agents.
 
-## Entscheidung
+## Decision
 
-- **Enrollment-Token**: einmalig, per `gssh-server enroll-token` erzeugt
-  (direkter DB-Zugriff — es gibt noch keine Admin-API). In der DB liegt nur
-  der SHA-256-Hash; Verbrauch ist ein einzelnes transaktionales UPDATE
-  (Single-Use auch bei parallelen Versuchen). Tokens tragen optional eine
-  Hostnamen-Bindung und Host-Tags; ein falsch eingesetztes gebundenes Token
-  ist bewusst verbrannt. Re-Enrollment (neues Token, gleicher Name)
-  aktualisiert den Host statt zu duplizieren.
-- **mTLS-Mini-PKI**: eigene X.509-CA (Ed25519) in `ca_keys` (purpose `mtls`,
-  Private Key AES-GCM-verschlüsselt wie die SSH-CAs, ADR-014). Beim
-  Enrollment schickt der Agent einen CSR; der Server setzt den CommonName
-  auf die Host-UUID — Identität kommt nie aus dem CSR. Der Agent-Listener
-  (`-agent-listen`) terminiert TLS mit einem bei jedem Start neu
-  ausgestellten Server-Zertifikat aus derselben CA (SANs via
-  `GSSH_AGENT_TLS_NAMES`) und verlangt Client-Zertifikate
-  (`RequireAndVerifyClientCert`). Enrollment selbst läuft über den
-  öffentlichen Listener (Henne-Ei), optional mit SPKI-Pinning (`--pin`,
-  ADR-016). Client-Zertifikate: 1 Jahr; Rotation ist Phase 10.
-- **Host-Zertifikate**: 30 Tage (Policy-Maximum), Principals = voller Name +
-  Kurzname; der Agent erneuert bei 2/3 der Laufzeit und führt optional ein
-  `reload_command` aus (sshd liest `HostCertificate` nur beim Start).
-- **Principals-Pfad**: sshd → `AuthorizedPrincipalsCommand gssh-agentd
-  principals` → Unix-Socket des Daemons → Cache/API. Antwort = Identitäts-
-  Principals (Username, E-Mail) aller aktiven Mitglieder von Gruppen, deren
-  Grant den lokalen Benutzer als Ziel-Principal enthält und deren
-  Tag-Selektor auf die Host-Tags passt (Selektor ⊆ Tags; die volle
-  Grant-Verwaltung folgt in Phase 6). Fail-closed: liefert die API keinen
-  Wert und ist der Cache älter als `cache_ttl`, gibt der Helper nichts aus
-  und sshd verweigert. Cache wird auf Platte persistiert (übersteht
-  Neustarts).
-- **sshd-Integration**: Enrollment schreibt idempotent
+- **Enrollment token**: single-use, generated via `gssh-server enroll-token`
+  (direct database access — there is no admin API yet). Only the SHA-256
+  hash is stored in the database; consumption is a single transactional
+  UPDATE (single-use even under concurrent attempts). Tokens optionally
+  carry a hostname binding and host tags; a bound token used with the wrong
+  name is deliberately burned. Re-enrollment (new token, same name) updates
+  the host instead of duplicating it.
+- **mTLS mini-PKI**: a dedicated X.509 CA (Ed25519) in `ca_keys` (purpose
+  `mtls`, private key AES-GCM-encrypted like the SSH CAs, ADR-014). During
+  enrollment, the agent sends a CSR; the server sets the CommonName to the
+  host UUID — identity never comes from the CSR. The agent listener
+  (`-agent-listen`) terminates TLS with a server certificate freshly issued
+  from the same CA on every start (SANs via `GSSH_AGENT_TLS_NAMES`) and
+  requires client certificates (`RequireAndVerifyClientCert`). Enrollment
+  itself runs over the public listener (chicken-and-egg problem), optionally
+  with SPKI pinning (`--pin`, ADR-016). Client certificates: 1 year; rotation
+  is Phase 10.
+- **Host certificates**: 30 days (policy maximum), principals = full name +
+  short name; the agent renews at 2/3 of the validity period and optionally
+  runs a `reload_command` (sshd only reads `HostCertificate` at startup).
+- **Principals path**: sshd → `AuthorizedPrincipalsCommand gssh-agentd
+  principals` → daemon's Unix socket → cache/API. Response = identity
+  principals (username, email) of all active members of groups whose grant
+  includes the local user as a target principal and whose tag selector
+  matches the host tags (selector ⊆ tags; full grant management follows in
+  Phase 6). Fail-closed: if the API returns nothing and the cache is older
+  than `cache_ttl`, the helper outputs nothing and sshd denies access. The
+  cache is persisted to disk (survives restarts).
+- **sshd integration**: enrollment idempotently writes
   `sshd_config.d/guided-ssh.conf` (TrustedUserCAKeys, HostCertificate,
-  AuthorizedPrincipalsCommand), das Host-Zertifikat neben den vorhandenen
-  Host-Key und das User-CA-Bundle. Der vorhandene sshd-Host-Key wird
-  weiterverwendet (kein neues Schlüsselmaterial auf dem Host).
-- **Paketierung**: nfpm (deb/rpm) + systemd-Unit + Install-Skript; der
-  Dienst startet erst nach explizitem Enrollment.
+  AuthorizedPrincipalsCommand), placing the host certificate alongside the
+  existing host key plus the user CA bundle. The existing sshd host key
+  continues to be used (no new key material on the host).
+- **Packaging**: nfpm (deb/rpm) + systemd unit + install script; the service
+  only starts after explicit enrollment.
 
-## Konsequenzen
+## Consequences
 
-- Sicherheit des Enrollments hängt am Token (einmalig, ablaufend, gehasht,
-  optional namensgebunden) und an TLS des öffentlichen Listeners.
-- Die Agent-API ist ohne gültiges Client-Zertifikat nicht erreichbar;
-  Host-Identität steckt im Zertifikat (CN = Host-UUID), nicht in Requests.
-- Offboarding wirkt auf Hosts über den Principals-Pfad innerhalb der
-  Cache-TTL (Default 5 m) — konsistent mit dem Gruppen-Sync aus ADR-015.
-- Wenn `AuthorizedPrincipalsCommand` konfiguriert ist, zählt bei sshd nur
-  noch dessen Ausgabe (kein Username-Fallback) — Logins brauchen ab dann
-  zwingend passende Grants; das ist gewollt (zentrale Steuerung).
-- Getestet end-to-end im Integrationstest: Container-sshd, Enrollment,
-  Login per Benutzerzertifikat (Principal- und Grant-Pfad), Ablehnung ohne
-  Grant.
+- Enrollment security hinges on the token (single-use, expiring, hashed,
+  optionally name-bound) and on TLS of the public listener.
+- The agent API is unreachable without a valid client certificate; host
+  identity is embedded in the certificate (CN = host UUID), not in requests.
+- Offboarding takes effect on hosts via the principals path within the
+  cache TTL (default 5 min) — consistent with the group sync from ADR-015.
+- When `AuthorizedPrincipalsCommand` is configured, sshd only honors its
+  output (no username fallback) — logins then strictly require matching
+  grants; this is intentional (centralized control).
+- Tested end-to-end in the integration test: containerized sshd,
+  enrollment, login via user certificate (principal and grant path),
+  rejection without a grant.

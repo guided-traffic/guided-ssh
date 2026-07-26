@@ -1,10 +1,10 @@
 //go:build integration
 
-// Phase-7-E2E-Test: simuliertes GitLab-OIDC (Discovery + JWKS), CI-Grant,
-// POST /v1/sign/ci mit signiertem Job-Token, Login auf dem Container-Host als
-// deploy über den kompletten Pfad TrustedUserCAKeys + CI-Principals im
-// AuthorizedPrincipalsCommand; optional Ansible-Ping, falls ansible auf dem
-// Runner installiert ist.
+// Phase 7 E2E test: simulated GitLab OIDC (discovery + JWKS), CI grant,
+// POST /v1/sign/ci with a signed job token, login on the container host as
+// deploy through the full TrustedUserCAKeys + CI principals path in
+// AuthorizedPrincipalsCommand; optionally an ansible ping if ansible is
+// installed on the runner.
 package agentd_test
 
 import (
@@ -43,8 +43,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeGitLab ist ein minimaler GitLab-OIDC-Issuer: Discovery + JWKS + Signatur
-// von Job-Tokens (id_tokens).
+// fakeGitLab is a minimal GitLab OIDC issuer: discovery + JWKS + signing of
+// job tokens (id_tokens).
 type fakeGitLab struct {
 	t      *testing.T
 	server *httptest.Server
@@ -55,7 +55,7 @@ func newFakeGitLab(t *testing.T) *fakeGitLab {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		t.Fatalf("rsa-key: %v", err)
+		t.Fatalf("rsa key: %v", err)
 	}
 	gl := &fakeGitLab{t: t, key: key}
 	mux := http.NewServeMux()
@@ -80,7 +80,7 @@ func newFakeGitLab(t *testing.T) *fakeGitLab {
 	return gl
 }
 
-// jobToken signiert ein GitLab-Job-Token; overrides überschreibt Claims.
+// jobToken signs a GitLab job token; overrides replaces claims.
 func (gl *fakeGitLab) jobToken(overrides map[string]any) string {
 	gl.t.Helper()
 	claims := map[string]any{
@@ -126,7 +126,7 @@ func (gl *fakeGitLab) jobToken(overrides map[string]any) string {
 func TestGitLabCIEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
-	// ── Postgres + Store + CA ────────────────────────────────────────────
+	// ── Postgres + store + CA ────────────────────────────────────────────
 	pgCtr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("guidedssh"),
 		tcpostgres.WithUsername("guidedssh"),
@@ -137,14 +137,14 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(pgCtr) })
 	}
 	if err != nil {
-		t.Fatalf("postgres-container: %v", err)
+		t.Fatalf("postgres container: %v", err)
 	}
 	dsn, err := pgCtr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
-		t.Fatalf("migrationen: %v", err)
+		t.Fatalf("migrations: %v", err)
 	}
 	st, err := store.New(ctx, dsn)
 	if err != nil {
@@ -168,14 +168,14 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 
-	// ── Simuliertes GitLab + echter CI-Verifier ──────────────────────────
+	// ── Simulated GitLab + real CI verifier ───────────────────────────────
 	gitlab := newFakeGitLab(t)
 	ciVerifier, err := auth.NewCIVerifier(ctx, auth.CIVerifierConfig{IssuerURL: gitlab.server.URL})
 	if err != nil {
-		t.Fatalf("ci-verifier: %v", err)
+		t.Fatalf("ci verifier: %v", err)
 	}
 
-	// ── Öffentliche API (Enroll + Sign-CI) + Agent-API (mTLS) ────────────
+	// ── Public API (enroll + sign-ci) + agent API (mTLS) ─────────────────
 	publicListener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +216,7 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = agentServer.Close() })
 	agentPort := agentListener.Addr().(*net.TCPAddr).Port
 
-	// ── CI-Grant: infra/ansible → deploy auf env=prod ────────────────────
+	// ── CI grant: infra/ansible → deploy on env=prod ─────────────────────
 	if err := st.CreateCIGrant(ctx, "test", &store.CIGrant{
 		ProjectPath: "infra/ansible", ProtectedOnly: true,
 		TagSelector: map[string]string{"env": "prod"},
@@ -225,7 +225,7 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ── Enrollment-Token + sshd-Container ────────────────────────────────
+	// ── Enrollment token + sshd container ─────────────────────────────────
 	token := "gssh-et-ci-integration-test"
 	hash := sha256.Sum256([]byte(token))
 	if err := st.CreateEnrollmentToken(ctx, &store.EnrollmentToken{
@@ -253,7 +253,7 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(ctr) })
 	}
 	if err != nil {
-		t.Fatalf("sshd-container: %v", err)
+		t.Fatalf("sshd container: %v", err)
 	}
 	t.Cleanup(func() {
 		if !t.Failed() {
@@ -261,11 +261,11 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		}
 		if logs, logErr := ctr.Logs(context.Background()); logErr == nil {
 			raw, _ := io.ReadAll(logs)
-			t.Logf("container-logs:\n%s", raw)
+			t.Logf("container logs:\n%s", raw)
 		}
 	})
 	if err := ctr.CopyFileToContainer(ctx, binaryPath, "/usr/local/bin/gssh-agentd", 0o755); err != nil {
-		t.Fatalf("binary kopieren: %v", err)
+		t.Fatalf("copying binary: %v", err)
 	}
 	code, output, err := ctr.Exec(ctx, []string{
 		"/usr/local/bin/gssh-agentd", "enroll",
@@ -282,7 +282,7 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		t.Fatalf("enroll exit %d: %s", code, raw)
 	}
 
-	// ── Simuliertes GitLab-Token → Zertifikat über POST /v1/sign/ci ──────
+	// ── Simulated GitLab token → certificate via POST /v1/sign/ci ────────
 	apiURL := fmt.Sprintf("http://127.0.0.1:%d", publicPort)
 	ciPub, ciPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -297,18 +297,18 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		t.Errorf("keyid: %q", ciCert.KeyId)
 	}
 
-	// Unprotected Ref wird abgelehnt (Grant verlangt protected).
+	// An unprotected ref is rejected (grant requires protected).
 	if status := postSignCIStatus(t, apiURL, gitlab.jobToken(map[string]any{"ref_protected": "false"}), ciSSHPub); status != http.StatusForbidden {
-		t.Errorf("unprotected ref: status %d, erwartet 403", status)
+		t.Errorf("unprotected ref: status %d, expected 403", status)
 	}
-	// Fremdes Projekt wird abgelehnt.
+	// A foreign project is rejected.
 	if status := postSignCIStatus(t, apiURL, gitlab.jobToken(map[string]any{
-		"project_path": "andere/app", "sub": "project_path:andere/app",
+		"project_path": "other/app", "sub": "project_path:other/app",
 	}), ciSSHPub); status != http.StatusForbidden {
-		t.Errorf("fremdes projekt: status %d, erwartet 403", status)
+		t.Errorf("foreign project: status %d, expected 403", status)
 	}
 
-	// ── Login als deploy mit dem CI-Zertifikat ───────────────────────────
+	// ── Login as deploy with the CI certificate ───────────────────────────
 	keySigner, err := ssh.NewSignerFromKey(ciPriv)
 	if err != nil {
 		t.Fatal(err)
@@ -330,10 +330,10 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 	hostKeyCallback := func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		cert, ok := key.(*ssh.Certificate)
 		if !ok {
-			return fmt.Errorf("kein host-zertifikat: %T", key)
+			return fmt.Errorf("not a host certificate: %T", key)
 		}
 		if !checker.IsHostAuthority(cert.SignatureKey, "") {
-			return fmt.Errorf("host-zertifikat von unbekannter ca")
+			return fmt.Errorf("host certificate from unknown ca")
 		}
 		return checker.CheckCert("ci-target.test", cert)
 	}
@@ -347,14 +347,14 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 	}
 	sshAddr := net.JoinHostPort(containerHost, mappedPort.Port())
 
-	// deploy: CI-Grant matcht (Host-ACL liefert ci:infra/ansible).
+	// deploy: CI grant matches (host ACL returns ci:infra/ansible).
 	assertWhoami(t, sshAddr, "deploy", certSigner, hostKeyCallback, "deploy")
-	// root: kein CI-Grant ⇒ fail-closed.
+	// root: no CI grant ⇒ fail-closed.
 	if err := trySSH(sshAddr, "root", certSigner, hostKeyCallback); err == nil {
-		t.Fatal("login als root muss scheitern (kein ci-grant)")
+		t.Fatal("login as root must fail (no ci grant)")
 	}
 
-	// Audit: Ausstellung ist der Pipeline zugeordnet.
+	// Audit: the issuance is attributed to the pipeline.
 	events, err := st.ListAuditEvents(ctx, store.AuditFilter{EventType: ca.EventCertIssued})
 	if err != nil {
 		t.Fatal(err)
@@ -366,14 +366,14 @@ func TestGitLabCIEndToEnd(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("kein audit-event mit ci-keyid gefunden (%d events)", len(events))
+		t.Errorf("no audit event found with ci keyid (%d events)", len(events))
 	}
 
-	// ── Ansible-Ping (nur wenn ansible auf dem Runner installiert ist) ───
+	// ── Ansible ping (only if ansible is installed on the runner) ────────
 	runAnsiblePing(t, sshAddr, ciPriv, ciCert)
 }
 
-// signCICert tauscht das Job-Token am Sign-Endpoint gegen ein Zertifikat.
+// signCICert exchanges the job token at the sign endpoint for a certificate.
 func signCICert(t *testing.T, apiURL, jobToken string, pub ssh.PublicKey) *ssh.Certificate {
 	t.Helper()
 	status, body := postSignCIRaw(t, apiURL, jobToken, pub)
@@ -388,11 +388,11 @@ func signCICert(t *testing.T, apiURL, jobToken string, pub ssh.PublicKey) *ssh.C
 	}
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.Certificate))
 	if err != nil {
-		t.Fatalf("zertifikat parsen: %v", err)
+		t.Fatalf("parsing certificate: %v", err)
 	}
 	cert, ok := parsed.(*ssh.Certificate)
 	if !ok {
-		t.Fatalf("kein zertifikat: %T", parsed)
+		t.Fatalf("not a certificate: %T", parsed)
 	}
 	return cert
 }
@@ -419,7 +419,7 @@ func postSignCIRaw(t *testing.T, apiURL, jobToken string, pub ssh.PublicKey) (in
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("sign/ci erreichen: %v", err)
+		t.Fatalf("reaching sign/ci: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -429,22 +429,22 @@ func postSignCIRaw(t *testing.T, apiURL, jobToken string, pub ssh.PublicKey) (in
 	return resp.StatusCode, body
 }
 
-// runAnsiblePing führt `ansible all -m ping` gegen den Testhost aus, sofern
-// ansible installiert ist — der komplette Referenz-Pfad der Doku (Zertifikat
-// statt statischer Key). Ohne ansible wird der Schritt nur geloggt; der
-// SSH-Durchstich ist bereits verifiziert.
+// runAnsiblePing runs `ansible all -m ping` against the test host, provided
+// ansible is installed — the complete reference path from the docs
+// (certificate instead of a static key). Without ansible, this step is only
+// logged; the SSH breakthrough is already verified.
 func runAnsiblePing(t *testing.T, sshAddr string, priv ed25519.PrivateKey, cert *ssh.Certificate) {
 	t.Helper()
 	ansible, err := exec.LookPath("ansible")
 	if err != nil {
-		t.Log("ansible nicht installiert — ping-schritt übersprungen (ssh-durchstich bereits geprüft)")
+		t.Log("ansible not installed — ping step skipped (ssh breakthrough already verified)")
 		return
 	}
 
 	dir := t.TempDir()
 	keyPEM, err := ssh.MarshalPrivateKey(priv, "")
 	if err != nil {
-		t.Fatalf("private key marshalen: %v", err)
+		t.Fatalf("marshalling private key: %v", err)
 	}
 	keyPath := filepath.Join(dir, "id_ed25519")
 	if err := os.WriteFile(keyPath, pem.EncodeToMemory(keyPEM), 0o600); err != nil {
@@ -474,10 +474,10 @@ func runAnsiblePing(t *testing.T, sshAddr string, priv ed25519.PrivateKey, cert 
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("ansible-ping fehlgeschlagen: %v\n%s", err, output)
+		t.Fatalf("ansible ping failed: %v\n%s", err, output)
 	}
 	if !strings.Contains(string(output), "pong") {
-		t.Errorf("ansible-ping ohne pong:\n%s", output)
+		t.Errorf("ansible ping without pong:\n%s", output)
 	}
-	t.Logf("ansible-ping ok")
+	t.Logf("ansible ping ok")
 }

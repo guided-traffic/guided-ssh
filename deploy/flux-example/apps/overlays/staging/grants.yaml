@@ -1,6 +1,6 @@
-# Zielzustand der Zugriffsregeln (deklarativ, gitops): der Sync-CronJob
-# gleicht mit `gssh-admin apply -f grants.yaml` ab — Einträge, die hier
-# fehlen, werden gelöscht. Format siehe docs/grants.md.
+# Target state of the access rules (declarative, GitOps): the sync CronJob
+# reconciles with `gssh-admin apply -f grants.yaml` — entries missing here
+# get deleted. Format: see docs/grants.md.
 grants:
   - group: gssh-devs
     tags:
@@ -8,8 +8,8 @@ grants:
     principals: [deploy]
     sudo: true
     max_validity: 8h
-# Abschnitt ci_grants weglassen = CI-Grants unangetastet; leere Liste
-# (ci_grants: []) löscht alle.
+# Omitting the ci_grants section = CI grants untouched; an empty list
+# (ci_grants: []) deletes all of them.
 ci_grants:
   - project: infra/ansible
     ref: main

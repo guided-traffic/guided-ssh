@@ -1,240 +1,244 @@
 # Troubleshooting
 
-Echte Fehlerbilder mit Ursache → Diagnose → Fix. Die zitierten Meldungen
-stammen aus dem Code (Stand Phase 13). Grundlagen:
-[Betriebs-Handbuch](betriebshandbuch.md), [Enrollment-Guide](enrollment-guide.md),
-[Grants](grants.md), [GitLab-CI](gitlab-ci.md).
+Real error patterns with cause → diagnosis → fix. The quoted messages are
+taken from the code (as of Phase 13). Background:
+[Operations manual](operations-manual.md), [Enrollment guide](enrollment-guide.md),
+[Grants](grants.md), [GitLab CI](gitlab-ci.md).
 
-## Login/Ausstellung schlägt fehl (`gssh login` / `POST /v1/sign/user`)
+## Login/issuance fails (`gssh login` / `POST /v1/sign/user`)
 
-### 401 — „id-token ungültig" / „authorization: bearer-token fehlt"
+### 401 — "invalid id-token" / "authorization: bearer token missing"
 
-- **Ursache**: ID-Token abgelaufen, falsche Audience (Token nicht für
-  `GSSH_OIDC_CLIENT_ID` ausgestellt), falscher Issuer oder kaputte Signatur
-  (JWKS). Der Grund steht serverseitig im Log (`sign/user: token abgelehnt`),
-  die 401-Antwort ist bewusst generisch.
-- **Diagnose**: Server-Log (`kubectl logs`) zum Zeitpunkt des Versuchs;
-  Token-Claims prüfen (iss/aud/exp).
-- **Fix**: Client neu anmelden (`gssh login` holt Tokens frisch); im IdP
-  prüfen, dass der CLI-Client die erwartete Audience liefert. Geht die
-  Server-Uhr vor, lehnt go-oidc frische Tokens als abgelaufen ab (kein
-  Leeway auf `exp`) — NTP sicherstellen.
+- **Cause**: ID token expired, wrong audience (token not issued for
+  `GSSH_OIDC_CLIENT_ID`), wrong issuer, or a broken signature (JWKS). The
+  reason is in the server-side log (`sign/user: token rejected`), the 401
+  response is deliberately generic.
+- **Diagnosis**: server log (`kubectl logs`) at the time of the attempt;
+  check the token claims (iss/aud/exp).
+- **Fix**: log the client in again (`gssh login` fetches fresh tokens);
+  check in the IdP that the CLI client supplies the expected audience. If
+  the server clock runs fast, go-oidc rejects fresh tokens as expired (no
+  leeway on `exp`) — make sure NTP is working.
 
-### 403 — „keine zugriffsregeln (grants) für diesen benutzer"
+### 403 — "no access rules (grants) for this user"
 
-- **Ursache**: Der Benutzer hat über seine Gruppen keinen einzigen Grant —
-  ohne Grant kein Zertifikat (ADR-018).
-- **Diagnose**: `gssh-admin grant list`; Gruppen im Token bzw. Web-UI
-  (Benutzer & Gruppen) mit den Grant-Gruppen abgleichen; Server-Log nennt
-  `subject` und `groups`.
-- **Fix**: Grant für eine Gruppe des Benutzers anlegen bzw. Benutzer im IdP
-  in die richtige Gruppe aufnehmen (Sync-Intervall Default 5 m abwarten oder
-  frisches Token verwenden — die Gruppen kommen bei der Ausstellung aus den
-  Token-Claims).
+- **Cause**: the user has not a single grant through their groups — no
+  grant, no certificate (ADR-018).
+- **Diagnosis**: `gssh-admin grant list`; compare the groups in the token
+  (or in the web UI under Users & Groups) with the grant groups; the server
+  log names `subject` and `groups`.
+- **Fix**: create a grant for one of the user's groups, or add the user to
+  the right group in the IdP (wait for the sync interval, default 5 m, or
+  use a fresh token — the groups used at issuance come from the token
+  claims).
 
-### 403 — „benutzer ist deaktiviert"
+### 403 — "user is disabled"
 
-- **Ursache**: Der Gruppen-Sync hat den Benutzer als inaktiv markiert
-  (Offboarding).
-- **Fix**: Wenn beabsichtigt: nichts. Sonst IdP-Konto prüfen; nach dem
-  nächsten Sync (5 m) wird der Benutzer reaktiviert.
+- **Cause**: the group sync has marked the user as inactive (offboarding).
+- **Fix**: if intentional, nothing to do. Otherwise check the IdP account;
+  the user is reactivated after the next sync (5 m).
 
-### 429 — „zu viele anfragen — bitte später erneut versuchen"
+### 429 — "too many requests — please try again later"
 
-- **Ursache**: Rate-Limit pro Client-IP: Request-Budget (Default 60/min,
-  Burst 20) erschöpft — oder das **Failure-Budget** (Default 10/min): schon
-  10 aufeinanderfolgende 401/403 sperren weitere Versuche, auch wenn das
-  Request-Budget noch Deckung hätte.
-- **Diagnose**: Metrik `gssh_http_responses_total{code="429"}`; vorher
-  gehäufte 401/403 derselben Quelle? Hinter Ingress ohne
-  `GSSH_RATE_TRUST_PROXY=true` zählen alle Nutzer als eine IP (die des
-  Proxys) und drosseln sich gegenseitig.
-- **Fix**: `Retry-After: 60` respektieren; Grundproblem der Fehlversuche
-  beheben; hinter Proxy `GSSH_RATE_TRUST_PROXY=true` setzen; Limits über
-  `GSSH_SIGN_RATE_PER_MINUTE`/`GSSH_SIGN_FAIL_PER_MINUTE` anpassen.
+- **Cause**: rate limit per client IP: the request budget (default 60/min,
+  burst 20) is exhausted — or the **failure budget** (default 10/min): 10
+  consecutive 401/403 responses already block further attempts, even if
+  the request budget would still allow more.
+- **Diagnosis**: metric `gssh_http_responses_total{code="429"}`; were there
+  accumulated 401/403 responses from the same source beforehand? Behind an
+  ingress without `GSSH_RATE_TRUST_PROXY=true`, all users count as a single
+  IP (the proxy's) and throttle each other.
+- **Fix**: honor `Retry-After: 60`; fix the root cause of the failed
+  attempts; set `GSSH_RATE_TRUST_PROXY=true` behind a proxy; adjust the
+  limits via `GSSH_SIGN_RATE_PER_MINUTE`/`GSSH_SIGN_FAIL_PER_MINUTE`.
 
-### 503 — „oidc nicht konfiguriert"
+### 503 — "oidc not configured"
 
-- **Ursache**: `GSSH_OIDC_ISSUER` ist auf dem Server nicht gesetzt —
-  `/v1/sign/user` ist gezielt deaktiviert.
-- **Fix**: `config.oidc.issuer`/`clientID` im Helm-Values setzen und ausrollen.
+- **Cause**: `GSSH_OIDC_ISSUER` is not set on the server — `/v1/sign/user`
+  is deliberately disabled.
+- **Fix**: set `config.oidc.issuer`/`clientID` in the Helm values and
+  redeploy.
 
-## gssh-Fehlermeldungen (Client-seitig)
+## gssh error messages (client-side)
 
-### „SSH_AUTH_SOCK nicht gesetzt — läuft ein ssh-agent?"
+### "SSH_AUTH_SOCK not set — is an ssh-agent running?"
 
-- **Ursache**: Kein ssh-agent in der Session — gssh legt Schlüssel und
-  Zertifikat ausschließlich in den Agenten (ADR-016).
-- **Fix**: `eval $(ssh-agent -s)` (in CI-Jobs Pflicht vor `gssh ci-login`)
-  bzw. den Agenten der Desktop-Session nutzen.
+- **Cause**: no ssh-agent in the session — gssh stores the key and
+  certificate exclusively in the agent (ADR-016).
+- **Fix**: `eval $(ssh-agent -s)` (mandatory in CI jobs before
+  `gssh ci-login`), or use the desktop session's agent.
 
-### „konfiguration …: pflichtfelder fehlen: api_url, issuer, client_id"
+### "configuration …: required fields missing: api_url, issuer, client_id"
 
-- **Ursache**: `~/.config/guided-ssh/config.yaml` unvollständig (die drei
-  Felder sind Pflicht).
-- **Fix**: Datei ergänzen; bei fehlender Datei druckt gssh einen
-  Beispielinhalt. Pfad-Override: `--config` bzw. `GSSH_CONFIG`.
+- **Cause**: `~/.config/guided-ssh/config.yaml` is incomplete (the three
+  fields are required).
+- **Fix**: complete the file; if the file is missing, gssh prints example
+  content. Path override: `--config` or `GSSH_CONFIG`.
 
-### `gssh status` liefert Exit-Code 1
+### `gssh status` returns exit code 1
 
-- Kein gültiges guided-ssh-Zertifikat im Agenten — gewollt skriptbar.
-  `gssh login` (oder `--if-needed` in der Match-exec-Integration).
+- No valid guided-ssh certificate in the agent — intentionally scriptable.
+  `gssh login` (or `--if-needed` in the Match-exec integration).
 
-## Host-Login scheitert (Zertifikat vorhanden, sshd lehnt ab)
+## Host login fails (certificate present, sshd rejects it)
 
-### AuthorizedPrincipalsCommand liefert nichts — fail-closed
+### AuthorizedPrincipalsCommand returns nothing — fail-closed
 
-- **Ursache**: API nicht erreichbar **und** Principals-Cache älter als
-  `cache_ttl` (Default 5 m) — der Helper verweigert dann bewusst
-  (Daemon-Log: „api nicht erreichbar und cache abgelaufen" bzw.
-  „principals nicht verfügbar (fail-closed)"). Oder der Daemon läuft gar
-  nicht („gssh-agentd nicht erreichbar (läuft der dienst?)").
-- **Diagnose**: auf dem Host `gssh-agentd principals -user <name>`;
-  `journalctl -u gssh-agentd`; serverseitig Agent-Erreichbarkeit
-  (`gssh_agent_heartbeats_total`, LoadBalancer/mTLS-Service).
-- **Fix**: Dienst starten (`systemctl start gssh-agentd`); Netzpfad zur
-  Agent-API reparieren. Bestehende SSH-Sessions sind nicht betroffen — nur
-  neue Logins.
+- **Cause**: the API is unreachable **and** the principals cache is older
+  than `cache_ttl` (default 5 m) — the helper then deliberately refuses
+  (daemon log: "api unreachable and cache expired" or "principals
+  unavailable (fail-closed)"). Or the daemon is not running at all
+  ("gssh-agentd unreachable (is the service running?)").
+- **Diagnosis**: on the host, `gssh-agentd principals -user <name>`;
+  `journalctl -u gssh-agentd`; server-side agent reachability
+  (`gssh_agent_heartbeats_total`, LoadBalancer/mTLS service).
+- **Fix**: start the service (`systemctl start gssh-agentd`); fix the
+  network path to the agent API. Existing SSH sessions are unaffected —
+  only new logins.
 
-### Grant/Tag-Selektor passt nicht
+### Grant/tag selector does not match
 
-- **Ursache**: Für den lokalen Ziel-Benutzer `%u` existiert kein Grant,
-  dessen Tag-Selektor auf die Host-Tags passt (Selektor ⊆ Tags), oder der
-  anfragende Benutzer ist kein aktives Mitglied der Grant-Gruppe. Der Helper
-  liefert dann eine leere/fremde Principals-Liste — sshd lehnt ab.
-- **Diagnose**: `gssh-agentd principals -user <ziel-user>` auf dem Host —
-  steht der Identitäts-Principal (Username/E-Mail) des Nutzers in der
-  Ausgabe? Host-Tags und Grants in der Web-UI abgleichen.
-- **Fix**: Grant anpassen (`gssh-admin grant …`) oder Host mit passenden
-  Tags enrollen. Änderungen wirken innerhalb der Cache-TTL (5 m).
+- **Cause**: no grant exists for the local target user `%u` whose tag
+  selector matches the host tags (selector ⊆ tags), or the requesting user
+  is not an active member of the grant's group. The helper then returns an
+  empty or unrelated principals list — sshd rejects the login.
+- **Diagnosis**: `gssh-agentd principals -user <target-user>` on the host —
+  is the user's identity principal (username/email) in the output? Compare
+  the host tags and grants in the web UI.
+- **Fix**: adjust the grant (`gssh-admin grant …`) or enroll the host with
+  matching tags. Changes take effect within the cache TTL (5 m).
 
-### Zertifikat abgelaufen
+### Certificate expired
 
-- **Diagnose**: `gssh status` (zeigt „abgelaufen") oder `ssh -vvv` (Server
-  ignoriert das Zertifikat).
-- **Fix**: `gssh login`; für transparente Erneuerung `gssh integrate`
-  (erneuert bei < 5 m Restlaufzeit).
+- **Diagnosis**: `gssh status` (shows "expired") or `ssh -vvv` (the server
+  ignores the certificate).
+- **Fix**: `gssh login`; for transparent renewal, `gssh integrate` (renews
+  when less than 5 m of validity remain).
 
-### TrustedUserCAKeys veraltet (nach CA-Rotation)
+### TrustedUserCAKeys outdated (after CA rotation)
 
-- **Ursache**: Host hat den neuen CA-Key noch nicht — das Bundle wird nur
-  alle `bundle_interval` (Default 1 h) geholt, oder der Agent lief nicht.
-- **Diagnose**: `/etc/ssh/guided-ssh-user-ca.pub` mit
-  `GET /v1/ca/bundle/user` vergleichen; Daemon-Log („user-ca-bundle
-  aktualisiert" fehlt).
-- **Fix**: `systemctl restart gssh-agentd` (holt das Bundle sofort initial).
+- **Cause**: the host does not yet have the new CA key — the bundle is
+  only fetched every `bundle_interval` (default 1 h), or the agent was not
+  running.
+- **Diagnosis**: compare `/etc/ssh/guided-ssh-user-ca.pub` with
+  `GET /v1/ca/bundle/user`; daemon log ("user-ca-bundle updated" is
+  missing).
+- **Fix**: `systemctl restart gssh-agentd` (fetches the bundle immediately
+  on startup).
 
-## Enrollment-Fehler
+## Enrollment errors
 
-### 403 — „enrollment-token ungültig, verbraucht oder abgelaufen"
+### 403 — "enrollment token invalid, used, or expired"
 
-- **Ursache**: Token bereits benutzt (Single-Use, transaktional), TTL
-  abgelaufen oder Tippfehler.
-- **Fix**: Neues Token erzeugen (`gssh-server enroll-token`).
+- **Cause**: the token was already used (single-use, transactional), the
+  TTL expired, or there is a typo.
+- **Fix**: generate a new token (`gssh-server enroll-token`).
 
-### 403 — „enrollment-token ist an einen anderen hostnamen gebunden"
+### 403 — "enrollment token is bound to a different hostname"
 
-- **Ursache**: Token wurde mit `-name` erzeugt und der Host meldet sich mit
-  anderem Hostnamen (`os.Hostname()` weicht ab).
-- **Fix**: `--hostname` beim Enroll passend setzen oder Token ohne
-  Namensbindung erzeugen.
+- **Cause**: the token was created with `-name` and the host reports a
+  different hostname (`os.Hostname()` differs).
+- **Fix**: set `--hostname` to match during enrollment, or generate the
+  token without a name binding.
 
-### „ssh-host-key lesen (sshd installiert? ssh-keygen -A)"
+### "reading ssh host key (is sshd installed? ssh-keygen -A)"
 
-- **Ursache**: `/etc/ssh/ssh_host_ed25519_key.pub` fehlt.
-- **Fix**: `ssh-keygen -A` bzw. `--ssh-key` auf einen vorhandenen Key zeigen.
+- **Cause**: `/etc/ssh/ssh_host_ed25519_key.pub` is missing.
+- **Fix**: run `ssh-keygen -A`, or point `--ssh-key` at an existing key.
 
-## Agent-Probleme
+## Agent issues
 
-### mTLS-Zertifikat abgelaufen
+### mTLS certificate expired
 
-- **Ursache**: Agent war länger als das Rotationsfenster aus (Rotation läuft
-  bei 2/3 von 1 Jahr über den noch gültigen Kanal — ist das Zertifikat erst
-  einmal abgelaufen, gibt es keinen Kanal mehr).
-- **Diagnose**: Daemon-Log: TLS-Handshake-Fehler bei jedem API-Kontakt;
+- **Cause**: the agent was down longer than the rotation window (rotation
+  runs at 2/3 of the 1-year validity, over the still-valid channel — once
+  the certificate has expired, that channel no longer exists).
+- **Diagnosis**: daemon log: TLS handshake error on every API contact;
   `openssl x509 -in /var/lib/guided-ssh/agent.crt -noout -enddate`.
-- **Fix**: Re-Enrollment mit neuem Token ([enrollment-guide.md](enrollment-guide.md) §7).
+- **Fix**: re-enroll with a new token ([enrollment-guide.md](enrollment-guide.md), §7).
 
-### `agentd.sock` fehlt
+### `agentd.sock` is missing
 
-- **Ursache**: Daemon läuft nicht (der Socket wird bei jedem Start neu
-  angelegt) oder abweichender `socket_path`/`-state-dir` zwischen Daemon und
-  sshd-Snippet.
-- **Diagnose**: `systemctl status gssh-agentd`; `ls -l /var/lib/guided-ssh/agentd.sock`;
-  Snippet und `config.yaml` auf denselben `-state-dir` prüfen.
-- **Fix**: Dienst starten; Pfade angleichen.
+- **Cause**: the daemon is not running (the socket is recreated on every
+  start), or `socket_path`/`-state-dir` differ between the daemon and the
+  sshd snippet.
+- **Diagnosis**: `systemctl status gssh-agentd`; `ls -l /var/lib/guided-ssh/agentd.sock`;
+  check that the snippet and `config.yaml` use the same `-state-dir`.
+- **Fix**: start the service; align the paths.
 
-## CI-Fehler (`gssh ci-login` / `POST /v1/sign/ci`)
+## CI errors (`gssh ci-login` / `POST /v1/sign/ci`)
 
-### 401 — „job-token ungültig"
+### 401 — "invalid job token"
 
-- **Ursache**: meist falsche Audience — `id_tokens` im Job ohne
-  `aud: guided-ssh` (bzw. abweichend von `GSSH_CI_AUDIENCE`); oder
-  `GSSH_CI_ISSUER` zeigt nicht auf die GitLab-Instanz des Jobs.
-- **Fix**: `.gitlab-ci.yml` gemäß [gitlab-ci.md](gitlab-ci.md) (Abschnitt
-  Referenz-Pipeline).
+- **Cause**: usually the wrong audience — the job's `id_tokens` lacks
+  `aud: guided-ssh` (or differs from `GSSH_CI_AUDIENCE`); or
+  `GSSH_CI_ISSUER` does not point at the job's GitLab instance.
+- **Fix**: set up `.gitlab-ci.yml` according to
+  [gitlab-ci.md](gitlab-ci.md) (reference pipeline section).
 
-### 403 — „kein passender ci-grant für dieses projekt/ref"
+### 403 — "no matching CI grant for this project/ref"
 
-- **Ursache**: Kein CI-Grant matcht — häufig: Ref nicht geschützt
-  (`protected_only` ist per Default `true`), Projekt-Pfad stimmt nicht mit
-  dem Grant überein (Mismatch nach Projekt-Umzug/-Umbenennung), oder
-  `ref`/`environment`-Glob passt nicht.
-- **Diagnose**: Server-Log nennt `project`, `ref`, `ref_protected`,
+- **Cause**: no CI grant matches — commonly: the ref is not protected
+  (`protected_only` defaults to `true`), the project path does not match
+  the grant (mismatch after the project was moved/renamed), or the
+  `ref`/`environment` glob does not match.
+- **Diagnosis**: the server log names `project`, `ref`, `ref_protected`,
   `environment`; `gssh-admin ci-grant list`.
-- **Fix**: Branch schützen oder CI-Grant anpassen.
+- **Fix**: protect the branch or adjust the CI grant.
 
-### 403 — „ci-zugang für dieses projekt ist deaktiviert"
+### 403 — "CI access for this project is disabled"
 
-- **Ursache**: Der Service-Account des Projekts steht auf `active=false`
-  (Not-Aus, z. B. über die Web-UI).
-- **Fix**: bewusste Entscheidung prüfen; ggf. in der Web-UI reaktivieren.
+- **Cause**: the project's service account is set to `active=false` (kill
+  switch, e.g. via the web UI).
+- **Fix**: verify this was intentional; reactivate it in the web UI if
+  needed.
 
-### 400 — „job-token läuft zu bald ab für ein zertifikat"
+### 400 — "job token expires too soon for a certificate"
 
-- **Ursache**: Token-`exp` (= Job-Timeout) liegt praktisch in der
-  Gegenwart — die Laufzeit wird auf `exp` gedeckelt, es bliebe nichts übrig.
-- **Fix**: `gssh ci-login` früh im Job ausführen; Job-Timeout prüfen.
+- **Cause**: the token's `exp` (= job timeout) is practically now — the
+  certificate lifetime is capped at `exp`, and nothing would be left.
+- **Fix**: run `gssh ci-login` early in the job; check the job timeout.
 
-### Serverstart scheitert mit „gleicher issuer und gleiche audience …"
+### Server start fails with "same issuer and same audience …"
 
-- **Ursache**: `checkAudienceSeparation` — Benutzer-OIDC und GitLab-CI sind
-  auf denselben Issuer konfiguriert **und** `GSSH_CI_AUDIENCE` ==
-  `GSSH_OIDC_CLIENT_ID`. Tokens wären an beiden Sign-Endpunkten
-  austauschbar; der Server verweigert den Start (Security-Review Phase 10).
-- **Fix**: getrennte Audiences (oder getrennte Issuer) konfigurieren.
+- **Cause**: `checkAudienceSeparation` — user OIDC and GitLab CI are
+  configured with the same issuer **and** `GSSH_CI_AUDIENCE` ==
+  `GSSH_OIDC_CLIENT_ID`. Tokens would then be interchangeable between both
+  sign endpoints; the server refuses to start (security review, Phase 10).
+- **Fix**: configure separate audiences (or separate issuers).
 
-## Server-Startfehler
+## Server startup errors
 
-| Meldung | Ursache → Fix |
+| Message | Cause → Fix |
 |---|---|
-| `GSSH_OIDC_ISSUER ist gesetzt, aber GSSH_OIDC_CLIENT_ID fehlt` | fail-fast statt stiller Ablehnung aller Tokens → Client-ID setzen |
-| `datenbank-konfiguration unvollständig: GSSH_DB_… nicht gesetzt` | Secret fehlt/Key-Mapping falsch (`secrets.db.existingSecret`, Keys via `secrets.db.keys`) |
-| `GSSH_CA_MASTER_KEY dekodieren: …` | Wert ist kein gültiges Base64 → korrekt erzeugen (`head -c 32 /dev/urandom \| base64`) |
-| `ca: ungültiger master-key: <n> Bytes statt 32` | Wert dekodiert nicht zu 32 Bytes → 32-Byte-Key verwenden |
-| `ca: ungültiger master-key: entschlüsselung fehlgeschlagen` | Master-Key passt nicht zu den bereits verschlüsselten `ca_keys` (vertauschtes Secret zwischen Umgebungen) → richtigen Key einspielen; **nicht** die DB „bereinigen" — das wäre eine neue CA |
-| `migrationen: …` | DB-Verbindungsdaten/Netz/DB-Rechte prüfen; Advisory-Lock: hängt eine andere Instanz in der Migration? |
+| `GSSH_OIDC_ISSUER is set but GSSH_OIDC_CLIENT_ID is missing` | fail-fast instead of silently rejecting all tokens → set the client ID |
+| `database configuration incomplete: GSSH_DB_… not set` | secret missing or key mapping wrong (`secrets.db.existingSecret`, keys via `secrets.db.keys`) |
+| `GSSH_CA_MASTER_KEY decode: …` | value is not valid base64 → generate it correctly (`head -c 32 /dev/urandom \| base64`) |
+| `ca: invalid master key: <n> bytes instead of 32` | value does not decode to 32 bytes → use a 32-byte key |
+| `ca: invalid master key: decryption failed` | the master key does not match the already-encrypted `ca_keys` (secret swapped between environments) → deploy the correct key; **do not** "clean up" the DB — that would create a new CA |
+| `migrations: …` | check DB connection details/network/DB permissions; advisory lock: is another instance stuck in migration? |
 
-## Clock-Skew
+## Clock skew
 
-- Zertifikate werden 1 min rückdatiert (`signBackdate`); die Policy erlaubt
-  maximal 5 min Rückdatierung (`maxBackdate`). Hosts, deren Uhr mehr als
-  ~1 min **vor** der Server-Uhr geht, lehnen frisch ausgestellte Zertifikate
-  als „not yet valid" ab (sichtbar in `ssh -vvv`).
-- go-oidc prüft `exp` ohne Leeway — geht die **Server**-Uhr vor, werden
-  frische ID-Tokens als abgelaufen abgelehnt (401).
-- **Fix**: NTP auf Server, Hosts und IdP (im Kubernetes-Deployment gegeben;
-  bei Bare-Metal-Hosts prüfen: `timedatectl`).
+- Certificates are backdated by 1 min (`signBackdate`); the policy allows a
+  maximum backdating of 5 min (`maxBackdate`). Hosts whose clock runs more
+  than ~1 min **ahead** of the server clock reject freshly issued
+  certificates as "not yet valid" (visible in `ssh -vvv`).
+- go-oidc checks `exp` without leeway — if the **server** clock runs fast,
+  fresh ID tokens are rejected as expired (401).
+- **Fix**: NTP on the server, hosts, and IdP (already in place in the
+  Kubernetes deployment; check on bare-metal hosts with `timedatectl`).
 
-## Diagnose-Werkzeuge
+## Diagnostic tools
 
-| Werkzeug | Wofür |
+| Tool | Purpose |
 |---|---|
-| Web-UI → Audit (Rolle Auditor) bzw. `GET /v1/admin/audit?event_type=…&actor=…&q=…` | jede Ausstellung/Grant-Änderung/Session; `q` matcht Actor + Payload (Host, Pipeline); Export CSV/JSON |
-| `gssh status` | Zertifikate im Agenten, Restlaufzeit, Principals; Exit-Code skriptbar |
-| `ssh -vvv user@host` | zeigt, ob das Zertifikat angeboten und warum es abgelehnt wird |
-| `gssh-agentd principals -user <name>` (auf dem Host) | genau das, was sshd sieht — leere Ausgabe/Fehler erklärt jeden abgelehnten Login |
-| `journalctl -u gssh-agentd` / `journalctl -u sshd` | Agent-JSON-Logs (Renewals, fail-closed-Warnungen); sshd mit `LogLevel VERBOSE` loggt den Zertifikats-Serial |
-| `kubectl logs deploy/guided-ssh` | Server-Logs: abgelehnte Tokens mit Grund, Enrollments, Sync-Läufe |
-| Metriken (`/metrics`, Port 9090) | `gssh_http_responses_total{code}` (Fehlerraten, 429), `gssh_agent_heartbeats_total`, `gssh_certificates_issued_total` |
-| `sshd -t` | sshd-Konfiguration (Snippet) validieren |
+| Web UI → Audit (auditor role) or `GET /v1/admin/audit?event_type=…&actor=…&q=…` | every issuance/grant change/session; `q` matches actor + payload (host, pipeline); export as CSV/JSON |
+| `gssh status` | certificates in the agent, remaining validity, principals; exit code is scriptable |
+| `ssh -vvv user@host` | shows whether the certificate is offered and why it is rejected |
+| `gssh-agentd principals -user <name>` (on the host) | exactly what sshd sees — empty output/errors explain every rejected login |
+| `journalctl -u gssh-agentd` / `journalctl -u sshd` | agent JSON logs (renewals, fail-closed warnings); sshd with `LogLevel VERBOSE` logs the certificate serial |
+| `kubectl logs deploy/guided-ssh` | server logs: rejected tokens with reason, enrollments, sync runs |
+| Metrics (`/metrics`, port 9090) | `gssh_http_responses_total{code}` (error rates, 429), `gssh_agent_heartbeats_total`, `gssh_certificates_issued_total` |
+| `sshd -t` | validate the sshd configuration (snippet) |
+</content>

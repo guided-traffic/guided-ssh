@@ -10,12 +10,13 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// ErrUserInactive: Benutzer ist deaktiviert (z. B. durch Gruppen-Sync nach
-// Offboarding) — keine Neuausstellung, egal ob das Token noch gültig ist.
-var ErrUserInactive = errors.New("auth: benutzer ist deaktiviert")
+// ErrUserInactive: the user is deactivated (e.g. by the group sync after
+// offboarding) — no reissuance, regardless of whether the token is still
+// valid.
+var ErrUserInactive = errors.New("auth: user is deactivated")
 
-// Store ist die vom Auth-Paket benötigte Persistenz-Schnittstelle
-// (*store.Store erfüllt sie; Tests nutzen einen Fake).
+// Store is the persistence interface required by the auth package
+// (*store.Store satisfies it; tests use a fake).
 type Store interface {
 	GetUserBySubject(ctx context.Context, issuer, subject string) (*store.User, error)
 	CreateUser(ctx context.Context, u *store.User) error
@@ -27,21 +28,21 @@ type Store interface {
 	AppendAuditEvent(ctx context.Context, e *store.AuditEvent) error
 }
 
-// Mapper bildet validierte Token-Claims auf interne Benutzer ab.
+// Mapper maps validated token claims onto internal users.
 type Mapper struct {
 	store Store
 }
 
-// NewMapper baut einen Mapper über dem Store.
+// NewMapper builds a Mapper over the store.
 func NewMapper(st Store) *Mapper {
 	return &Mapper{store: st}
 }
 
-// EnsureUser legt den Benutzer zu den Claims an bzw. aktualisiert ihn und
-// ersetzt seine Gruppenzugehörigkeiten durch die Gruppen aus dem Token
-// (Group-Claims sind bei Ausstellung die frischeste Quelle). Deaktivierte
-// Benutzer werden abgewiesen (ErrUserInactive) und nicht reaktiviert —
-// Reaktivierung entscheidet der Gruppen-Sync bzw. ein Admin.
+// EnsureUser creates or updates the user for the claims and replaces their
+// group memberships with the groups from the token (group claims are the
+// freshest source at issuance time). Deactivated users are rejected
+// (ErrUserInactive) and not reactivated — reactivation is decided by the
+// group sync or an admin.
 func (m *Mapper) EnsureUser(ctx context.Context, claims *Claims) (*store.User, error) {
 	user, err := m.store.GetUserBySubject(ctx, claims.Issuer, claims.Subject)
 	switch {
@@ -54,7 +55,7 @@ func (m *Mapper) EnsureUser(ctx context.Context, claims *Claims) (*store.User, e
 			Active:   true,
 		}
 		if err := m.store.CreateUser(ctx, user); err != nil {
-			return nil, fmt.Errorf("auth: benutzer anlegen: %w", err)
+			return nil, fmt.Errorf("auth: creating user: %w", err)
 		}
 	case err != nil:
 		return nil, err
@@ -65,7 +66,7 @@ func (m *Mapper) EnsureUser(ctx context.Context, claims *Claims) (*store.User, e
 			user.Username = claims.Username()
 			user.Email = claims.Email
 			if err := m.store.UpdateUser(ctx, user); err != nil {
-				return nil, fmt.Errorf("auth: benutzer aktualisieren: %w", err)
+				return nil, fmt.Errorf("auth: updating user: %w", err)
 			}
 		}
 	}
@@ -75,12 +76,12 @@ func (m *Mapper) EnsureUser(ctx context.Context, claims *Claims) (*store.User, e
 		return nil, err
 	}
 	if err := m.store.SetUserGroups(ctx, user.ID, groupIDs); err != nil {
-		return nil, fmt.Errorf("auth: gruppen setzen: %w", err)
+		return nil, fmt.Errorf("auth: setting groups: %w", err)
 	}
 	return user, nil
 }
 
-// ensureGroups löst Gruppennamen in IDs auf und legt unbekannte Gruppen an.
+// ensureGroups resolves group names to IDs and creates unknown groups.
 func (m *Mapper) ensureGroups(ctx context.Context, issuer string, names []string) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0, len(names))
 	for _, name := range names {
@@ -88,7 +89,7 @@ func (m *Mapper) ensureGroups(ctx context.Context, issuer string, names []string
 		if errors.Is(err, store.ErrNotFound) {
 			group = &store.Group{Issuer: issuer, Name: name}
 			if err := m.store.CreateGroup(ctx, group); err != nil {
-				return nil, fmt.Errorf("auth: gruppe %q anlegen: %w", name, err)
+				return nil, fmt.Errorf("auth: creating group %q: %w", name, err)
 			}
 		} else if err != nil {
 			return nil, err

@@ -24,7 +24,7 @@ func TestCIGrantsCRUD(t *testing.T) {
 	}
 	mustNoErr(t, testStore.CreateCIGrant(ctx, "admin:test", grant))
 	if grant.ID == uuid.Nil || grant.CreatedAt.IsZero() {
-		t.Fatalf("grant unvollständig: %+v", grant)
+		t.Fatalf("grant incomplete: %+v", grant)
 	}
 
 	got, err := testStore.GetCIGrant(ctx, grant.ID)
@@ -36,7 +36,7 @@ func TestCIGrantsCRUD(t *testing.T) {
 	list, err := testStore.ListCIGrants(ctx)
 	mustNoErr(t, err)
 	if len(list) != 1 {
-		t.Fatalf("list: %d einträge", len(list))
+		t.Fatalf("list: %d entries", len(list))
 	}
 
 	grant.Principals = []string{"deploy", "ansible"}
@@ -45,7 +45,7 @@ func TestCIGrantsCRUD(t *testing.T) {
 	got, err = testStore.GetCIGrant(ctx, grant.ID)
 	mustNoErr(t, err)
 	if !slices.Equal(got.Principals, []string{"deploy", "ansible"}) || got.RefPattern != "release/*" {
-		t.Errorf("update nicht persistiert: %+v", got)
+		t.Errorf("update not persisted: %+v", got)
 	}
 
 	mustNoErr(t, testStore.DeleteCIGrant(ctx, "admin:test", grant.ID))
@@ -53,7 +53,7 @@ func TestCIGrantsCRUD(t *testing.T) {
 	wantNotFound(t, err)
 	wantNotFound(t, testStore.DeleteCIGrant(ctx, "admin:test", grant.ID))
 
-	// Jede Mutation hat ein Audit-Event mit Actor geschrieben.
+	// Every mutation wrote an audit event with an actor.
 	for _, eventType := range []string{
 		store.EventCIGrantCreated, store.EventCIGrantUpdated, store.EventCIGrantDeleted,
 	} {
@@ -65,7 +65,7 @@ func TestCIGrantsCRUD(t *testing.T) {
 	}
 }
 
-// eventsActor liefert den Actor des ersten Events (Diagnose).
+// eventsActor returns the actor of the first event (diagnostics).
 func eventsActor(events []store.AuditEvent) string {
 	if len(events) == 0 {
 		return ""
@@ -73,7 +73,7 @@ func eventsActor(events []store.AuditEvent) string {
 	return events[0].Actor
 }
 
-func TestMatchCIGrantsProjektUndNamespace(t *testing.T) {
+func TestMatchCIGrantsProjectAndNamespace(t *testing.T) {
 	cleanDB(t)
 	ctx := context.Background()
 
@@ -86,7 +86,7 @@ func TestMatchCIGrantsProjektUndNamespace(t *testing.T) {
 		Principals: []string{"ansible"}, MaxValiditySeconds: 1800,
 	}
 	other := &store.CIGrant{
-		ProjectPath: "andere/app", ProtectedOnly: false,
+		ProjectPath: "other/app", ProtectedOnly: false,
 		Principals: []string{"deploy"}, MaxValiditySeconds: 3600,
 	}
 	prefixTrap := &store.CIGrant{
@@ -97,7 +97,7 @@ func TestMatchCIGrantsProjektUndNamespace(t *testing.T) {
 		mustNoErr(t, testStore.CreateCIGrant(ctx, "admin:test", g))
 	}
 
-	// Geschützter main-Branch: exakter und Namespace-Grant matchen.
+	// Protected main branch: both the exact and namespace grant match.
 	matched, err := testStore.MatchCIGrants(ctx, store.CIMatch{
 		ProjectPath: "infra/ansible", Ref: "main", RefProtected: true,
 	})
@@ -106,7 +106,7 @@ func TestMatchCIGrantsProjektUndNamespace(t *testing.T) {
 		t.Fatalf("matched: %d grants (%+v)", len(matched), matched)
 	}
 
-	// Ungeschützter Branch: nur der Namespace-Grant (ProtectedOnly=false).
+	// Unprotected branch: only the namespace grant (ProtectedOnly=false).
 	matched, err = testStore.MatchCIGrants(ctx, store.CIMatch{
 		ProjectPath: "infra/ansible", Ref: "feature/x", RefProtected: false,
 	})
@@ -115,9 +115,9 @@ func TestMatchCIGrantsProjektUndNamespace(t *testing.T) {
 		t.Fatalf("matched: %+v", matched)
 	}
 
-	// Fremdes Projekt: nichts ("inf" ist kein gültiger Namespace-Präfix).
+	// Unrelated project: nothing ("inf" is not a valid namespace prefix).
 	matched, err = testStore.MatchCIGrants(ctx, store.CIMatch{
-		ProjectPath: "infrastruktur/app", Ref: "main", RefProtected: true,
+		ProjectPath: "infrastructure/app", Ref: "main", RefProtected: true,
 	})
 	mustNoErr(t, err)
 	if len(matched) != 0 {
@@ -143,48 +143,48 @@ func TestApplyCIGrants(t *testing.T) {
 	result, err := testStore.ApplyCIGrants(ctx, "admin:test", specs)
 	mustNoErr(t, err)
 	if result.Created != 2 || result.Updated+result.Deleted+result.Unchanged != 0 {
-		t.Fatalf("erster apply: %+v", result)
+		t.Fatalf("first apply: %+v", result)
 	}
 
-	// Idempotent: gleicher Zielzustand ⇒ nur unverändert.
+	// Idempotent: same target state ⇒ everything unchanged.
 	result, err = testStore.ApplyCIGrants(ctx, "admin:test", specs)
 	mustNoErr(t, err)
 	if result.Unchanged != 2 || result.Created+result.Updated+result.Deleted != 0 {
-		t.Fatalf("idempotenter apply: %+v", result)
+		t.Fatalf("idempotent apply: %+v", result)
 	}
 
-	// Principals ändern + einen Grant entfernen.
+	// Change principals + remove a grant.
 	specs[0].Principals = []string{"deploy", "root"}
 	result, err = testStore.ApplyCIGrants(ctx, "admin:test", specs[:1])
 	mustNoErr(t, err)
 	if result.Updated != 1 || result.Deleted != 1 {
-		t.Fatalf("dritter apply: %+v", result)
+		t.Fatalf("third apply: %+v", result)
 	}
 	remaining, err := testStore.ListCIGrants(ctx)
 	mustNoErr(t, err)
 	if len(remaining) != 1 || !slices.Equal(remaining[0].Principals, []string{"deploy", "root"}) {
-		t.Fatalf("bestand: %+v", remaining)
+		t.Fatalf("inventory: %+v", remaining)
 	}
 
-	// Ungültige Spec bricht ab (Transaktion, Bestand unverändert).
+	// Invalid spec aborts the whole apply (transaction, inventory unchanged).
 	if _, err := testStore.ApplyCIGrants(ctx, "admin:test", []store.CIGrantSpec{
 		{ProjectPath: "", Principals: []string{"x"}, MaxValiditySeconds: 60},
 	}); err == nil {
-		t.Fatal("ungültige spec: fehler erwartet")
+		t.Fatal("invalid spec: expected an error")
 	}
 	remaining, err = testStore.ListCIGrants(ctx)
 	mustNoErr(t, err)
 	if len(remaining) != 1 {
-		t.Fatalf("bestand nach fehlgeschlagenem apply: %+v", remaining)
+		t.Fatalf("inventory after failed apply: %+v", remaining)
 	}
 
-	// Doppelte Bedingung in einer Datei ist ein Client-Fehler.
+	// A duplicate condition within one file is a client error.
 	dup := store.CIGrantSpec{
 		ProjectPath: "x", ProtectedOnly: true,
 		Principals: []string{"deploy"}, MaxValiditySeconds: 60,
 	}
 	if _, err := testStore.ApplyCIGrants(ctx, "admin:test", []store.CIGrantSpec{dup, dup}); err == nil {
-		t.Fatal("doppelte spec: fehler erwartet")
+		t.Fatal("duplicate spec: expected an error")
 	}
 }
 
@@ -198,35 +198,35 @@ func TestEnsureCIServiceAccount(t *testing.T) {
 		t.Fatalf("account = %+v", account)
 	}
 
-	// Idempotent: gleiche ID beim zweiten Aufruf.
+	// Idempotent: same ID on the second call.
 	again, err := testStore.EnsureCIServiceAccount(ctx, "https://gitlab.example", "infra/ansible")
 	mustNoErr(t, err)
 	if again.ID != account.ID {
-		t.Errorf("neue id %s statt %s", again.ID, account.ID)
+		t.Errorf("new id %s instead of %s", again.ID, account.ID)
 	}
 
-	// Deaktivierung (Not-Aus) überlebt weitere Ausstellungen.
+	// Deactivation (kill switch) survives further issuances.
 	account.Active = false
 	mustNoErr(t, testStore.UpdateServiceAccount(ctx, account))
 	after, err := testStore.EnsureCIServiceAccount(ctx, "https://gitlab.example", "infra/ansible")
 	mustNoErr(t, err)
 	if after.Active {
-		t.Error("active wurde durch ensure reaktiviert")
+		t.Error("active was reactivated by ensure")
 	}
 }
 
-func TestListAuthorizedPrincipalsMitCIGrants(t *testing.T) {
+func TestListAuthorizedPrincipalsWithCIGrants(t *testing.T) {
 	cleanDB(t)
 	ctx := context.Background()
 
-	// Host mit env=prod.
+	// Host with env=prod.
 	hash := newToken(t, nil, map[string]string{"env": "prod"}, time.Hour)
 	host, err := testStore.EnrollHost(ctx, store.EnrollHostParams{
 		TokenHash: hash, Name: "web1", PublicKey: "k",
 	})
 	mustNoErr(t, err)
 
-	// CI-Grant für deploy auf env=prod, zweiter für andere Tags.
+	// CI grant for deploy on env=prod, a second one for different tags.
 	mustNoErr(t, testStore.CreateCIGrant(ctx, "admin:test", &store.CIGrant{
 		ProjectPath: "infra/ansible", ProtectedOnly: true,
 		TagSelector: map[string]string{"env": "prod"},
@@ -238,8 +238,8 @@ func TestListAuthorizedPrincipalsMitCIGrants(t *testing.T) {
 		Principals:  []string{"deploy"}, MaxValiditySeconds: 3600,
 	}))
 
-	// deploy erhält den CI-Principal des passenden Grants — nicht den des
-	// staging-Grants und nichts für andere lokale Benutzer.
+	// deploy gets the CI principal of the matching grant — not that of the
+	// staging grant, and nothing for other local users.
 	principals, err := testStore.ListAuthorizedPrincipals(ctx, host.ID, "deploy")
 	mustNoErr(t, err)
 	if !slices.Equal(principals, []string{"ci:infra/ansible"}) {
@@ -251,7 +251,7 @@ func TestListAuthorizedPrincipalsMitCIGrants(t *testing.T) {
 		t.Errorf("root-principals = %v", principals)
 	}
 
-	// Benutzer-Grants und CI-Grants ergänzen sich.
+	// User grants and CI grants complement each other.
 	alice := &store.User{Issuer: "idp", Subject: "s1", Username: "alice", Email: "alice@example.com", Active: true}
 	mustNoErr(t, testStore.CreateUser(ctx, alice))
 	ops := &store.Group{Issuer: "idp", Name: "ops"}
@@ -265,6 +265,6 @@ func TestListAuthorizedPrincipalsMitCIGrants(t *testing.T) {
 	mustNoErr(t, err)
 	want := []string{"alice", "alice@example.com", "ci:infra/ansible"}
 	if !slices.Equal(principals, want) {
-		t.Errorf("principals = %v, erwartet %v", principals, want)
+		t.Errorf("principals = %v, want %v", principals, want)
 	}
 }

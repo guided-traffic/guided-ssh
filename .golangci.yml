@@ -11,7 +11,7 @@ linters:
     - unparam
   settings:
     misspell:
-      # Deutsche Kommentare/Ausgaben: kein Tippfehler von "configuration"
+      # German words appearing in comments/output — not misspellings of "configuration"
       ignore-rules:
         - konfiguration
         - periodisch
@@ -23,23 +23,23 @@ linters:
       - common-false-positives
       - std-error-handling
     rules:
-      # gosec ist auf Testcode Rauschen: Fixtures (Fake-IdP, bewusste Redirects,
-      # feste Hostnamen) tun absichtlich „unsichere" Dinge und werden nie
-      # ausgeliefert. Deckt u. a. die G710-Open-Redirect-Meldungen der Fake-IdPs ab.
+      # gosec is noise on test code: fixtures (fake IdP, deliberate redirects,
+      # fixed hostnames) intentionally do "unsafe" things and are never
+      # shipped. Covers, among others, the G710 open-redirect findings of the fake IdPs.
       - path: _test\.go
         linters:
           - gosec
-      # internal/version ist idiomatisch; Kollision mit stdlib go/version ist hier irrelevant.
+      # internal/version is idiomatic; the collision with stdlib go/version is irrelevant here.
       - path: internal/version/
         text: "avoid package names that conflict with Go standard library"
         linters:
           - revive
-      # internal/metrics ist idiomatisch; Kollision mit stdlib runtime/metrics ist hier irrelevant.
+      # internal/metrics is idiomatic; the collision with stdlib runtime/metrics is irrelevant here.
       - path: internal/metrics/
         text: "avoid package names that conflict with Go standard library"
         linters:
           - revive
-      # internal/api ist im Projektlayout (ADR-001) als HTTP-API-Paket gesetzt.
+      # internal/api is set as the HTTP API package in the project layout (ADR-001).
       - path: internal/api/
         text: "avoid meaningless package names"
         linters:

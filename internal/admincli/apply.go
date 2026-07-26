@@ -10,11 +10,11 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/cli"
 )
 
-// grantsFile ist das Format der deklarativen Grant-Datei (GitOps):
+// grantsFile is the format of the declarative grants file (GitOps):
 //
 //	grants:
 //	  - group: deployers
-//	    # issuer: https://idp.example/realms/x   (default: issuer des tokens)
+//	    # issuer: https://idp.example/realms/x   (default: token's issuer)
 //	    tags:
 //	      env: prod
 //	    principals: [deploy]
@@ -22,22 +22,22 @@ import (
 //	    max_validity: 8h
 //	ci_grants:
 //	  - project: infra/ansible
-//	    ref: main            # glob; leer = alle refs
+//	    ref: main            # glob; empty = all refs
 //	    protected_only: true # default true
-//	    environment: prod    # glob; leer = keine bedingung
+//	    environment: prod    # glob; empty = no condition
 //	    tags:
 //	      env: prod
 //	    principals: [deploy]
 //	    max_validity: 1h
 //
-// Fehlt der Abschnitt ci_grants komplett, bleiben CI-Grants unangetastet;
-// ein leerer Abschnitt (ci_grants: []) löscht alle.
+// If the ci_grants section is missing entirely, CI grants are left
+// untouched; an empty section (ci_grants: []) deletes all of them.
 type grantsFile struct {
 	Grants   []grantEntry    `yaml:"grants"`
 	CIGrants *[]ciGrantEntry `yaml:"ci_grants"`
 }
 
-// grantEntry ist eine Zugriffsregel in der YAML-Datei.
+// grantEntry is an access rule in the YAML file.
 type grantEntry struct {
 	Group       string            `yaml:"group"`
 	Issuer      string            `yaml:"issuer,omitempty"`
@@ -47,7 +47,7 @@ type grantEntry struct {
 	MaxValidity cli.Duration      `yaml:"max_validity"`
 }
 
-// ciGrantEntry ist eine CI-Zugriffsregel in der YAML-Datei (Phase 7).
+// ciGrantEntry is a CI access rule in the YAML file (phase 7).
 type ciGrantEntry struct {
 	Project       string            `yaml:"project"`
 	Ref           string            `yaml:"ref,omitempty"`
@@ -58,17 +58,17 @@ type ciGrantEntry struct {
 	MaxValidity   cli.Duration      `yaml:"max_validity"`
 }
 
-// loadGrantsFile liest und mappt die deklarative Grant-Datei; die inhaltliche
-// Validierung übernimmt der Server (Zeilenkontext kommt von dort als Index).
-// ciGrants ist nil, wenn der Abschnitt ci_grants in der Datei fehlt.
+// loadGrantsFile reads and maps the declarative grants file; content
+// validation is handled by the server (line context comes from there as an
+// index). ciGrants is nil if the ci_grants section is missing from the file.
 func loadGrantsFile(path string) (grants []Grant, ciGrants []CIGrant, ciPresent bool, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("grants-datei lesen: %w", err)
+		return nil, nil, false, fmt.Errorf("read grants file: %w", err)
 	}
 	var file grantsFile
 	if err := yaml.Unmarshal(raw, &file); err != nil {
-		return nil, nil, false, fmt.Errorf("grants-datei %s: %w", path, err)
+		return nil, nil, false, fmt.Errorf("grants file %s: %w", path, err)
 	}
 	grants = make([]Grant, 0, len(file.Grants))
 	for _, entry := range file.Grants {

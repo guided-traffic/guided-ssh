@@ -21,7 +21,7 @@ func aliceClaims() *auth.Claims {
 	}
 }
 
-func TestEnsureUserLegtNeuAn(t *testing.T) {
+func TestEnsureUserCreatesNew(t *testing.T) {
 	fs := newFakeAuthStore()
 	mapper := auth.NewMapper(fs)
 
@@ -30,48 +30,48 @@ func TestEnsureUserLegtNeuAn(t *testing.T) {
 		t.Fatalf("EnsureUser: %v", err)
 	}
 	if user.Username != "alice" || user.Email != "alice@example.com" || !user.Active {
-		t.Errorf("benutzer falsch: %+v", user)
+		t.Errorf("user wrong: %+v", user)
 	}
 	names := fs.groupNames(user.ID)
 	slices.Sort(names)
 	if !slices.Equal(names, []string{"admins", "dev"}) {
-		t.Errorf("gruppen falsch: %v", names)
+		t.Errorf("groups wrong: %v", names)
 	}
 }
 
-func TestEnsureUserAktualisiertUndSynctGruppen(t *testing.T) {
+func TestEnsureUserUpdatesAndSyncsGroups(t *testing.T) {
 	fs := newFakeAuthStore()
 	mapper := auth.NewMapper(fs)
 
 	first, err := mapper.EnsureUser(context.Background(), aliceClaims())
 	if err != nil {
-		t.Fatalf("erster EnsureUser: %v", err)
+		t.Fatalf("first EnsureUser: %v", err)
 	}
 
-	// Umbenannt und aus "admins" entfernt.
+	// Renamed and removed from "admins".
 	changed := aliceClaims()
-	changed.PreferredUsername = "alice.neu"
+	changed.PreferredUsername = "alice.new"
 	changed.Groups = []string{"dev"}
 	second, err := mapper.EnsureUser(context.Background(), changed)
 	if err != nil {
-		t.Fatalf("zweiter EnsureUser: %v", err)
+		t.Fatalf("second EnsureUser: %v", err)
 	}
 	if second.ID != first.ID {
-		t.Fatal("benutzer wurde dupliziert statt aktualisiert")
+		t.Fatal("user was duplicated instead of updated")
 	}
-	if second.Username != "alice.neu" {
-		t.Errorf("username nicht aktualisiert: %+v", second)
+	if second.Username != "alice.new" {
+		t.Errorf("username not updated: %+v", second)
 	}
 	if names := fs.groupNames(first.ID); !slices.Equal(names, []string{"dev"}) {
-		t.Errorf("gruppen nicht ersetzt: %v", names)
+		t.Errorf("groups not replaced: %v", names)
 	}
-	// Gruppen wurden wiederverwendet, nicht dupliziert.
+	// Groups were reused, not duplicated.
 	if len(fs.groups) != 2 {
-		t.Errorf("gruppenanzahl: %d, erwartet 2", len(fs.groups))
+		t.Errorf("group count: %d, expected 2", len(fs.groups))
 	}
 }
 
-func TestEnsureUserInaktivWirdAbgewiesen(t *testing.T) {
+func TestEnsureUserInactiveIsRejected(t *testing.T) {
 	fs := newFakeAuthStore()
 	mapper := auth.NewMapper(fs)
 
@@ -83,25 +83,25 @@ func TestEnsureUserInaktivWirdAbgewiesen(t *testing.T) {
 	stored.Active = false
 
 	if _, err := mapper.EnsureUser(context.Background(), aliceClaims()); !errors.Is(err, auth.ErrUserInactive) {
-		t.Fatalf("erwartete ErrUserInactive, bekam %v", err)
+		t.Fatalf("expected ErrUserInactive, got %v", err)
 	}
 	if stored.Active {
-		t.Error("benutzer darf nicht reaktiviert werden")
+		t.Error("user must not be reactivated")
 	}
 }
 
-func TestEnsureUserFehlerpfade(t *testing.T) {
+func TestEnsureUserErrorPaths(t *testing.T) {
 	for _, method := range []string{
 		"GetUserBySubject", "CreateUser", "SetUserGroups", "GetGroupByName", "CreateGroup",
 	} {
 		fs := newFakeAuthStore()
 		fs.failOn = method
 		if _, err := auth.NewMapper(fs).EnsureUser(context.Background(), aliceClaims()); err == nil {
-			t.Errorf("failOn=%s: erwartete fehler", method)
+			t.Errorf("failOn=%s: expected error", method)
 		}
 	}
 
-	// UpdateUser-Fehler braucht einen existierenden Benutzer mit Änderung.
+	// An UpdateUser error needs an existing user with a change.
 	fs := newFakeAuthStore()
 	mapper := auth.NewMapper(fs)
 	if _, err := mapper.EnsureUser(context.Background(), aliceClaims()); err != nil {
@@ -109,8 +109,8 @@ func TestEnsureUserFehlerpfade(t *testing.T) {
 	}
 	fs.failOn = "UpdateUser"
 	changed := aliceClaims()
-	changed.PreferredUsername = "neu"
+	changed.PreferredUsername = "new"
 	if _, err := mapper.EnsureUser(context.Background(), changed); err == nil {
-		t.Error("failOn=UpdateUser: erwartete fehler")
+		t.Error("failOn=UpdateUser: expected error")
 	}
 }

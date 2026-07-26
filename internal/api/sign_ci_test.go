@@ -22,9 +22,9 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-const ciTestToken = "gueltiges-ci-token" //#nosec G101 -- Testwert, kein Credential
+const ciTestToken = "valid-ci-token" //#nosec G101 -- test value, not a credential
 
-// fakeCIVerifier akzeptiert genau ein Token und liefert feste CI-Claims.
+// fakeCIVerifier accepts exactly one token and returns fixed CI claims.
 type fakeCIVerifier struct {
 	token  string
 	claims *auth.CIClaims
@@ -32,14 +32,14 @@ type fakeCIVerifier struct {
 
 func (f *fakeCIVerifier) Verify(_ context.Context, rawToken string) (*auth.CIClaims, error) {
 	if rawToken != f.token {
-		return nil, fmt.Errorf("%w: token unbekannt", auth.ErrInvalidToken)
+		return nil, fmt.Errorf("%w: unknown token", auth.ErrInvalidToken)
 	}
 	copied := *f.claims
 	return &copied, nil
 }
 
-// fakeCIStore ist ein In-Memory-CIStore: Grants werden über die echte
-// Matching-Logik ausgewertet, Service-Accounts pro Projekt vorgehalten.
+// fakeCIStore is an in-memory CIStore: grants are evaluated via the real
+// matching logic, service accounts are kept per project.
 type fakeCIStore struct {
 	grants   []store.CIGrant
 	inactive bool
@@ -85,7 +85,7 @@ func ciTestGrant() store.CIGrant {
 	}
 }
 
-// newCISignServer baut den Testserver mit CI-Sign-Endpoint (echte CA über fakeStore).
+// newCISignServer builds the test server with the CI sign endpoint (real CA over fakeStore).
 func newCISignServer(t *testing.T, ciStore api.CIStore, verifier api.CITokenVerifier) *httptest.Server {
 	t.Helper()
 	fs := &fakeStore{}
@@ -105,16 +105,16 @@ func newCISignServer(t *testing.T, ciStore api.CIStore, verifier api.CITokenVeri
 	return srv
 }
 
-// postSignCI ruft den CI-Sign-Endpoint auf.
+// postSignCI calls the CI sign endpoint.
 func postSignCI(t *testing.T, url, token string, body any) (int, []byte) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("body marshalen: %v", err)
+		t.Fatalf("marshaling body: %v", err)
 	}
 	req, err := http.NewRequest(http.MethodPost, url+"/v1/sign/ci", bytes.NewReader(payload))
 	if err != nil {
-		t.Fatalf("request bauen: %v", err)
+		t.Fatalf("building request: %v", err)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -126,12 +126,12 @@ func postSignCI(t *testing.T, url, token string, body any) (int, []byte) {
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("body lesen: %v", err)
+		t.Fatalf("reading body: %v", err)
 	}
 	return resp.StatusCode, data
 }
 
-func TestSignCIErfolg(t *testing.T) {
+func TestSignCISuccess(t *testing.T) {
 	ciStore := &fakeCIStore{grants: []store.CIGrant{ciTestGrant()}}
 	srv := newCISignServer(t, ciStore, &fakeCIVerifier{token: ciTestToken, claims: ciTestClaims()})
 
@@ -147,38 +147,38 @@ func TestSignCIErfolg(t *testing.T) {
 		ValidBefore time.Time `json:"valid_before"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("antwort dekodieren: %v", err)
+		t.Fatalf("decoding response: %v", err)
 	}
 
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.Certificate))
 	if err != nil {
-		t.Fatalf("zertifikat parsen: %v", err)
+		t.Fatalf("parsing certificate: %v", err)
 	}
 	cert, ok := parsed.(*ssh.Certificate)
 	if !ok {
-		t.Fatalf("kein zertifikat: %T", parsed)
+		t.Fatalf("not a certificate: %T", parsed)
 	}
-	// KeyID ci:<project>:<pipeline>:<job> (Audit-Zuordnung pro Job).
+	// KeyID ci:<project>:<pipeline>:<job> (audit correlation per job).
 	if want := "ci:infra/ansible:4711:815"; cert.KeyId != want || resp.KeyID != want {
-		t.Errorf("keyid: %q / %q, erwartet %q", cert.KeyId, resp.KeyID, want)
+		t.Errorf("keyid: %q / %q, expected %q", cert.KeyId, resp.KeyID, want)
 	}
-	// Projekt-Identitäts-Principals inkl. Namespace-Vorfahr (ADR-019).
+	// Project identity principals including namespace ancestor (ADR-019).
 	if want := []string{"ci:infra/ansible", "ci:infra"}; !slices.Equal(cert.ValidPrincipals, want) {
-		t.Errorf("principals: %v, erwartet %v", cert.ValidPrincipals, want)
+		t.Errorf("principals: %v, expected %v", cert.ValidPrincipals, want)
 	}
-	// Nur permit-pty (CI-Policy).
+	// Only permit-pty (CI policy).
 	if _, ok := cert.Extensions["permit-pty"]; !ok || len(cert.Extensions) != 1 {
 		t.Errorf("extensions: %v", cert.Extensions)
 	}
-	// Default-Laufzeit 1 h.
+	// Default lifetime 1h.
 	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime != time.Hour {
-		t.Errorf("laufzeit %s, erwartet 1h", lifetime)
+		t.Errorf("lifetime %s, expected 1h", lifetime)
 	}
 }
 
-func TestSignCILaufzeitDurchGrantGedeckelt(t *testing.T) {
+func TestSignCIValidityCappedByGrant(t *testing.T) {
 	grant := ciTestGrant()
-	grant.MaxValiditySeconds = 600 // Grant erlaubt nur 10 m
+	grant.MaxValiditySeconds = 600 // grant allows only 10m
 	ciStore := &fakeCIStore{grants: []store.CIGrant{grant}}
 	srv := newCISignServer(t, ciStore, &fakeCIVerifier{token: ciTestToken, claims: ciTestClaims()})
 
@@ -196,13 +196,13 @@ func TestSignCILaufzeitDurchGrantGedeckelt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lifetime := resp.ValidBefore.Sub(resp.ValidAfter); lifetime != 10*time.Minute {
-		t.Errorf("laufzeit %s, erwartet 10m (grant-maximum)", lifetime)
+		t.Errorf("lifetime %s, expected 10m (grant maximum)", lifetime)
 	}
 }
 
-func TestSignCILaufzeitDurchTokenAblaufGedeckelt(t *testing.T) {
+func TestSignCIValidityCappedByTokenExpiry(t *testing.T) {
 	claims := ciTestClaims()
-	claims.ExpiresAt = time.Now().Add(10 * time.Minute) // Job-Timeout in 10 m
+	claims.ExpiresAt = time.Now().Add(10 * time.Minute) // job timeout in 10m
 	ciStore := &fakeCIStore{grants: []store.CIGrant{ciTestGrant()}}
 	srv := newCISignServer(t, ciStore, &fakeCIVerifier{token: ciTestToken, claims: claims})
 
@@ -217,19 +217,19 @@ func TestSignCILaufzeitDurchTokenAblaufGedeckelt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.ValidBefore.After(claims.ExpiresAt.Add(time.Second)) {
-		t.Errorf("valid_before %s liegt nach token-ablauf %s", resp.ValidBefore, claims.ExpiresAt)
+		t.Errorf("valid_before %s is after token expiry %s", resp.ValidBefore, claims.ExpiresAt)
 	}
 }
 
-func TestSignCIFehlerfaelle(t *testing.T) {
+func TestSignCIErrorCases(t *testing.T) {
 	validKey := testPublicKey(t)
 
 	protectedClaims := ciTestClaims()
-	protectedClaims.RefProtected = false // Grant verlangt protected
+	protectedClaims.RefProtected = false // grant requires protected
 
 	wrongProject := ciTestClaims()
-	wrongProject.ProjectPath = "andere/app"
-	wrongProject.NamespacePath = "andere"
+	wrongProject.ProjectPath = "other/app"
+	wrongProject.NamespacePath = "other"
 
 	expired := ciTestClaims()
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
@@ -242,31 +242,31 @@ func TestSignCIFehlerfaelle(t *testing.T) {
 		body       any
 		wantStatus int
 	}{
-		{"ohne token", "", ciTestClaims(), false, map[string]any{"public_key": validKey}, http.StatusUnauthorized},
-		{"falsches token", "falsch", ciTestClaims(), false, map[string]any{"public_key": validKey}, http.StatusUnauthorized},
-		{"kaputter body", ciTestToken, ciTestClaims(), false, "kein-json", http.StatusBadRequest},
-		{"kaputter key", ciTestToken, ciTestClaims(), false, map[string]any{"public_key": "kein-key"}, http.StatusBadRequest},
-		{"unprotected ref ohne grant", ciTestToken, protectedClaims, false, map[string]any{"public_key": validKey}, http.StatusForbidden},
-		{"fremdes projekt", ciTestToken, wrongProject, false, map[string]any{"public_key": validKey}, http.StatusForbidden},
-		{"service-account deaktiviert", ciTestToken, ciTestClaims(), true, map[string]any{"public_key": validKey}, http.StatusForbidden},
-		{"token bereits abgelaufen", ciTestToken, expired, false, map[string]any{"public_key": validKey}, http.StatusBadRequest},
+		{"without token", "", ciTestClaims(), false, map[string]any{"public_key": validKey}, http.StatusUnauthorized},
+		{"wrong token", "wrong", ciTestClaims(), false, map[string]any{"public_key": validKey}, http.StatusUnauthorized},
+		{"broken body", ciTestToken, ciTestClaims(), false, "not-json", http.StatusBadRequest},
+		{"broken key", ciTestToken, ciTestClaims(), false, map[string]any{"public_key": "not-a-key"}, http.StatusBadRequest},
+		{"unprotected ref without grant", ciTestToken, protectedClaims, false, map[string]any{"public_key": validKey}, http.StatusForbidden},
+		{"foreign project", ciTestToken, wrongProject, false, map[string]any{"public_key": validKey}, http.StatusForbidden},
+		{"service account disabled", ciTestToken, ciTestClaims(), true, map[string]any{"public_key": validKey}, http.StatusForbidden},
+		{"token already expired", ciTestToken, expired, false, map[string]any{"public_key": validKey}, http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		ciStore := &fakeCIStore{grants: []store.CIGrant{ciTestGrant()}, inactive: c.inactive}
 		srv := newCISignServer(t, ciStore, &fakeCIVerifier{token: ciTestToken, claims: c.claims})
 		if status, body := postSignCI(t, srv.URL, c.token, c.body); status != c.wantStatus {
-			t.Errorf("%s: status %d (erwartet %d): %s", c.name, status, c.wantStatus, body)
+			t.Errorf("%s: status %d (expected %d): %s", c.name, status, c.wantStatus, body)
 		}
 	}
 }
 
-func TestSignCIZertifikatAlsKeyAbgelehnt(t *testing.T) {
+func TestSignCICertificateAsKeyRejected(t *testing.T) {
 	ciStore := &fakeCIStore{grants: []store.CIGrant{ciTestGrant()}}
 	srv := newCISignServer(t, ciStore, &fakeCIVerifier{token: ciTestToken, claims: ciTestClaims()})
 
 	status, body := postSignCI(t, srv.URL, ciTestToken, map[string]any{"public_key": testPublicKey(t)})
 	if status != http.StatusOK {
-		t.Fatalf("setup-zertifikat: status %d", status)
+		t.Fatalf("setup certificate: status %d", status)
 	}
 	var resp struct {
 		Certificate string `json:"certificate"`
@@ -275,14 +275,14 @@ func TestSignCIZertifikatAlsKeyAbgelehnt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if status, _ := postSignCI(t, srv.URL, ciTestToken, map[string]any{"public_key": resp.Certificate}); status != http.StatusBadRequest {
-		t.Errorf("zertifikat als key: status %d, erwartet 400", status)
+		t.Errorf("certificate as key: status %d, expected 400", status)
 	}
 }
 
-func TestSignCIOhneKonfiguration(t *testing.T) {
-	srv := newTestServer(t, &fakeStore{}) // ohne CIVerifier/CIStore
+func TestSignCIWithoutConfiguration(t *testing.T) {
+	srv := newTestServer(t, &fakeStore{}) // without CIVerifier/CIStore
 	status, _ := postSignCI(t, srv.URL, ciTestToken, map[string]any{"public_key": testPublicKey(t)})
 	if status != http.StatusServiceUnavailable {
-		t.Errorf("status %d, erwartet 503", status)
+		t.Errorf("status %d, expected 503", status)
 	}
 }

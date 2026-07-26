@@ -11,67 +11,67 @@ import (
 	"fmt"
 )
 
-// ErrInvalidSession kapselt alle Decodier-Fehler eines Session-Cookies; die
-// API behandelt sie wie eine fehlende Session (Login-Aufforderung statt 500).
-var ErrInvalidSession = errors.New("auth: ungültige session")
+// ErrInvalidSession wraps all decoding errors of a session cookie; the API
+// treats them like a missing session (prompt for login instead of a 500).
+var ErrInvalidSession = errors.New("auth: invalid session")
 
-// sessionKeyInfo ist der HKDF-Kontext der Cookie-Verschlüsselung; eine neue
-// Version invalidiert alle bestehenden Sessions (erneuter Login).
+// sessionKeyInfo is the HKDF context of the cookie encryption; a new
+// version invalidates all existing sessions (forcing re-login).
 const sessionKeyInfo = "guided-ssh/ui-session/v1"
 
-// SessionCodec ver- und entschlüsselt die Web-Sessions der UI als kompakte,
-// URL-sichere Cookie-Werte (AES-256-GCM). Der Schlüssel wird per HKDF aus dem
-// CA-Master-Key abgeleitet: kein zusätzliches Secret im Deployment, und alle
-// Replikas akzeptieren die Sessions der anderen.
+// SessionCodec encrypts and decrypts the UI's web sessions as compact,
+// URL-safe cookie values (AES-256-GCM). The key is derived from the CA
+// master key via HKDF: no additional secret in the deployment, and all
+// replicas accept each other's sessions.
 type SessionCodec struct {
 	aead cipher.AEAD
 }
 
-// NewSessionCodec leitet den Cookie-Schlüssel aus dem Master-Key ab.
+// NewSessionCodec derives the cookie key from the master key.
 func NewSessionCodec(masterKey []byte) (*SessionCodec, error) {
 	if len(masterKey) < 32 {
-		return nil, fmt.Errorf("auth: master-key zu kurz für session-schlüssel (%d bytes, 32 erwartet)", len(masterKey))
+		return nil, fmt.Errorf("auth: master key too short for session key (%d bytes, 32 expected)", len(masterKey))
 	}
 	key, err := hkdf.Key(sha256.New, masterKey, nil, sessionKeyInfo, 32)
 	if err != nil {
-		return nil, fmt.Errorf("auth: session-schlüssel ableiten: %w", err)
+		return nil, fmt.Errorf("auth: deriving session key: %w", err)
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, fmt.Errorf("auth: session-cipher: %w", err)
+		return nil, fmt.Errorf("auth: session cipher: %w", err)
 	}
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, fmt.Errorf("auth: session-gcm: %w", err)
+		return nil, fmt.Errorf("auth: session gcm: %w", err)
 	}
 	return &SessionCodec{aead: aead}, nil
 }
 
-// Seal verschlüsselt den Klartext zu einem Cookie-Wert (nonce‖ciphertext,
-// Base64-URL ohne Padding).
+// Seal encrypts the plaintext into a cookie value (nonce‖ciphertext,
+// base64-URL without padding).
 func (c *SessionCodec) Seal(plaintext []byte) (string, error) {
 	nonce := make([]byte, c.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("auth: session-nonce: %w", err)
+		return "", fmt.Errorf("auth: session nonce: %w", err)
 	}
 	sealed := c.aead.Seal(nonce, nonce, plaintext, nil)
 	return base64.RawURLEncoding.EncodeToString(sealed), nil
 }
 
-// Open entschlüsselt einen Cookie-Wert; manipulierte oder mit anderem
-// Schlüssel erzeugte Werte kommen als ErrInvalidSession zurück.
+// Open decrypts a cookie value; tampered values or ones produced with a
+// different key come back as ErrInvalidSession.
 func (c *SessionCodec) Open(value string) ([]byte, error) {
 	sealed, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
 		return nil, fmt.Errorf("%w: base64: %w", ErrInvalidSession, err)
 	}
 	if len(sealed) < c.aead.NonceSize() {
-		return nil, fmt.Errorf("%w: wert zu kurz", ErrInvalidSession)
+		return nil, fmt.Errorf("%w: value too short", ErrInvalidSession)
 	}
 	nonce, ciphertext := sealed[:c.aead.NonceSize()], sealed[c.aead.NonceSize():]
 	plaintext, err := c.aead.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: entschlüsseln: %w", ErrInvalidSession, err)
+		return nil, fmt.Errorf("%w: decrypting: %w", ErrInvalidSession, err)
 	}
 	return plaintext, nil
 }

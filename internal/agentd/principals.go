@@ -10,18 +10,19 @@ import (
 	"time"
 )
 
-// PrintPrincipals ist der AuthorizedPrincipalsCommand-Helper: fragt den
-// Daemon über den Unix-Socket und schreibt Principals zeilenweise nach
-// stdout. Jeder Fehler (Daemon down, Timeout, API+Cache leer) führt zu
-// einem Fehler — sshd wertet fehlende Ausgabe als Ablehnung (fail-closed).
+// PrintPrincipals is the AuthorizedPrincipalsCommand helper: it asks the
+// daemon over the unix socket and writes the principals to stdout, one per
+// line. Any error (daemon down, timeout, empty API+cache) results in an
+// error — sshd treats missing output as a denial (fail-closed).
 //
-// serial/keyid stammen aus den sshd-Tokens %s/%i (nur bei aktivem Session-Audit
-// gesetzt): nach dem Principals-Druck werden sie best-effort an den Daemon
-// gemeldet, damit dieser eine folgende Session-Open korrelieren kann. Fehler
-// dabei sind irrelevant — das (fail-closed) Login-Ergebnis steht bereits fest.
+// serial/keyid come from the sshd tokens %s/%i (only set with session audit
+// enabled): after printing the principals, they are reported to the daemon
+// on a best-effort basis so it can correlate a following session open.
+// Errors there are irrelevant — the (fail-closed) login outcome is already
+// decided.
 func PrintPrincipals(ctx context.Context, stateDir, user string, serial int64, keyid string, stdout io.Writer) error {
 	if user == "" {
-		return fmt.Errorf("aufruf: gssh-agentd principals -user <name>")
+		return fmt.Errorf("usage: gssh-agentd principals -user <name>")
 	}
 	cfg, err := LoadConfig(stateDir)
 	if err != nil {
@@ -35,12 +36,12 @@ func PrintPrincipals(ctx context.Context, stateDir, user string, serial int64, k
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("gssh-agentd nicht erreichbar (läuft der dienst?): %w", err)
+		return fmt.Errorf("gssh-agentd unreachable (is the service running?): %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("principals verweigert: %s", string(msg))
+		return fmt.Errorf("principals denied: %s", string(msg))
 	}
 	var payload struct {
 		Principals []string `json:"principals"`
@@ -56,9 +57,9 @@ func PrintPrincipals(ctx context.Context, stateDir, user string, serial int64, k
 	return nil
 }
 
-// recordAuthSerial meldet dem Daemon best-effort den am Login gesehenen Serial.
-// Nur wenn ein Serial vorliegt und das Socket-Token existiert (Session-Audit
-// aktiv). Jeder Fehler wird verschluckt.
+// recordAuthSerial reports the serial seen at login to the daemon on a
+// best-effort basis. Only when a serial is present and the socket token
+// exists (session audit active). Any error is swallowed.
 func recordAuthSerial(ctx context.Context, socketPath, stateDir, user string, serial int64, keyid string) {
 	if serial <= 0 {
 		return

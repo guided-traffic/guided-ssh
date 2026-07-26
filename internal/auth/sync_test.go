@@ -13,7 +13,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 )
 
-// fakeDirectory ist eine DirectorySource aus dem Speicher.
+// fakeDirectory is an in-memory DirectorySource.
 type fakeDirectory struct {
 	issuer string
 	users  []auth.DirectoryUser
@@ -30,8 +30,8 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// seedUser legt via Mapper einen aktiven Benutzer mit Gruppen an und liefert
-// seine ID.
+// seedUser creates an active user with groups via Mapper and returns its
+// ID.
 func seedUser(t *testing.T, fs *fakeAuthStore, claims *auth.Claims) uuid.UUID {
 	t.Helper()
 	user, err := auth.NewMapper(fs).EnsureUser(context.Background(), claims)
@@ -41,7 +41,7 @@ func seedUser(t *testing.T, fs *fakeAuthStore, claims *auth.Claims) uuid.UUID {
 	return user.ID
 }
 
-func TestSyncOnceEntzugUndOffboarding(t *testing.T) {
+func TestSyncOnceRevocationAndOffboarding(t *testing.T) {
 	fs := newFakeAuthStore()
 	alice := seedUser(t, fs, aliceClaims())
 
@@ -51,7 +51,7 @@ func TestSyncOnceEntzugUndOffboarding(t *testing.T) {
 	bobClaims.Email = "bob@example.com"
 	bob := seedUser(t, fs, bobClaims)
 
-	// IdP-Zustand: alice nur noch in "dev", bob gar nicht mehr vorhanden.
+	// IdP state: alice only in "dev" now, bob no longer present at all.
 	dir := &fakeDirectory{issuer: testIssuer, users: []auth.DirectoryUser{
 		{Subject: "alice-id", Username: "alice", Email: "alice@example.com", Groups: []string{"dev"}, Active: true},
 	}}
@@ -61,29 +61,29 @@ func TestSyncOnceEntzugUndOffboarding(t *testing.T) {
 	}
 
 	if names := fs.groupNames(alice); !slices.Equal(names, []string{"dev"}) {
-		t.Errorf("alice-gruppen: %v, erwartet [dev]", names)
+		t.Errorf("alice groups: %v, expected [dev]", names)
 	}
 	bobStored := fs.users[bob]
 	if bobStored.Active {
-		t.Error("bob muss deaktiviert sein")
+		t.Error("bob must be deactivated")
 	}
 	if names := fs.groupNames(bob); len(names) != 0 {
-		t.Errorf("bob-gruppen nicht entzogen: %v", names)
+		t.Errorf("bob groups not revoked: %v", names)
 	}
 	if len(fs.audits) != 1 || fs.audits[0].EventType != auth.EventUserDeactivated {
-		t.Errorf("audit-events: %+v", fs.audits)
+		t.Errorf("audit events: %+v", fs.audits)
 	}
 
-	// Zweiter Lauf: idempotent, kein weiteres Audit-Event.
+	// Second run: idempotent, no further audit event.
 	if err := syncer.SyncOnce(context.Background()); err != nil {
-		t.Fatalf("zweiter SyncOnce: %v", err)
+		t.Fatalf("second SyncOnce: %v", err)
 	}
 	if len(fs.audits) != 1 {
-		t.Errorf("deaktivierung nicht idempotent: %+v", fs.audits)
+		t.Errorf("deactivation not idempotent: %+v", fs.audits)
 	}
 }
 
-func TestSyncOnceDeaktiviertImIdPDeaktivierte(t *testing.T) {
+func TestSyncOnceDeactivatedInIdPGetsDeactivated(t *testing.T) {
 	fs := newFakeAuthStore()
 	alice := seedUser(t, fs, aliceClaims())
 
@@ -94,11 +94,11 @@ func TestSyncOnceDeaktiviertImIdPDeaktivierte(t *testing.T) {
 		t.Fatalf("SyncOnce: %v", err)
 	}
 	if fs.users[alice].Active {
-		t.Error("alice muss deaktiviert sein (im idp disabled)")
+		t.Error("alice must be deactivated (disabled in idp)")
 	}
 }
 
-func TestSyncOnceReaktiviertUndAktualisiert(t *testing.T) {
+func TestSyncOnceReactivatesAndUpdates(t *testing.T) {
 	fs := newFakeAuthStore()
 	alice := seedUser(t, fs, aliceClaims())
 	fs.users[alice].Active = false
@@ -112,10 +112,10 @@ func TestSyncOnceReaktiviertUndAktualisiert(t *testing.T) {
 	}
 	stored := fs.users[alice]
 	if !stored.Active || stored.Username != "alice2" || stored.Email != "alice2@example.com" {
-		t.Errorf("nicht reaktiviert/aktualisiert: %+v", stored)
+		t.Errorf("not reactivated/updated: %+v", stored)
 	}
 	if names := fs.groupNames(alice); !slices.Equal(names, []string{"admins"}) {
-		t.Errorf("gruppen: %v", names)
+		t.Errorf("groups: %v", names)
 	}
 	found := false
 	for _, e := range fs.audits {
@@ -124,45 +124,45 @@ func TestSyncOnceReaktiviertUndAktualisiert(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("kein reaktivierungs-audit: %+v", fs.audits)
+		t.Errorf("no reactivation audit: %+v", fs.audits)
 	}
 }
 
-func TestSyncOnceIgnoriertFremdeIssuer(t *testing.T) {
+func TestSyncOnceIgnoresForeignIssuer(t *testing.T) {
 	fs := newFakeAuthStore()
 	alice := seedUser(t, fs, aliceClaims())
 
-	dir := &fakeDirectory{issuer: "https://anderer.example.com", users: nil}
+	dir := &fakeDirectory{issuer: "https://other.example.com", users: nil}
 	if err := auth.NewSyncer(fs, dir, discardLogger()).SyncOnce(context.Background()); err != nil {
 		t.Fatalf("SyncOnce: %v", err)
 	}
 	if !fs.users[alice].Active {
-		t.Error("benutzer eines anderen issuers darf nicht angefasst werden")
+		t.Error("user of a different issuer must not be touched")
 	}
 }
 
-func TestSyncOnceFehlerpfade(t *testing.T) {
+func TestSyncOnceErrorPaths(t *testing.T) {
 	dirErr := &fakeDirectory{issuer: testIssuer, err: errFakeStore}
 	if err := auth.NewSyncer(newFakeAuthStore(), dirErr, discardLogger()).SyncOnce(context.Background()); err == nil {
-		t.Error("directory-fehler nicht durchgereicht")
+		t.Error("directory error not propagated")
 	}
 
 	for _, method := range []string{"ListUsers", "UpdateUser", "SetUserGroups", "AppendAuditEvent"} {
 		fs := newFakeAuthStore()
 		seedUser(t, fs, aliceClaims())
 		fs.failOn = method
-		dir := &fakeDirectory{issuer: testIssuer} // niemand mehr im IdP ⇒ Deaktivierungspfad
+		dir := &fakeDirectory{issuer: testIssuer} // nobody left in the IdP ⇒ deactivation path
 		if err := auth.NewSyncer(fs, dir, discardLogger()).SyncOnce(context.Background()); err == nil {
-			t.Errorf("failOn=%s: erwartete fehler", method)
+			t.Errorf("failOn=%s: expected error", method)
 		}
 	}
 }
 
-func TestRunSynctPeriodisch(t *testing.T) {
+func TestRunSyncsPeriodically(t *testing.T) {
 	fs := newFakeAuthStore()
 	seedUser(t, fs, aliceClaims())
 
-	dir := &fakeDirectory{issuer: testIssuer} // leer ⇒ Deaktivierung beim ersten Lauf
+	dir := &fakeDirectory{issuer: testIssuer} // empty ⇒ deactivation on the first run
 	syncer := auth.NewSyncer(fs, dir, discardLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -175,7 +175,7 @@ func TestRunSynctPeriodisch(t *testing.T) {
 	for fs.auditCount() == 0 {
 		select {
 		case <-deadline:
-			t.Fatal("Run hat nie synchronisiert")
+			t.Fatal("Run never synchronized")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
@@ -183,6 +183,6 @@ func TestRunSynctPeriodisch(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Run endet nicht bei context-cancel")
+		t.Fatal("Run does not end on context cancel")
 	}
 }

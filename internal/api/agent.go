@@ -17,29 +17,29 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// AgentDeps sind die Abhängigkeiten der Agent-API (mTLS-Listener).
+// AgentDeps are the dependencies of the agent API (mTLS listener).
 type AgentDeps struct {
 	CA     *ca.CA
 	Hosts  HostStore
 	Logger *slog.Logger
-	// HostCertValidity ist die Laufzeit erneuerter Host-Zertifikate;
-	// 0 ⇒ Default (30 Tage). Das Policy-Maximum greift immer.
+	// HostCertValidity is the lifetime of renewed host certificates;
+	// 0 ⇒ default (30 days). The policy maximum always applies.
 	HostCertValidity time.Duration
-	// Sessions ist optional (Phase 9): fehlt es, bleibt POST /v1/agent/sessions
-	// deaktiviert (404). *store.Store erfüllt das Interface.
+	// Sessions is optional (phase 9): if missing, POST /v1/agent/sessions
+	// stays disabled (404). *store.Store satisfies the interface.
 	Sessions SessionStore
 }
 
-// SessionStore sind die Store-Methoden zur Aufnahme von Host-Session- und
-// sudo-Events (*store.Store erfüllt sie; Tests nutzen einen Fake).
+// SessionStore is the set of store methods for recording host session and
+// sudo events (*store.Store satisfies it; tests use a fake).
 type SessionStore interface {
 	OpenHostSession(ctx context.Context, e store.SessionEvent) error
 	CloseHostSession(ctx context.Context, e store.SessionEvent) error
 	RecordSudoEvent(ctx context.Context, e store.SessionEvent) error
 }
 
-// sessionEvent ist ein gemeldetes Session-/sudo-Ereignis (Wire-Format). Serial 0
-// bedeutet „kein korrelierter Serial".
+// sessionEvent is a reported session/sudo event (wire format). Serial 0
+// means "no correlated serial".
 type sessionEvent struct {
 	Phase      string    `json:"phase"`   // open | close
 	Service    string    `json:"service"` // sshd | sudo
@@ -53,44 +53,44 @@ type sessionEvent struct {
 	OccurredAt time.Time `json:"occurred_at"`
 }
 
-// sessionsRequest ist der Body von POST /v1/agent/sessions (Batch aus dem Spool).
+// sessionsRequest is the body of POST /v1/agent/sessions (batch from the spool).
 type sessionsRequest struct {
 	Events []sessionEvent `json:"events"`
 }
 
-// renewRequest ist der Body von POST /v1/agent/renew.
+// renewRequest is the body of POST /v1/agent/renew.
 type renewRequest struct {
-	// PublicKey ist der SSH-Host-Key im authorized_keys-Format.
+	// PublicKey is the SSH host key in authorized_keys format.
 	PublicKey string `json:"public_key"`
 }
 
-// renewResponse ist die Antwort: das erneuerte Host-Zertifikat.
+// renewResponse is the response: the renewed host certificate.
 type renewResponse struct {
 	Certificate string    `json:"certificate"`
 	ValidBefore time.Time `json:"valid_before"`
 }
 
-// principalsResponse ist die Antwort von GET /v1/agent/principals.
+// principalsResponse is the response of GET /v1/agent/principals.
 type principalsResponse struct {
 	Principals []string `json:"principals"`
 }
 
-// renewMTLSRequest ist der Body von POST /v1/agent/renew-mtls (Phase 10:
-// Rotation des mTLS-Client-Zertifikats über den bestehenden mTLS-Kanal).
+// renewMTLSRequest is the body of POST /v1/agent/renew-mtls (phase 10:
+// rotation of the mTLS client certificate over the existing mTLS channel).
 type renewMTLSRequest struct {
-	// CSR ist der PEM-kodierte Certificate Request; die Identität (CN)
-	// vergibt der Server aus dem verifizierten Client-Zertifikat.
+	// CSR is the PEM-encoded certificate request; the server assigns the
+	// identity (CN) from the verified client certificate.
 	CSR string `json:"csr"`
 }
 
-// renewMTLSResponse ist die Antwort: das neue mTLS-Client-Zertifikat (PEM).
+// renewMTLSResponse is the response: the new mTLS client certificate (PEM).
 type renewMTLSResponse struct {
 	Certificate string `json:"certificate"`
 }
 
-// NewAgent baut den Handler der Agent-API. Er läuft ausschließlich hinter
-// dem mTLS-Listener: die Identität des Hosts kommt aus dem CommonName des
-// verifizierten Client-Zertifikats (Host-UUID, gesetzt beim Enrollment).
+// NewAgent builds the agent API's handler. It runs exclusively behind the
+// mTLS listener: the host's identity comes from the CommonName of the
+// verified client certificate (host UUID, set during enrollment).
 func NewAgent(deps AgentDeps) http.Handler {
 	mux := http.NewServeMux()
 
@@ -102,11 +102,11 @@ func NewAgent(deps AgentDeps) http.Handler {
 	}
 	mux.HandleFunc("GET /v1/agent/bundle/user", agentBundleUser(deps))
 
-	// Antwort-Zähler nach Status-Code für die Fehlerraten-Metrik (Phase 11).
+	// Response counter by status code for the error rate metric (phase 11).
 	return metrics.Middleware(mux)
 }
 
-// agentRenew erneuert das SSH-Host-Zertifikat für den eingereichten Host-Key.
+// agentRenew renews the SSH host certificate for the submitted host key.
 func agentRenew(deps AgentDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
@@ -115,17 +115,17 @@ func agentRenew(deps AgentDeps) http.HandlerFunc {
 		}
 		var req renewRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			http.Error(w, "request body invalid", http.StatusBadRequest)
 			return
 		}
 		publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.PublicKey))
 		if err != nil {
-			http.Error(w, "public_key ungültig (authorized_keys-format erwartet)", http.StatusBadRequest)
+			http.Error(w, "public_key invalid (authorized_keys format expected)", http.StatusBadRequest)
 			return
 		}
 		cert, record, err := issueHostCert(r.Context(), deps.CA, host, publicKey, deps.HostCertValidity)
 		if err != nil {
-			deps.Logger.Error("agent/renew: ausstellung fehlgeschlagen", "host", host.Name, "error", err)
+			deps.Logger.Error("agent/renew: issuance failed", "host", host.Name, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -137,9 +137,9 @@ func agentRenew(deps AgentDeps) http.HandlerFunc {
 	}
 }
 
-// agentRenewMTLS rotiert das mTLS-Client-Zertifikat: der Agent authentifiziert
-// sich mit dem noch gültigen Zertifikat und reicht einen CSR für das nächste
-// ein (Identität kommt ausschließlich aus dem verifizierten Peer-Zertifikat).
+// agentRenewMTLS rotates the mTLS client certificate: the agent
+// authenticates with the still-valid certificate and submits a CSR for the
+// next one (identity comes exclusively from the verified peer certificate).
 func agentRenewMTLS(deps AgentDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
@@ -148,13 +148,13 @@ func agentRenewMTLS(deps AgentDeps) http.HandlerFunc {
 		}
 		var req renewMTLSRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
-			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			http.Error(w, "request body invalid", http.StatusBadRequest)
 			return
 		}
 		certPEM, err := deps.CA.IssueAgentCert(r.Context(), host.ID, []byte(req.CSR))
 		if err != nil {
-			deps.Logger.Error("agent/renew-mtls: ausstellung fehlgeschlagen", "host", host.Name, "error", err)
-			http.Error(w, "csr ungültig", http.StatusBadRequest)
+			deps.Logger.Error("agent/renew-mtls: issuance failed", "host", host.Name, "error", err)
+			http.Error(w, "csr invalid", http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -162,7 +162,7 @@ func agentRenewMTLS(deps AgentDeps) http.HandlerFunc {
 	}
 }
 
-// agentPrincipals liefert die autorisierten Principals für einen lokalen User.
+// agentPrincipals returns the authorized principals for a local user.
 func agentPrincipals(deps AgentDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
@@ -171,12 +171,12 @@ func agentPrincipals(deps AgentDeps) http.HandlerFunc {
 		}
 		localUser := r.URL.Query().Get("user")
 		if localUser == "" {
-			http.Error(w, "query-parameter user fehlt", http.StatusBadRequest)
+			http.Error(w, "query parameter user missing", http.StatusBadRequest)
 			return
 		}
 		principals, err := deps.Hosts.ListAuthorizedPrincipals(r.Context(), host.ID, localUser)
 		if err != nil {
-			deps.Logger.Error("agent/principals: abfrage fehlgeschlagen", "host", host.Name, "user", localUser, "error", err)
+			deps.Logger.Error("agent/principals: query failed", "host", host.Name, "user", localUser, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -185,7 +185,7 @@ func agentPrincipals(deps AgentDeps) http.HandlerFunc {
 	}
 }
 
-// agentSessions nimmt einen Batch Session-/sudo-Events aus dem Agent-Spool an.
+// agentSessions accepts a batch of session/sudo events from the agent spool.
 func agentSessions(deps AgentDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, ok := agentHost(w, r, deps)
@@ -194,15 +194,15 @@ func agentSessions(deps AgentDeps) http.HandlerFunc {
 		}
 		var req sessionsRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			http.Error(w, "request body invalid", http.StatusBadRequest)
 			return
 		}
-		// Fehler je Event werden geloggt, aber der Batch wird bestätigt: der
-		// Agent räumt den Spool nur bei HTTP-200. Ein fehlerhaftes Einzelevent
-		// darf den gesamten Batch nicht dauerhaft blockieren.
+		// Errors per event are logged, but the batch is acknowledged: the
+		// agent only clears the spool on HTTP 200. A single bad event must
+		// not permanently block the whole batch.
 		for i := range req.Events {
 			if err := ingestSessionEvent(r.Context(), deps.Sessions, host, req.Events[i]); err != nil {
-				deps.Logger.Error("agent/sessions: event verwerfen",
+				deps.Logger.Error("agent/sessions: discarding event",
 					"host", host.Name, "service", req.Events[i].Service,
 					"phase", req.Events[i].Phase, "error", err)
 			}
@@ -211,7 +211,7 @@ func agentSessions(deps AgentDeps) http.HandlerFunc {
 	}
 }
 
-// agentBundleUser liefert das User-CA-Bundle für die sshd-Konfiguration.
+// agentBundleUser returns the user CA bundle for the sshd configuration.
 func agentBundleUser(deps AgentDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := agentHost(w, r, deps); !ok {
@@ -219,7 +219,7 @@ func agentBundleUser(deps AgentDeps) http.HandlerFunc {
 		}
 		bundle, err := deps.CA.Bundle(r.Context(), store.CertTypeUser)
 		if err != nil {
-			deps.Logger.Error("agent/bundle: laden fehlgeschlagen", "error", err)
+			deps.Logger.Error("agent/bundle: loading failed", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -228,9 +228,8 @@ func agentBundleUser(deps AgentDeps) http.HandlerFunc {
 	}
 }
 
-// ingestSessionEvent bildet ein gemeldetes Ereignis auf die passende
-// Store-Methode ab. Unbekannte Kombinationen (z. B. sudo-close) werden
-// stillschweigend verworfen.
+// ingestSessionEvent maps a reported event onto the matching store method.
+// Unknown combinations (e.g. sudo-close) are silently discarded.
 func ingestSessionEvent(ctx context.Context, sessions SessionStore, host *store.Host, ev sessionEvent) error {
 	e := store.SessionEvent{
 		HostID:     host.ID,
@@ -259,31 +258,31 @@ func ingestSessionEvent(ctx context.Context, sessions SessionStore, host *store.
 	}
 }
 
-// agentHost ermittelt den aufrufenden Host aus dem mTLS-Client-Zertifikat
-// (CN = Host-UUID) und stempelt last_seen_at. Schreibt bei Fehlern selbst
-// die HTTP-Antwort.
+// agentHost determines the calling host from the mTLS client certificate
+// (CN = host UUID) and stamps last_seen_at. Writes the HTTP response itself
+// on errors.
 func agentHost(w http.ResponseWriter, r *http.Request, deps AgentDeps) (*store.Host, bool) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "client-zertifikat fehlt", http.StatusUnauthorized)
+		http.Error(w, "client certificate missing", http.StatusUnauthorized)
 		return nil, false
 	}
 	hostID, err := uuid.Parse(r.TLS.PeerCertificates[0].Subject.CommonName)
 	if err != nil {
-		http.Error(w, "client-zertifikat ohne host-id", http.StatusUnauthorized)
+		http.Error(w, "client certificate without host id", http.StatusUnauthorized)
 		return nil, false
 	}
 	host, err := deps.Hosts.GetHost(r.Context(), hostID)
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "host unbekannt", http.StatusUnauthorized)
+		http.Error(w, "host unknown", http.StatusUnauthorized)
 		return nil, false
 	}
 	if err != nil {
-		deps.Logger.Error("agent: host laden fehlgeschlagen", "host_id", hostID, "error", err)
+		deps.Logger.Error("agent: loading host failed", "host_id", hostID, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return nil, false
 	}
 	if err := deps.Hosts.TouchHostLastSeen(r.Context(), host.ID); err != nil {
-		deps.Logger.Warn("agent: last_seen aktualisieren fehlgeschlagen", "host", host.Name, "error", err)
+		deps.Logger.Warn("agent: updating last_seen failed", "host", host.Name, "error", err)
 	} else {
 		metrics.AgentHeartbeats.Inc()
 	}

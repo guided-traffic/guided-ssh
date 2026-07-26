@@ -22,11 +22,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// hostCertValidity ist die Laufzeit der Test-Host-Zertifikate (wie Policy: 30 d).
+// hostCertValidity is the validity period of test host certificates (like
+// the policy: 30 d).
 const hostCertValidity = 30 * 24 * time.Hour
 
-// testSignedHostCert baut ein signiertes Host-Zertifikat, dessen Laufzeit
-// bereits um elapsed fortgeschritten ist.
+// testSignedHostCert builds a signed host certificate whose validity has
+// already advanced by elapsed.
 func testSignedHostCert(t *testing.T, elapsed time.Duration) string {
 	validFor := hostCertValidity
 	t.Helper()
@@ -52,8 +53,8 @@ func testSignedHostCert(t *testing.T, elapsed time.Duration) string {
 		CertType:        ssh.HostCert,
 		KeyId:           "host:test",
 		ValidPrincipals: []string{"test"},
-		ValidAfter:      uint64(validAfter.Unix()),               //nolint:gosec // Unix-Zeit nach 1970
-		ValidBefore:     uint64(validAfter.Add(validFor).Unix()), //nolint:gosec // dito
+		ValidAfter:      uint64(validAfter.Unix()),               //nolint:gosec // unix time after 1970
+		ValidBefore:     uint64(validAfter.Add(validFor).Unix()), //nolint:gosec // same
 	}
 	if err := cert.SignCert(rand.Reader, signer); err != nil {
 		t.Fatal(err)
@@ -61,7 +62,7 @@ func testSignedHostCert(t *testing.T, elapsed time.Duration) string {
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert)))
 }
 
-// fakeAPI implementiert agentAPI in-memory.
+// fakeAPI implements agentAPI in-memory.
 type fakeAPI struct {
 	principals    map[string][]string
 	principalsErr error
@@ -113,7 +114,7 @@ func (f *fakeAPI) sentSessions() []sessionEventWire {
 	return append([]sessionEventWire(nil), f.sessions...)
 }
 
-// newTestDaemon baut einen Daemon mit Fake-API und Temp-Verzeichnissen.
+// newTestDaemon builds a Daemon with a fake API and temp directories.
 func newTestDaemon(t *testing.T, api agentAPI) *Daemon {
 	t.Helper()
 	stateDir := t.TempDir()
@@ -160,23 +161,23 @@ func TestConfigRoundtrip(t *testing.T) {
 		t.Errorf("roundtrip: %+v", loaded)
 	}
 	if time.Duration(loaded.BundleInterval) != defaultBundleInterval {
-		t.Errorf("default fehlt: %v", loaded.BundleInterval)
+		t.Errorf("default missing: %v", loaded.BundleInterval)
 	}
 }
 
-func TestLoadConfigFehlt(t *testing.T) {
+func TestLoadConfigMissing(t *testing.T) {
 	if _, err := LoadConfig(t.TempDir()); err == nil {
-		t.Fatal("fehler erwartet")
+		t.Fatal("expected error")
 	}
 }
 
-func TestLoadConfigUnvollstaendig(t *testing.T) {
+func TestLoadConfigIncomplete(t *testing.T) {
 	stateDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stateDir, "config.yaml"), []byte("host_id: x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadConfig(stateDir); err == nil || !strings.Contains(err.Error(), "unvollständig") {
-		t.Fatalf("unvollständig-fehler erwartet, bekam %v", err)
+	if _, err := LoadConfig(stateDir); err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("expected incomplete error, got %v", err)
 	}
 }
 
@@ -191,31 +192,31 @@ func TestNeedsRenewal(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pub")
 
-	// Keine Datei ⇒ erneuern.
+	// No file ⇒ renew.
 	if !needsRenewal(certPath, time.Now()) {
-		t.Error("fehlende datei muss erneuerung auslösen")
+		t.Error("missing file must trigger renewal")
 	}
-	// Müll ⇒ erneuern.
-	_ = os.WriteFile(certPath, []byte("müll"), 0o600)
+	// Garbage ⇒ renew.
+	_ = os.WriteFile(certPath, []byte("garbage"), 0o600)
 	if !needsRenewal(certPath, time.Now()) {
-		t.Error("unparsebares zertifikat muss erneuerung auslösen")
+		t.Error("unparsable certificate must trigger renewal")
 	}
-	// Frisch (10 % verstrichen) ⇒ nicht erneuern.
+	// Fresh (10% elapsed) ⇒ do not renew.
 	_ = os.WriteFile(certPath, []byte(testSignedHostCert(t, 3*24*time.Hour)), 0o600)
 	if needsRenewal(certPath, time.Now()) {
-		t.Error("frisches zertifikat darf nicht erneuert werden")
+		t.Error("fresh certificate must not be renewed")
 	}
-	// 80 % verstrichen ⇒ erneuern.
+	// 80% elapsed ⇒ renew.
 	_ = os.WriteFile(certPath, []byte(testSignedHostCert(t, 24*24*time.Hour)), 0o600)
 	if !needsRenewal(certPath, time.Now()) {
-		t.Error("2/3 laufzeit überschritten muss erneuerung auslösen")
+		t.Error("2/3 of validity exceeded must trigger renewal")
 	}
 }
 
 func TestRenewIfNeeded(t *testing.T) {
 	api := &fakeAPI{renewCert: testSignedHostCert(t, 0)}
 	d := newTestDaemon(t, api)
-	// Host-Key anlegen (Renew schickt ihn an die API).
+	// Create the host key (Renew sends it to the API).
 	_ = os.WriteFile(d.cfg.SSHKeyPath, []byte("ssh-ed25519 AAAA host"), 0o600)
 
 	d.renewIfNeeded(context.Background())
@@ -224,12 +225,12 @@ func TestRenewIfNeeded(t *testing.T) {
 	}
 	raw, err := os.ReadFile(HostCertPath(d.cfg.SSHKeyPath))
 	if err != nil || !strings.HasPrefix(string(raw), "ssh-ed25519-cert") {
-		t.Fatalf("zertifikat nicht geschrieben: %v %q", err, raw)
+		t.Fatalf("certificate not written: %v %q", err, raw)
 	}
-	// Zweiter Lauf: Zertifikat frisch ⇒ kein weiterer Call.
+	// Second run: certificate fresh ⇒ no further call.
 	d.renewIfNeeded(context.Background())
 	if api.renewCalls.Load() != 1 {
-		t.Errorf("frisches zertifikat erneut erneuert (calls=%d)", api.renewCalls.Load())
+		t.Errorf("fresh certificate renewed again (calls=%d)", api.renewCalls.Load())
 	}
 }
 
@@ -242,51 +243,51 @@ func TestRefreshBundle(t *testing.T) {
 	if err != nil || string(raw) != api.bundle {
 		t.Fatalf("bundle: %v %q", err, raw)
 	}
-	// Unverändert ⇒ kein Rewrite nötig (nur API-Call zählt hoch).
+	// Unchanged ⇒ no rewrite needed (only the API call counts up).
 	d.refreshBundle(context.Background())
 	if api.bundleCalls.Load() != 2 {
 		t.Errorf("bundleCalls = %d", api.bundleCalls.Load())
 	}
 }
 
-func TestPrincipalsCacheUndFailClosed(t *testing.T) {
+func TestPrincipalsCacheAndFailClosed(t *testing.T) {
 	api := &fakeAPI{principals: map[string][]string{"deploy": {"alice", "alice@example.com"}}}
 	d := newTestDaemon(t, api)
 	ctx := context.Background()
 
-	// Erster Abruf: von der API, wird gecacht + persistiert.
+	// First fetch: from the API, gets cached + persisted.
 	got, err := d.principals(ctx, "deploy")
 	if err != nil || len(got) != 2 {
 		t.Fatalf("principals: %v %v", got, err)
 	}
 	if _, err := os.Stat(d.paths.CacheFile()); err != nil {
-		t.Errorf("cache nicht persistiert: %v", err)
+		t.Errorf("cache not persisted: %v", err)
 	}
 
-	// API fällt aus: frischer Cache (innerhalb TTL) trägt weiter.
+	// API goes down: fresh cache (within TTL) keeps serving.
 	api.principalsErr = errors.New("api down")
 	got, err = d.principals(ctx, "deploy")
 	if err != nil || len(got) != 2 {
-		t.Fatalf("cache-fallback: %v %v", got, err)
+		t.Fatalf("cache fallback: %v %v", got, err)
 	}
 
-	// Cache abgelaufen ⇒ fail-closed.
+	// Cache expired ⇒ fail-closed.
 	d.mu.Lock()
 	entry := d.cache["deploy"]
 	entry.FetchedAt = time.Now().Add(-time.Duration(d.cfg.CacheTTL) - time.Minute)
 	d.cache["deploy"] = entry
 	d.mu.Unlock()
 	if _, err := d.principals(ctx, "deploy"); err == nil {
-		t.Fatal("fail-closed erwartet (cache abgelaufen, api down)")
+		t.Fatal("expected fail-closed (cache expired, api down)")
 	}
 
-	// Unbekannter user ohne Cache ⇒ fail-closed.
+	// Unknown user without a cache ⇒ fail-closed.
 	if _, err := d.principals(ctx, "root"); err == nil {
-		t.Fatal("fail-closed erwartet (kein cache)")
+		t.Fatal("expected fail-closed (no cache)")
 	}
 }
 
-func TestDaemonSocketUndHelper(t *testing.T) {
+func TestDaemonSocketAndHelper(t *testing.T) {
 	api := &fakeAPI{
 		principals: map[string][]string{"deploy": {"alice"}},
 		bundle:     "ssh-ed25519 AAAA ca\n",
@@ -294,7 +295,7 @@ func TestDaemonSocketUndHelper(t *testing.T) {
 	}
 	d := newTestDaemon(t, api)
 	_ = os.WriteFile(d.cfg.SSHKeyPath, []byte("ssh-ed25519 AAAA host"), 0o600)
-	// Config auf Platte, damit der Helper sie laden kann.
+	// Config on disk so the helper can load it.
 	if err := writeConfig(d.paths, d.cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestDaemonSocketUndHelper(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- d.Run(ctx) }()
 
-	// Warten bis Socket antwortet.
+	// Wait until the socket responds.
 	waitForSocket(t, d.cfg.SocketPath)
 
 	var stdout bytes.Buffer
@@ -314,14 +315,14 @@ func TestDaemonSocketUndHelper(t *testing.T) {
 		t.Errorf("stdout = %q", stdout.String())
 	}
 
-	// Fail-closed über den Helper: unbekannter User, API down.
+	// Fail-closed via the helper: unknown user, API down.
 	api.principalsErr = errors.New("api down")
 	var out2 bytes.Buffer
 	if err := PrintPrincipals(ctx, d.paths.StateDir, "root", 0, "", &out2); err == nil {
-		t.Fatal("fail-closed erwartet")
+		t.Fatal("expected fail-closed")
 	}
 	if out2.Len() != 0 {
-		t.Errorf("fail-closed darf nichts ausgeben: %q", out2.String())
+		t.Errorf("fail-closed must not output anything: %q", out2.String())
 	}
 
 	cancel()
@@ -330,12 +331,12 @@ func TestDaemonSocketUndHelper(t *testing.T) {
 	}
 }
 
-func TestPrintPrincipalsOhneDaemon(t *testing.T) {
+func TestPrintPrincipalsWithoutDaemon(t *testing.T) {
 	stateDir := t.TempDir()
 	cfg := &Config{
 		AgentURL: "https://x", HostID: "id", HostName: "h",
 		SSHKeyPath: "/etc/ssh/k.pub",
-		SocketPath: filepath.Join(stateDir, "fehlt.sock"),
+		SocketPath: filepath.Join(stateDir, "missing.sock"),
 	}
 	cfg.applyDefaults(Paths{StateDir: stateDir})
 	if err := writeConfig(Paths{StateDir: stateDir}, cfg); err != nil {
@@ -343,17 +344,17 @@ func TestPrintPrincipalsOhneDaemon(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	if err := PrintPrincipals(context.Background(), stateDir, "deploy", 0, "", &stdout); err == nil {
-		t.Fatal("fehler erwartet (daemon läuft nicht)")
+		t.Fatal("expected error (daemon not running)")
 	}
 }
 
-func TestPrintPrincipalsOhneUser(t *testing.T) {
+func TestPrintPrincipalsWithoutUser(t *testing.T) {
 	if err := PrintPrincipals(context.Background(), t.TempDir(), "", 0, "", io.Discard); err == nil {
-		t.Fatal("fehler erwartet (user fehlt)")
+		t.Fatal("expected error (missing user)")
 	}
 }
 
-// waitForSocket pollt bis der Daemon-Socket antwortet.
+// waitForSocket polls until the daemon socket responds.
 func waitForSocket(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -363,45 +364,45 @@ func waitForSocket(t *testing.T, path string) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("daemon-socket kam nicht hoch")
+	t.Fatal("daemon socket did not come up")
 }
 
 func TestRunCLI(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, nil); got != 2 {
-		t.Errorf("ohne args = %d", got)
+		t.Errorf("no args = %d", got)
 	}
-	if got := Run(&stdout, &stderr, []string{"gibtsnicht"}); got != 2 {
-		t.Errorf("unbekannt = %d", got)
+	if got := Run(&stdout, &stderr, []string{"doesnotexist"}); got != 2 {
+		t.Errorf("unknown = %d", got)
 	}
 	stdout.Reset()
 	if got := Run(&stdout, &stderr, []string{"version"}); got != 0 || !strings.Contains(stdout.String(), "guided-ssh") {
 		t.Errorf("version = %d %q", got, stdout.String())
 	}
 	stdout.Reset()
-	if got := Run(&stdout, &stderr, []string{"help"}); got != 0 || !strings.Contains(stdout.String(), "kommandos") {
+	if got := Run(&stdout, &stderr, []string{"help"}); got != 0 || !strings.Contains(stdout.String(), "commands") {
 		t.Errorf("help = %d", got)
 	}
-	if got := Run(&stdout, &stderr, []string{"enroll", "--gibtsnicht"}); got != 2 {
-		t.Errorf("enroll flag-fehler = %d", got)
+	if got := Run(&stdout, &stderr, []string{"enroll", "--doesnotexist"}); got != 2 {
+		t.Errorf("enroll flag error = %d", got)
 	}
 	if got := Run(&stdout, &stderr, []string{"enroll"}); got != 1 {
-		t.Errorf("enroll ohne pflicht-flags = %d", got)
+		t.Errorf("enroll without required flags = %d", got)
 	}
 	if got := Run(&stdout, &stderr, []string{"run", "-state-dir", t.TempDir()}); got != 1 {
-		t.Errorf("run ohne enrollment = %d", got)
+		t.Errorf("run without enrollment = %d", got)
 	}
 	if got := Run(&stdout, &stderr, []string{"principals", "-state-dir", t.TempDir(), "-user", "x"}); got != 1 {
-		t.Errorf("principals ohne enrollment = %d", got)
+		t.Errorf("principals without enrollment = %d", got)
 	}
-	if got := Run(&stdout, &stderr, []string{"enroll", "-tags", "kaputt", "-server", "x", "-agent-url", "y", "-token", "z"}); got != 2 {
-		t.Errorf("kaputte tags = %d", got)
+	if got := Run(&stdout, &stderr, []string{"enroll", "-tags", "broken", "-server", "x", "-agent-url", "y", "-token", "z"}); got != 2 {
+		t.Errorf("broken tags = %d", got)
 	}
 }
 
-// TestEnrollGegenFakeServer: kompletter Enroll-Ablauf gegen einen HTTP-Fake —
-// prüft geschriebene Dateien und Snippet-Inhalt.
-func TestEnrollGegenFakeServer(t *testing.T) {
+// TestEnrollAgainstFakeServer: complete enroll flow against an HTTP fake —
+// checks the written files and snippet content.
+func TestEnrollAgainstFakeServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/enroll" {
 			http.NotFound(w, r)
@@ -444,10 +445,10 @@ func TestEnrollGegenFakeServer(t *testing.T) {
 		t.Fatalf("Enroll: %v", err)
 	}
 
-	// State-Dateien.
+	// State files.
 	for _, f := range []string{"config.yaml", "agent.key", "agent.crt", "server-ca.pem"} {
 		if _, err := os.Stat(filepath.Join(stateDir, f)); err != nil {
-			t.Errorf("%s fehlt: %v", f, err)
+			t.Errorf("%s missing: %v", f, err)
 		}
 	}
 	cfg, err := LoadConfig(stateDir)
@@ -455,9 +456,9 @@ func TestEnrollGegenFakeServer(t *testing.T) {
 		t.Errorf("config: %+v %v", cfg, err)
 	}
 
-	// sshd-Dateien.
+	// sshd files.
 	if _, err := os.Stat(HostCertPath(keyPath)); err != nil {
-		t.Errorf("host-zertifikat fehlt: %v", err)
+		t.Errorf("host certificate missing: %v", err)
 	}
 	snippet, err := os.ReadFile(SnippetPath(sshDir))
 	if err != nil {
@@ -465,27 +466,27 @@ func TestEnrollGegenFakeServer(t *testing.T) {
 	}
 	for _, want := range []string{"TrustedUserCAKeys", "HostCertificate", "AuthorizedPrincipalsCommand", "principals -state-dir " + stateDir} {
 		if !strings.Contains(string(snippet), want) {
-			t.Errorf("snippet ohne %q:\n%s", want, snippet)
+			t.Errorf("snippet missing %q:\n%s", want, snippet)
 		}
 	}
 
-	// Falsches Token ⇒ Fehler.
+	// Wrong token ⇒ error.
 	err = Enroll(context.Background(), EnrollOptions{
-		ServerURL: server.URL, AgentURL: "https://gssh:8443", Token: "falsch",
+		ServerURL: server.URL, AgentURL: "https://gssh:8443", Token: "wrong",
 		Hostname: "x", StateDir: t.TempDir(), SSHDir: sshDir, SSHKeyPath: keyPath,
 	}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("403 erwartet, bekam %v", err)
+		t.Fatalf("expected 403, got %v", err)
 	}
 }
 
-func TestEnrollOhneHostKey(t *testing.T) {
+func TestEnrollWithoutHostKey(t *testing.T) {
 	err := Enroll(context.Background(), EnrollOptions{
 		ServerURL: "http://127.0.0.1:1", AgentURL: "https://x", Token: "t",
 		Hostname: "h", StateDir: t.TempDir(), SSHDir: t.TempDir(),
-		SSHKeyPath: filepath.Join(t.TempDir(), "fehlt.pub"),
+		SSHKeyPath: filepath.Join(t.TempDir(), "missing.pub"),
 	}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "ssh-host-key") {
-		t.Fatalf("host-key-fehler erwartet, bekam %v", err)
+		t.Fatalf("expected host-key error, got %v", err)
 	}
 }

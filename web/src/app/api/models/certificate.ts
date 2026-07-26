@@ -7,7 +7,7 @@ export interface Certificate {
   id: string;
 
   /**
-   * Kontext der Ausstellung (SSO-Session, CI-Pipeline-Claims)
+   * Context of issuance (SSO session, CI pipeline claims)
    */
   issuer_context?: {
 };

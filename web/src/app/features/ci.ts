@@ -44,39 +44,39 @@ import { SessionService } from '../core/session.service';
     <div class="page">
       <div class="page-header">
         <div>
-          <h1>CI &amp; Service-Accounts</h1>
-          <div class="page-sub">GitLab-Pipelines: Zugriffsregeln und Projekt-Identitäten</div>
+          <h1>CI &amp; Service Accounts</h1>
+          <div class="page-sub">GitLab pipelines: access rules and project identities</div>
         </div>
         <div>
           <button mat-stroked-button (click)="load()" [disabled]="loading()">
-            <mat-icon svgIcon="refresh" />Aktualisieren
+            <mat-icon svgIcon="refresh" />Refresh
           </button>
           @if (session.isAdmin()) {
             <button mat-flat-button (click)="edit(null)" style="margin-left: 8px">
-              <mat-icon svgIcon="add" />Neue CI-Regel
+              <mat-icon svgIcon="add" />New CI Rule
             </button>
           }
         </div>
       </div>
 
       <mat-tab-group>
-        <mat-tab label="CI-Zugriffsregeln">
+        <mat-tab label="CI Access Rules">
           <div class="glass-panel table-scroll" style="margin-top: 16px">
             @if (loading()) {
               <div class="empty-state"><mat-spinner diameter="28" /></div>
             } @else if (ciGrants().length === 0) {
-              <div class="empty-state">Keine CI-Zugriffsregeln definiert.</div>
+              <div class="empty-state">No CI access rules defined.</div>
             } @else {
               <table mat-table [dataSource]="ciGrants()">
                 <ng-container matColumnDef="project">
-                  <th mat-header-cell *matHeaderCellDef>Projekt / Namespace</th>
+                  <th mat-header-cell *matHeaderCellDef>Project / Namespace</th>
                   <td mat-cell *matCellDef="let g" class="mono">{{ g.project }}</td>
                 </ng-container>
                 <ng-container matColumnDef="conditions">
-                  <th mat-header-cell *matHeaderCellDef>Bedingungen</th>
+                  <th mat-header-cell *matHeaderCellDef>Conditions</th>
                   <td mat-cell *matCellDef="let g">
                     @if (g.protected_only) {
-                      <span class="pill accent">nur geschützte Refs</span>
+                      <span class="pill accent">protected refs only</span>
                     }
                     @if (g.ref_pattern) {
                       <span class="tag-chip">ref={{ g.ref_pattern }}</span>
@@ -85,17 +85,17 @@ import { SessionService } from '../core/session.service';
                       <span class="tag-chip">env={{ g.environment_pattern }}</span>
                     }
                     @if (!g.protected_only && !g.ref_pattern && !g.environment_pattern) {
-                      <span class="dim">alle Refs</span>
+                      <span class="dim">all refs</span>
                     }
                   </td>
                 </ng-container>
                 <ng-container matColumnDef="selector">
-                  <th mat-header-cell *matHeaderCellDef>Host-Selektor</th>
+                  <th mat-header-cell *matHeaderCellDef>Host Selector</th>
                   <td mat-cell *matCellDef="let g">
                     @for (tag of tagList(g.tag_selector); track tag) {
                       <span class="tag-chip">{{ tag }}</span>
                     } @empty {
-                      <span class="pill accent">alle Hosts</span>
+                      <span class="pill accent">all hosts</span>
                     }
                   </td>
                 </ng-container>
@@ -104,17 +104,17 @@ import { SessionService } from '../core/session.service';
                   <td mat-cell *matCellDef="let g" class="mono">{{ g.principals.join(', ') }}</td>
                 </ng-container>
                 <ng-container matColumnDef="validity">
-                  <th mat-header-cell *matHeaderCellDef>Max. Laufzeit</th>
+                  <th mat-header-cell *matHeaderCellDef>Max. Validity</th>
                   <td mat-cell *matCellDef="let g">{{ formatSeconds(g.max_validity_seconds) }}</td>
                 </ng-container>
                 <ng-container matColumnDef="actions">
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let g" style="white-space: nowrap; text-align: right">
                     @if (session.isAdmin()) {
-                      <button mat-icon-button aria-label="Bearbeiten" (click)="edit(g)">
+                      <button mat-icon-button aria-label="Edit" (click)="edit(g)">
                         <mat-icon svgIcon="edit" />
                       </button>
-                      <button mat-icon-button aria-label="Löschen" (click)="remove(g)">
+                      <button mat-icon-button aria-label="Delete" (click)="remove(g)">
                         <mat-icon svgIcon="delete" />
                       </button>
                     }
@@ -127,22 +127,22 @@ import { SessionService } from '../core/session.service';
           </div>
         </mat-tab>
 
-        <mat-tab label="Service-Accounts">
+        <mat-tab label="Service Accounts">
           <div class="glass-panel table-scroll" style="margin-top: 16px">
             @if (loading()) {
               <div class="empty-state"><mat-spinner diameter="28" /></div>
             } @else if (accounts().length === 0) {
               <div class="empty-state">
-                Noch keine Service-Accounts — sie entstehen mit der ersten CI-Ausstellung.
+                No service accounts yet — they are created on the first CI issuance.
               </div>
             } @else {
               <table mat-table [dataSource]="accounts()">
                 <ng-container matColumnDef="name">
-                  <th mat-header-cell *matHeaderCellDef>Projekt</th>
+                  <th mat-header-cell *matHeaderCellDef>Project</th>
                   <td mat-cell *matCellDef="let a" class="mono">{{ a.name }}</td>
                 </ng-container>
                 <ng-container matColumnDef="kind">
-                  <th mat-header-cell *matHeaderCellDef>Typ</th>
+                  <th mat-header-cell *matHeaderCellDef>Type</th>
                   <td mat-cell *matCellDef="let a"><span class="pill muted">{{ a.kind }}</span></td>
                 </ng-container>
                 <ng-container matColumnDef="issuer">
@@ -150,7 +150,7 @@ import { SessionService } from '../core/session.service';
                   <td mat-cell *matCellDef="let a" class="dim mono">{{ a.issuer }}</td>
                 </ng-container>
                 <ng-container matColumnDef="active">
-                  <th mat-header-cell *matHeaderCellDef>Aktiv (Not-Aus)</th>
+                  <th mat-header-cell *matHeaderCellDef>Active (kill switch)</th>
                   <td mat-cell *matCellDef="let a">
                     <mat-slide-toggle
                       [checked]="a.active"
@@ -209,13 +209,13 @@ export class CiPage implements OnInit {
   }
 
   remove(grant: CiGrant): void {
-    if (!confirm(`CI-Regel für „${grant.project}“ wirklich löschen?`)) {
+    if (!confirm(`Really delete the CI rule for "${grant.project}"?`)) {
       return;
     }
     this.api
       .invoke(deleteCiGrant, { id: grant.id })
       .then(() => this.load())
-      .catch(() => this.snackBar.open('Löschen fehlgeschlagen', 'OK', { duration: 4000 }));
+      .catch(() => this.snackBar.open('Delete failed', 'OK', { duration: 4000 }));
   }
 
   toggle(account: ServiceAccount, active: boolean): void {
@@ -226,7 +226,7 @@ export class CiPage implements OnInit {
         this.accounts.update((list) => list.map((a) => (a.id === updated.id ? updated : a))),
       )
       .catch(() => {
-        this.snackBar.open('Umschalten fehlgeschlagen', 'OK', { duration: 4000 });
+        this.snackBar.open('Toggle failed', 'OK', { duration: 4000 });
         this.load();
       })
       .finally(() => this.toggling.set(''));
@@ -244,42 +244,42 @@ export class CiPage implements OnInit {
     MatButtonModule,
   ],
   template: `
-    <h2 mat-dialog-title>{{ grant ? 'CI-Regel bearbeiten' : 'Neue CI-Regel' }}</h2>
+    <h2 mat-dialog-title>{{ grant ? 'Edit CI Rule' : 'New CI Rule' }}</h2>
     <mat-dialog-content>
       <div class="dialog-form">
         <mat-form-field appearance="outline">
-          <mat-label>GitLab-Projekt oder Namespace</mat-label>
+          <mat-label>GitLab project or namespace</mat-label>
           <input matInput [(ngModel)]="project" [disabled]="grant !== null" placeholder="infra/ansible" required />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Ref-Pattern (Glob, leer = alle)</mat-label>
+          <mat-label>Ref pattern (glob, empty = all)</mat-label>
           <input matInput [(ngModel)]="refPattern" placeholder="main" />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Environment-Pattern (Glob, leer = alle)</mat-label>
+          <mat-label>Environment pattern (glob, empty = all)</mat-label>
           <input matInput [(ngModel)]="environmentPattern" placeholder="production" />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Host-Tag-Selektor (key=value, …)</mat-label>
+          <mat-label>Host tag selector (key=value, …)</mat-label>
           <input matInput [(ngModel)]="tagSelector" placeholder="env=prod" />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Principals (Komma-getrennt)</mat-label>
+          <mat-label>Principals (comma-separated)</mat-label>
           <input matInput [(ngModel)]="principals" placeholder="deploy" required />
         </mat-form-field>
         <mat-form-field appearance="outline">
-          <mat-label>Maximale Laufzeit (Minuten)</mat-label>
+          <mat-label>Maximum validity (minutes)</mat-label>
           <input matInput type="number" min="1" [(ngModel)]="validityMinutes" required />
         </mat-form-field>
-        <mat-checkbox [(ngModel)]="protectedOnly">nur geschützte Refs (ref_protected)</mat-checkbox>
+        <mat-checkbox [(ngModel)]="protectedOnly">protected refs only (ref_protected)</mat-checkbox>
         @if (error()) {
           <div class="pill danger">{{ error() }}</div>
         }
       </div>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Abbrechen</button>
-      <button mat-flat-button (click)="save()" [disabled]="saving()">Speichern</button>
+      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-flat-button (click)="save()" [disabled]="saving()">Save</button>
     </mat-dialog-actions>
   `,
   styles: `
@@ -335,11 +335,11 @@ export class CiGrantDialog {
       return;
     }
     if (!this.grant && !body.project) {
-      this.error.set('Projekt fehlt');
+      this.error.set('Project is missing');
       return;
     }
     if (body.principals.length === 0) {
-      this.error.set('Mindestens ein Principal erforderlich');
+      this.error.set('At least one principal is required');
       return;
     }
     this.saving.set(true);
@@ -348,7 +348,7 @@ export class CiGrantDialog {
       : this.api.invoke(createCiGrant, { body });
     call
       .then(() => this.ref.close(true))
-      .catch(() => this.error.set('Speichern fehlgeschlagen'))
+      .catch(() => this.error.set('Save failed'))
       .finally(() => this.saving.set(false));
   }
 }

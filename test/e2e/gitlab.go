@@ -12,10 +12,10 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 )
 
-// gitlabFake hält den RSA-Schlüssel des simulierten GitLab-OIDC-Issuers.
-// Discovery + JWKS liegen als statisches JSON im Cluster (nginx); die
-// Job-Tokens signiert die Suite lokal — exakt das Muster des
-// Phase-7-Integrationstests, nur mit In-Cluster-Issuer-URL.
+// gitlabFake holds the RSA key of the simulated GitLab OIDC issuer.
+// Discovery + JWKS live as static JSON in the cluster (nginx); the suite
+// signs job tokens locally — exactly the pattern of the Phase 7 integration
+// test, just with an in-cluster issuer URL.
 type gitlabFake struct {
 	issuer string
 	key    *rsa.PrivateKey
@@ -29,7 +29,7 @@ func newGitLabFake(issuer string) (*gitlabFake, error) {
 	return &gitlabFake{issuer: issuer, key: key}, nil
 }
 
-// discoveryJSON liefert das OIDC-Discovery-Dokument.
+// discoveryJSON returns the OIDC discovery document.
 func (g *gitlabFake) discoveryJSON() string {
 	doc, _ := json.Marshal(map[string]any{
 		"issuer":                                g.issuer,
@@ -41,7 +41,7 @@ func (g *gitlabFake) discoveryJSON() string {
 	return string(doc)
 }
 
-// jwksJSON liefert den öffentlichen Schlüssel als JWKS.
+// jwksJSON returns the public key as a JWKS.
 func (g *gitlabFake) jwksJSON() string {
 	doc, _ := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
 		Key: &g.key.PublicKey, KeyID: "gitlab-key", Algorithm: "RS256", Use: "sig",
@@ -49,7 +49,7 @@ func (g *gitlabFake) jwksJSON() string {
 	return string(doc)
 }
 
-// jobToken signiert ein GitLab-Job-Token; overrides überschreibt Claims.
+// jobToken signs a GitLab job token; overrides overwrites claims.
 func (g *gitlabFake) jobToken(overrides map[string]any) (string, error) {
 	claims := map[string]any{
 		"iss":            g.issuer,

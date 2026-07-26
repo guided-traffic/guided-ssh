@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// startSocketServer serviert den Daemon-Socket-Handler auf dem konfigurierten
-// Unix-Socket (wie Daemon.Run, aber ohne Renew-/Bundle-Schleifen).
+// startSocketServer serves the daemon socket handler on the configured unix
+// socket (like Daemon.Run, but without the renew/bundle loops).
 func startSocketServer(t *testing.T, d *Daemon) {
 	t.Helper()
 	listener, err := net.Listen("unix", d.cfg.SocketPath)
@@ -24,8 +24,8 @@ func startSocketServer(t *testing.T, d *Daemon) {
 	t.Cleanup(func() { _ = server.Close() })
 }
 
-// TestRunPAMSessionRoundtrip deckt den kompletten pam_exec-Pfad ab: PAM-Env →
-// RunPAMSession → Token-geschützter Daemon-Socket → Spool.
+// TestRunPAMSessionRoundtrip covers the complete pam_exec path: PAM env →
+// RunPAMSession → token-protected daemon socket → spool.
 func TestRunPAMSessionRoundtrip(t *testing.T) {
 	d := newTestDaemon(t, &fakeAPI{})
 	enableAudit(d)
@@ -51,26 +51,26 @@ func TestRunPAMSessionRoundtrip(t *testing.T) {
 
 	raw, err := os.ReadFile(d.paths.SpoolFile())
 	if err != nil {
-		t.Fatalf("spool lesen: %v", err)
+		t.Fatalf("reading spool: %v", err)
 	}
 	for _, want := range []string{"deploy", "sshd", "192.0.2.1", "open"} {
 		if !strings.Contains(string(raw), want) {
-			t.Errorf("spool ohne %q: %s", want, raw)
+			t.Errorf("spool missing %q: %s", want, raw)
 		}
 	}
 }
 
-// Ohne Socket-Token (Session-Audit aus) ist der Hook ein No-op.
-func TestRunPAMSessionOhneAudit(t *testing.T) {
+// Without a socket token (session audit off), the hook is a no-op.
+func TestRunPAMSessionWithoutAudit(t *testing.T) {
 	stateDir := t.TempDir()
 	env := envFrom(map[string]string{"PAM_TYPE": "open_session", "PAM_SERVICE": "sshd", "PAM_USER": "deploy"})
 	if err := RunPAMSession(context.Background(), stateDir, env, time.Now); err != nil {
-		t.Fatalf("ohne audit: %v", err)
+		t.Fatalf("without audit: %v", err)
 	}
 }
 
-// Unvollständige PAM-Umgebung (kein PAM_USER) sendet nichts — auch mit Token.
-func TestRunPAMSessionUnvollstaendigesEnv(t *testing.T) {
+// An incomplete PAM environment (no PAM_USER) sends nothing — even with a token.
+func TestRunPAMSessionIncompleteEnv(t *testing.T) {
 	d := newTestDaemon(t, &fakeAPI{})
 	enableAudit(d)
 	if err := os.WriteFile(d.paths.SocketTokenFile(), []byte(d.token), 0o600); err != nil {
@@ -78,15 +78,15 @@ func TestRunPAMSessionUnvollstaendigesEnv(t *testing.T) {
 	}
 	env := envFrom(map[string]string{"PAM_TYPE": "open_session", "PAM_SERVICE": "sshd"})
 	if err := RunPAMSession(context.Background(), d.paths.StateDir, env, time.Now); err != nil {
-		t.Fatalf("unvollständiges env: %v", err)
+		t.Fatalf("incomplete env: %v", err)
 	}
 }
 
-// runPAMSessionCmd (CLI) beendet sich immer mit 0 — fail-open, pam_exec darf
-// Login/sudo nie blockieren, selbst ohne Enrollment.
+// runPAMSessionCmd (CLI) always exits 0 — fail-open, pam_exec must never
+// block login/sudo, even without enrollment.
 func TestCLIPAMSessionFailOpen(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"pam-session", "-state-dir", t.TempDir()}); got != 0 {
-		t.Fatalf("pam-session = %d, erwartet 0 (fail-open)", got)
+		t.Fatalf("pam-session = %d, want 0 (fail-open)", got)
 	}
 }

@@ -42,7 +42,7 @@ spec:
     {{- if .Values.networkPolicy.egressAllowAll }}
     - {}
     {{- else }}
-    # DNS immer erlauben
+    # Always allow DNS
     - ports:
         - port: 53
           protocol: UDP

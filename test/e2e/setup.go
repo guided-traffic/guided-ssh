@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// Feste Namen der E2E-Umgebung.
+// Fixed names of the E2E environment.
 const (
 	defaultCluster = "gssh-e2e"
 	namespace      = "guided-ssh-e2e"
@@ -29,7 +29,7 @@ const (
 	alicePassword = "alice-password"
 )
 
-// env ist der geteilte Zustand der Szenarien.
+// env is the shared state of the scenarios.
 type env struct {
 	t        *testing.T
 	tmp      string
@@ -37,8 +37,8 @@ type env struct {
 	cluster  string
 	ns       string
 
-	gsshHost  string // gssh-Binary fürs Host-OS (ci-login)
-	adminHost string // gssh-admin-Binary fürs Host-OS
+	gsshHost  string // gssh binary for the host OS (ci-login)
+	adminHost string // gssh-admin binary for the host OS
 
 	apiPF *portForward
 	dexPF *portForward
@@ -52,7 +52,7 @@ type env struct {
 
 func (e *env) context() string { return "kind-" + e.cluster }
 
-// runWithEnv führt ein Kommando mit zusätzlichen Env-Variablen aus.
+// runWithEnv executes a command with additional env variables.
 func runWithEnv(extraEnv []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), extraEnv...)
@@ -63,8 +63,8 @@ func runWithEnv(extraEnv []string, name string, args ...string) (string, error) 
 	return string(out), nil
 }
 
-// setupEnv baut die komplette E2E-Umgebung auf (kind, Fakes, Helm-Release,
-// Testhosts, Workstation) und liefert den geteilten Zustand.
+// setupEnv builds the complete E2E environment (kind, fakes, Helm release,
+// test hosts, workstation) and returns the shared state.
 func setupEnv(t *testing.T) *env {
 	t.Helper()
 	requireTools(t, "docker", "kind", "kubectl", "helm")
@@ -88,7 +88,7 @@ func setupEnv(t *testing.T) *env {
 	if os.Getenv("E2E_SKIP_BUILD") == "" {
 		e.buildArtifacts()
 	} else {
-		e.hostBinaries() // Host-Binaries sind billig und immer aktuell nötig
+		e.hostBinaries() // host binaries are cheap and always needed up to date
 	}
 	e.ensureCluster()
 	e.loadImages()
@@ -104,7 +104,7 @@ func setupEnv(t *testing.T) *env {
 	return e
 }
 
-// hostBinaries baut gssh und gssh-admin fürs Host-OS (Treiber der Suite).
+// hostBinaries builds gssh and gssh-admin for the host OS (the suite's driver).
 func (e *env) hostBinaries() {
 	e.t.Helper()
 	bin := filepath.Join(e.tmp, "bin")
@@ -114,8 +114,8 @@ func (e *env) hostBinaries() {
 	e.goBuild(e.adminHost, "./cmd/gssh-admin", nil)
 }
 
-// buildArtifacts baut alle Binaries und Docker-Images und lädt sie später
-// via kind in den Cluster.
+// buildArtifacts builds all binaries and Docker images and loads them into
+// the cluster later via kind.
 func (e *env) buildArtifacts() {
 	e.t.Helper()
 	e.hostBinaries()
@@ -132,7 +132,7 @@ func (e *env) buildArtifacts() {
 	e.goBuild(filepath.Join(wsCtx, "gssh"), "./cmd/gssh", linuxEnv)
 	e.dockerBuild(workstationImage, wsCtx, nil)
 
-	// Server-Image über das produktive Dockerfile (inkl. Web-UI-Build).
+	// Server image via the production Dockerfile (including the web UI build).
 	e.dockerBuild(serverImage, e.repoRoot, []string{"--build-arg", "VERSION=e2e"})
 }
 
@@ -150,8 +150,8 @@ func (e *env) dockerBuild(tag, dir string, extraArgs []string) {
 	e.t.Helper()
 	args := append([]string{"build", "-t", tag}, extraArgs...)
 	args = append(args, dir)
-	// DOCKER_BUILDKIT=1: der Legacy-Builder kennt $BUILDPLATFORM nicht und
-	// scheitert am produktiven Dockerfile (FROM --platform=$BUILDPLATFORM).
+	// DOCKER_BUILDKIT=1: the legacy builder does not know $BUILDPLATFORM and
+	// fails on the production Dockerfile (FROM --platform=$BUILDPLATFORM).
 	if out, err := runWithEnv([]string{"DOCKER_BUILDKIT=1"}, "docker", args...); err != nil {
 		e.t.Fatalf("docker build %s: %v\n%s", tag, err, out)
 	}
@@ -177,8 +177,8 @@ func (e *env) copyTestdata(src, dst string) {
 	}
 }
 
-// ensureCluster legt den kind-Cluster an (bzw. nutzt einen vorhandenen) und
-// registriert das Aufräumen (E2E_KEEP=1 lässt ihn stehen).
+// ensureCluster creates the kind cluster (or reuses an existing one) and
+// registers cleanup (E2E_KEEP=1 leaves it running).
 func (e *env) ensureCluster() {
 	e.t.Helper()
 	out, err := run("", "", "kind", "get", "clusters")
@@ -193,7 +193,7 @@ func (e *env) ensureCluster() {
 	}
 	e.t.Cleanup(func() {
 		if os.Getenv("E2E_KEEP") != "" {
-			e.t.Logf("E2E_KEEP gesetzt — cluster %s bleibt stehen", e.cluster)
+			e.t.Logf("E2E_KEEP set — cluster %s stays up", e.cluster)
 			return
 		}
 		_, _ = run("", "", "kind", "delete", "cluster", "--name", e.cluster)
@@ -210,11 +210,11 @@ func (e *env) loadImages() {
 	e.t.Helper()
 	if out, err := run("", "", "kind", "load", "docker-image", "--name", e.cluster,
 		serverImage, testhostImage, workstationImage); err != nil {
-		e.t.Fatalf("kind load (E2E_SKIP_BUILD gesetzt, aber images fehlen lokal?): %v\n%s", err, out)
+		e.t.Fatalf("kind load (E2E_SKIP_BUILD set, but images missing locally?): %v\n%s", err, out)
 	}
 }
 
-// applyConfigMap erzeugt/aktualisiert eine ConfigMap aus Datei-Inhalten.
+// applyConfigMap creates/updates a ConfigMap from file contents.
 func (e *env) applyConfigMap(name string, files map[string]string) {
 	e.t.Helper()
 	dir := filepath.Join(e.tmp, "cm-"+name)
@@ -233,16 +233,16 @@ func (e *env) applyConfigMap(name string, files map[string]string) {
 	e.applyYAML(manifest)
 }
 
-// deployInfra bringt Namespace, Postgres, GLAuth, Dex, das simulierte
-// GitLab-OIDC und das Pflicht-Secret in den Cluster.
+// deployInfra brings the namespace, Postgres, GLAuth, Dex, the simulated
+// GitLab OIDC, and the required secret into the cluster.
 func (e *env) deployInfra() {
 	e.t.Helper()
 	e.applyYAML("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: " + e.ns + "\n")
 
 	vars := map[string]string{"NS": e.ns}
 
-	// Simuliertes GitLab-OIDC: Schlüssel gehört der Suite, Discovery+JWKS
-	// liegen als statisches JSON hinter nginx.
+	// Simulated GitLab OIDC: the key belongs to the suite, discovery+JWKS
+	// live as static JSON behind nginx.
 	gitlab, err := newGitLabFake("http://gitlab-fake." + e.ns + ".svc.cluster.local")
 	if err != nil {
 		e.t.Fatal(err)
@@ -268,9 +268,9 @@ func (e *env) deployInfra() {
 	if _, err := rand.Read(masterKey); err != nil {
 		e.t.Fatal(err)
 	}
-	// Postgres-Zugang als einzelne Keys (kein DSN) — dieselbe Struktur, die
-	// das Chart per secrets.db.keys erwartet; ca-master-key liegt im selben
-	// Secret (secrets.db und secrets.ca dürfen auf dasselbe Secret zeigen).
+	// Postgres access as individual keys (no DSN) — the same structure the
+	// chart expects via secrets.db.keys; ca-master-key lives in the same
+	// secret (secrets.db and secrets.ca may point at the same secret).
 	secret := e.mustKubectl("create", "secret", "generic", "guided-ssh-e2e",
 		"--from-literal=host=postgres."+e.ns+".svc.cluster.local",
 		"--from-literal=port=5432",
@@ -287,12 +287,12 @@ func (e *env) deployInfra() {
 	}
 }
 
-// deployServer installiert das produktive Helm-Chart mit E2E-Werten.
+// deployServer installs the production Helm chart with E2E values.
 func (e *env) deployServer() {
 	e.t.Helper()
 	chart := filepath.Join(e.repoRoot, "deploy/helm/guided-ssh")
-	// charts/ ist nicht eingecheckt (.gitignore); das postgresql-Subchart muss
-	// gemäß Chart.lock nachgeladen werden, sonst scheitert der Install.
+	// charts/ is not checked in (.gitignore); the postgresql subchart must
+	// be fetched per Chart.lock, otherwise the install fails.
 	if out, err := run("", "", "helm", "dependency", "build", chart); err != nil {
 		e.t.Fatalf("helm dependency build: %v\n%s", err, out)
 	}
@@ -316,12 +316,12 @@ func (e *env) waitHealthy() {
 	})
 }
 
-// adminToken holt ein frisches ID-Token für alice (Gruppe admins) per
-// Password-Grant über den Dex-Port-Forward.
+// adminToken fetches a fresh ID token for alice (group admins) via password
+// grant over the Dex port-forward.
 func (e *env) adminToken() string {
 	e.t.Helper()
 	var token string
-	e.poll(120*time.Second, "admin-token via dex", func() error {
+	e.poll(120*time.Second, "admin token via dex", func() error {
 		var err error
 		token, err = passwordGrant(e.dexPF.URL(), "alice", alicePassword)
 		return err
@@ -329,7 +329,7 @@ func (e *env) adminToken() string {
 	return token
 }
 
-// adminApply gleicht die Zugriffsregeln deklarativ ab (gssh-admin apply).
+// adminApply reconciles the access rules declaratively (gssh-admin apply).
 func (e *env) adminApply(grantsYAML string) {
 	e.t.Helper()
 	cfg := filepath.Join(e.tmp, "gssh-host-config.yaml")
@@ -352,27 +352,27 @@ func (e *env) adminApply(grantsYAML string) {
 	e.t.Logf("gssh-admin apply:\n%s", out)
 }
 
-// setupTesthost deployt einen sshd-Testhost, enrollt ihn über die echte API
-// und dreht die Agent-Intervalle E2E-tauglich (Cache 30s, Renew-Check 10s).
+// setupTesthost deploys an sshd test host, enrolls it via the real API, and
+// tunes the agent intervals for E2E (cache 30s, renew check 10s).
 func (e *env) setupTesthost(name, fqdn, tags string) {
 	e.t.Helper()
 	e.applyYAML(render(testhostYAML, map[string]string{"NAME": name}))
 	e.mustKubectl("rollout", "status", "deploy/"+name, "--timeout=180s")
 
-	// Der Entrypoint erzeugt erst die SSH-Host-Keys (ssh-keygen -A); das
-	// Enrollment liest sie. "Running" reicht nicht — auf die Marke warten.
+	// The entrypoint first generates the SSH host keys (ssh-keygen -A);
+	// enrollment reads them. "Running" is not enough — wait for the marker.
 	e.poll(60*time.Second, name+" host-keys", func() error {
 		logs, err := e.kubectl("logs", "deploy/"+name)
 		if err != nil {
 			return err
 		}
 		if !strings.Contains(logs, "entrypoint ready") {
-			return fmt.Errorf("host-keys noch nicht erzeugt")
+			return fmt.Errorf("host keys not generated yet")
 		}
 		return nil
 	})
 
-	// Einmal-Token über das Server-Binary im Pod (distroless — kein sh).
+	// One-time token via the server binary in the pod (distroless — no sh).
 	out := e.mustKubectl("exec", "deploy/guided-ssh", "--",
 		"/usr/local/bin/gssh-server", "enroll-token", "-name", fqdn, "-tags", tags, "-ttl", "1h")
 	token := ""
@@ -382,7 +382,7 @@ func (e *env) setupTesthost(name, fqdn, tags string) {
 		}
 	}
 	if token == "" {
-		e.t.Fatalf("kein enroll-token in ausgabe: %s", out)
+		e.t.Fatalf("no enroll-token in output: %s", out)
 	}
 
 	e.mustKubectl("exec", "deploy/"+name, "--",
@@ -392,8 +392,8 @@ func (e *env) setupTesthost(name, fqdn, tags string) {
 		"--token", token,
 		"--hostname", fqdn)
 
-	// Agent-Konfiguration für E2E-Zeitmaße anpassen, dann den Entrypoint
-	// weiterlaufen lassen (startet agentd + sshd).
+	// Adjust the agent configuration for E2E timing, then let the entrypoint
+	// keep running (starts agentd + sshd).
 	e.mustExecPod("deploy/"+name,
 		"sed -i 's/^cache_ttl:.*/cache_ttl: 30s/; s/^renew_interval:.*/renew_interval: 10s/' /var/lib/guided-ssh/config.yaml"+
 			" && printf 'reload_command: kill -HUP 1\\n' >> /var/lib/guided-ssh/config.yaml"+
@@ -403,15 +403,15 @@ func (e *env) setupTesthost(name, fqdn, tags string) {
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(logs, "starte sshd") {
-			return fmt.Errorf("sshd noch nicht gestartet")
+		if !strings.Contains(logs, "starting sshd") {
+			return fmt.Errorf("sshd not started yet")
 		}
 		return nil
 	})
 }
 
-// setupWorkstation startet den "Mensch"-Pod und hinterlegt das
-// CA-verankerte known_hosts (@cert-authority) für striktes Host-Checking.
+// setupWorkstation starts the "human" pod and installs the CA-anchored
+// known_hosts (@cert-authority) for strict host checking.
 func (e *env) setupWorkstation() {
 	e.t.Helper()
 	e.applyConfigMap("gssh-config", map[string]string{
@@ -434,7 +434,7 @@ func (e *env) setupWorkstation() {
 	e.mustExecPod("pod/workstation", "echo "+encoded+" | base64 -d > /root/known_hosts")
 }
 
-// httpGet holt eine URL (optional mit Bearer-Token) und liefert den Body.
+// httpGet fetches a URL (optionally with a bearer token) and returns the body.
 func httpGet(url, bearer string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

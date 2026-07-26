@@ -4,12 +4,12 @@
 export interface GrantRequest {
 
   /**
-   * Pflicht bei POST
+   * Required on POST
    */
   group?: string;
 
   /**
-   * leer ⇒ Issuer des Admin-Tokens
+   * empty ⇒ issuer of the admin token
    */
   issuer?: string;
   max_validity_seconds: number;

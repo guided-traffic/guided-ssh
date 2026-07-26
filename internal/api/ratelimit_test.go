@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// newTestLimiter baut einen Limiter mit steuerbarer Uhr.
+// newTestLimiter builds a limiter with a controllable clock.
 func newTestLimiter(cfg RateLimiterConfig) (*RateLimiter, *time.Time) {
 	l := NewRateLimiter(cfg)
 	now := time.Now()
@@ -15,44 +15,44 @@ func newTestLimiter(cfg RateLimiterConfig) (*RateLimiter, *time.Time) {
 	return l, &now
 }
 
-func TestRateLimitBurstUndRefill(t *testing.T) {
+func TestRateLimitBurstAndRefill(t *testing.T) {
 	l, now := newTestLimiter(RateLimiterConfig{RequestsPerMinute: 60, Burst: 3})
 
 	for i := range 3 {
 		if !l.allow("ip") {
-			t.Fatalf("request %d im burst abgelehnt", i+1)
+			t.Fatalf("request %d rejected within burst", i+1)
 		}
 	}
 	if l.allow("ip") {
-		t.Fatal("request über burst erlaubt")
+		t.Fatal("request beyond burst allowed")
 	}
-	// 60/min ⇒ nach 1 s ist genau ein Token nachgefüllt.
+	// 60/min ⇒ after 1s exactly one token has been refilled.
 	*now = now.Add(time.Second)
 	if !l.allow("ip") {
-		t.Fatal("request nach refill abgelehnt")
+		t.Fatal("request after refill rejected")
 	}
 	if l.allow("ip") {
-		t.Fatal("zweiter request nach einem token erlaubt")
+		t.Fatal("second request after one token allowed")
 	}
 }
 
-func TestRateLimitClientsGetrennt(t *testing.T) {
+func TestRateLimitClientsSeparated(t *testing.T) {
 	l, _ := newTestLimiter(RateLimiterConfig{RequestsPerMinute: 60, Burst: 1})
 	if !l.allow("a") || !l.allow("b") {
-		t.Fatal("clients teilen sich ein budget")
+		t.Fatal("clients share one budget")
 	}
 	if l.allow("a") {
-		t.Fatal("budget von a nicht erschöpft")
+		t.Fatal("a's budget not exhausted")
 	}
 }
 
-func TestRateLimitFailureBudgetSperrt(t *testing.T) {
+func TestRateLimitFailureBudgetBlocks(t *testing.T) {
 	l, now := newTestLimiter(RateLimiterConfig{
-		RequestsPerMinute: 600, Burst: 100, // Request-Budget bewusst großzügig
+		RequestsPerMinute: 600, Burst: 100, // request budget deliberately generous
 		FailuresPerMinute: 60, FailureBurst: 2,
 	})
 	unauthorized := l.limit(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "abgelehnt", http.StatusUnauthorized)
+		http.Error(w, "rejected", http.StatusUnauthorized)
 	})
 
 	status := func() int {
@@ -63,24 +63,24 @@ func TestRateLimitFailureBudgetSperrt(t *testing.T) {
 		return rec.Code
 	}
 
-	// FailureBurst=2: zwei Fehlversuche kommen durch, danach 429 trotz
-	// freiem Request-Budget.
+	// FailureBurst=2: two failed attempts get through, then 429 despite a
+	// free request budget.
 	for i := range 2 {
 		if got := status(); got != http.StatusUnauthorized {
-			t.Fatalf("fehlversuch %d: status %d, erwartet 401", i+1, got)
+			t.Fatalf("failed attempt %d: status %d, expected 401", i+1, got)
 		}
 	}
 	if got := status(); got != http.StatusTooManyRequests {
-		t.Fatalf("nach erschöpftem failure-budget: status %d, erwartet 429", got)
+		t.Fatalf("after exhausted failure budget: status %d, expected 429", got)
 	}
-	// 60 Fehlversuche/min ⇒ nach 1 s ist wieder ein Token da.
+	// 60 failed attempts/min ⇒ after 1s a token is available again.
 	*now = now.Add(time.Second)
 	if got := status(); got != http.StatusUnauthorized {
-		t.Fatalf("nach refill: status %d, erwartet 401", got)
+		t.Fatalf("after refill: status %d, expected 401", got)
 	}
 }
 
-func TestRateLimitErfolgVerbrauchtKeinFailureBudget(t *testing.T) {
+func TestRateLimitSuccessDoesNotConsumeFailureBudget(t *testing.T) {
 	l, _ := newTestLimiter(RateLimiterConfig{
 		RequestsPerMinute: 600, Burst: 100,
 		FailuresPerMinute: 60, FailureBurst: 1,
@@ -94,12 +94,12 @@ func TestRateLimitErfolgVerbrauchtKeinFailureBudget(t *testing.T) {
 		rec := httptest.NewRecorder()
 		okHandler(rec, req)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("erfolgreicher request %d: status %d", i+1, rec.Code)
+			t.Fatalf("successful request %d: status %d", i+1, rec.Code)
 		}
 	}
 }
 
-func TestRateLimitNilLimiterDurchlaessig(t *testing.T) {
+func TestRateLimitNilLimiterPermissive(t *testing.T) {
 	var l *RateLimiter
 	handler := l.limit(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -107,7 +107,7 @@ func TestRateLimitNilLimiterDurchlaessig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("nil-limiter blockiert: status %d", rec.Code)
+		t.Fatalf("nil limiter blocks: status %d", rec.Code)
 	}
 }
 
@@ -120,20 +120,20 @@ func TestClientKey(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "10.0.0.1, 203.0.113.50")
 
 	if got := direct.clientKey(req); got != "198.51.100.9" {
-		t.Errorf("ohne proxy-vertrauen: %q, erwartet remote-addr-host", got)
+		t.Errorf("without proxy trust: %q, expected remote-addr host", got)
 	}
-	// Vertrauenswürdiger Proxy: letzter (vom nächsten Proxy angehängter) Eintrag.
+	// Trusted proxy: last entry (appended by the nearest proxy).
 	if got := proxied.clientKey(req); got != "203.0.113.50" {
-		t.Errorf("mit proxy-vertrauen: %q, erwartet letzten xff-eintrag", got)
+		t.Errorf("with proxy trust: %q, expected last xff entry", got)
 	}
 }
 
-func TestRateLimitMapBleibtBegrenzt(t *testing.T) {
+func TestRateLimitMapStaysBounded(t *testing.T) {
 	l, _ := newTestLimiter(RateLimiterConfig{RequestsPerMinute: 60, Burst: 1})
 	for i := range maxClients + 100 {
 		l.allow(string(rune(i)) + "-client")
 	}
 	if len(l.clients) > maxClients {
-		t.Fatalf("client-map über limit: %d", len(l.clients))
+		t.Fatalf("client map over limit: %d", len(l.clients))
 	}
 }

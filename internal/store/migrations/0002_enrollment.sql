@@ -1,11 +1,11 @@
 -- +goose Up
 
--- Einmalige Enrollment-Tokens (Phase 5): in der DB liegt nur der SHA-256-Hash,
--- das Klartext-Token sieht ausschließlich der Ersteller und der Host.
+-- Single-use enrollment tokens (phase 5): the DB only holds the SHA-256 hash,
+-- the plaintext token is seen only by its creator and the host.
 CREATE TABLE enrollment_tokens (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     token_hash bytea       NOT NULL UNIQUE,
-    -- optional an einen Hostnamen gebunden; NULL = beliebiger Hostname
+    -- optionally bound to a hostname; NULL = any hostname
     host_name  text,
     tags       jsonb       NOT NULL DEFAULT '{}',
     expires_at timestamptz NOT NULL,
@@ -14,8 +14,8 @@ CREATE TABLE enrollment_tokens (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Die mTLS-CA der Host-Agenten (X.509) nutzt dieselbe Key-Tabelle wie die
--- SSH-CAs; public_key enthält dann das CA-Zertifikat als PEM.
+-- The mTLS CA of the host agents (X.509) uses the same key table as the
+-- SSH CAs; public_key then holds the CA certificate as PEM.
 ALTER TABLE ca_keys DROP CONSTRAINT ca_keys_purpose_check;
 ALTER TABLE ca_keys ADD CONSTRAINT ca_keys_purpose_check CHECK (purpose IN ('user', 'host', 'mtls'));
 

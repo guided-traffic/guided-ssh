@@ -13,7 +13,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// CI-Grant-Anteil des fakeAdminStore (Phase 7).
+// CI grant portion of fakeAdminStore (phase 7).
 
 func (f *fakeAdminStore) ListCIGrants(context.Context) ([]store.CIGrant, error) {
 	out := make([]store.CIGrant, 0, len(f.ciGrants))
@@ -34,7 +34,7 @@ func (f *fakeAdminStore) GetCIGrant(_ context.Context, id uuid.UUID) (*store.CIG
 
 func (f *fakeAdminStore) CreateCIGrant(_ context.Context, actor string, g *store.CIGrant) error {
 	if actor == "" {
-		return fmt.Errorf("actor fehlt") //nolint:err113
+		return fmt.Errorf("actor missing") //nolint:err113
 	}
 	g.ID = uuid.New()
 	copied := *g
@@ -73,7 +73,7 @@ func TestAdminCIGrantCRUD(t *testing.T) {
 	srv := newAdminServer(t, fs, admin, &fakeVerifier{token: testToken, claims: adminClaims()}, adminGroupName)
 	base := srv.URL + "/v1/admin/ci-grants"
 
-	// Create: protected_only defaultet auf true.
+	// Create: protected_only defaults to true.
 	status, body := adminCall(t, http.MethodPost, base, testToken, map[string]any{
 		"project":              "infra/ansible",
 		"ref_pattern":          "main",
@@ -90,25 +90,25 @@ func TestAdminCIGrantCRUD(t *testing.T) {
 		ProtectedOnly bool   `json:"protected_only"`
 	}
 	if err := json.Unmarshal(body, &created); err != nil {
-		t.Fatalf("create-antwort: %v", err)
+		t.Fatalf("create response: %v", err)
 	}
 	if created.Project != "infra/ansible" || !created.ProtectedOnly {
 		t.Errorf("create: %+v", created)
 	}
 
-	// List und Get.
+	// List and get.
 	status, body = adminCall(t, http.MethodGet, base, testToken, nil)
 	var list []struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &list); err != nil || status != http.StatusOK || len(list) != 1 {
-		t.Fatalf("list: status %d, %d einträge (%v): %s", status, len(list), err, body)
+		t.Fatalf("list: status %d, %d entries (%v): %s", status, len(list), err, body)
 	}
 	if status, _ = adminCall(t, http.MethodGet, base+"/"+created.ID, testToken, nil); status != http.StatusOK {
 		t.Errorf("get: status %d", status)
 	}
 
-	// Update: protected_only explizit aus, neue principals.
+	// Update: protected_only explicitly off, new principals.
 	status, body = adminCall(t, http.MethodPut, base+"/"+created.ID, testToken, map[string]any{
 		"ref_pattern":          "release/*",
 		"protected_only":       false,
@@ -125,11 +125,11 @@ func TestAdminCIGrantCRUD(t *testing.T) {
 		MaxValiditySeconds int64    `json:"max_validity_seconds"`
 	}
 	if err := json.Unmarshal(body, &updated); err != nil {
-		t.Fatalf("update-antwort: %v", err)
+		t.Fatalf("update response: %v", err)
 	}
 	if updated.RefPattern != "release/*" || updated.ProtectedOnly ||
 		!slices.Equal(updated.Principals, []string{"deploy", "ansible"}) || updated.MaxValiditySeconds != 1800 {
-		t.Errorf("update nicht übernommen: %+v", updated)
+		t.Errorf("update not applied: %+v", updated)
 	}
 
 	// Delete.
@@ -137,11 +137,11 @@ func TestAdminCIGrantCRUD(t *testing.T) {
 		t.Errorf("delete: status %d", status)
 	}
 	if status, _ = adminCall(t, http.MethodGet, base+"/"+created.ID, testToken, nil); status != http.StatusNotFound {
-		t.Errorf("get nach delete: status %d, erwartet 404", status)
+		t.Errorf("get after delete: status %d, expected 404", status)
 	}
 }
 
-func TestAdminCIGrantValidierung(t *testing.T) {
+func TestAdminCIGrantValidation(t *testing.T) {
 	fs := newFakeAuthStore()
 	admin := newFakeAdminStore(fs)
 	srv := newAdminServer(t, fs, admin, &fakeVerifier{token: testToken, claims: adminClaims()}, adminGroupName)
@@ -154,24 +154,24 @@ func TestAdminCIGrantValidierung(t *testing.T) {
 		payload    any
 		wantStatus int
 	}{
-		{"create ohne project", http.MethodPost, base, map[string]any{
+		{"create without project", http.MethodPost, base, map[string]any{
 			"principals": []string{"deploy"}, "max_validity_seconds": 3600,
 		}, http.StatusBadRequest},
-		{"create ohne principals", http.MethodPost, base, map[string]any{
+		{"create without principals", http.MethodPost, base, map[string]any{
 			"project": "x", "max_validity_seconds": 3600,
 		}, http.StatusBadRequest},
-		{"create ohne laufzeit", http.MethodPost, base, map[string]any{
+		{"create without validity", http.MethodPost, base, map[string]any{
 			"project": "x", "principals": []string{"deploy"},
 		}, http.StatusBadRequest},
-		{"kaputter body", http.MethodPost, base, "kein-json", http.StatusBadRequest},
-		{"update unbekannte id", http.MethodPut, base + "/" + uuid.NewString(), map[string]any{
+		{"broken body", http.MethodPost, base, "not-json", http.StatusBadRequest},
+		{"update unknown id", http.MethodPut, base + "/" + uuid.NewString(), map[string]any{
 			"principals": []string{"deploy"}, "max_validity_seconds": 3600,
 		}, http.StatusNotFound},
-		{"delete unbekannte id", http.MethodDelete, base + "/" + uuid.NewString(), nil, http.StatusNotFound},
+		{"delete unknown id", http.MethodDelete, base + "/" + uuid.NewString(), nil, http.StatusNotFound},
 	}
 	for _, c := range cases {
 		if status, body := adminCall(t, c.method, c.url, testToken, c.payload); status != c.wantStatus {
-			t.Errorf("%s: status %d (erwartet %d): %s", c.name, status, c.wantStatus, body)
+			t.Errorf("%s: status %d (expected %d): %s", c.name, status, c.wantStatus, body)
 		}
 	}
 }
@@ -197,16 +197,16 @@ func TestAdminCIApply(t *testing.T) {
 		t.Fatalf("specs = %+v", admin.applyCISpecs)
 	}
 	if admin.applyCISpecs[0].ProjectPath != "infra/ansible" || !admin.applyCISpecs[0].ProtectedOnly {
-		t.Errorf("spec 0 (protected_only muss defaulten): %+v", admin.applyCISpecs[0])
+		t.Errorf("spec 0 (protected_only must default): %+v", admin.applyCISpecs[0])
 	}
 	if admin.applyCISpecs[1].ProtectedOnly {
-		t.Errorf("spec 1 (protected_only explizit false): %+v", admin.applyCISpecs[1])
+		t.Errorf("spec 1 (protected_only explicitly false): %+v", admin.applyCISpecs[1])
 	}
 
-	// Validierungsfehler aus dem Store werden 400.
-	admin.applyErr = fmt.Errorf("%w: prüfung", store.ErrInvalidGrantSpec)
+	// Validation errors from the store become 400.
+	admin.applyErr = fmt.Errorf("%w: check", store.ErrInvalidGrantSpec)
 	if status, _ := adminCall(t, http.MethodPost, srv.URL+"/v1/admin/ci-grants/apply", testToken,
 		map[string]any{"ci_grants": []map[string]any{}}); status != http.StatusBadRequest {
-		t.Errorf("apply-validierung: status %d, erwartet 400", status)
+		t.Errorf("apply validation: status %d, expected 400", status)
 	}
 }

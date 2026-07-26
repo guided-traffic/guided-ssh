@@ -25,7 +25,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// newAgentHandler baut den Agent-Handler mit frischer Test-CA.
+// newAgentHandler builds the agent handler with a fresh test CA.
 func newAgentHandler(t *testing.T, hosts *fakeHostStore) http.Handler {
 	t.Helper()
 	fs := &fakeStore{}
@@ -44,8 +44,8 @@ func newAgentHandler(t *testing.T, hosts *fakeHostStore) http.Handler {
 	return api.NewAgent(api.AgentDeps{CA: certAuthority, Hosts: hosts, Logger: logger})
 }
 
-// agentRequest baut einen Request mit simuliertem mTLS-Client-Zertifikat
-// (CN = Host-ID) — die TLS-Verifikation selbst testet internal/ca.
+// agentRequest builds a request with a simulated mTLS client certificate
+// (CN = host ID) — the TLS verification itself is tested by internal/ca.
 func agentRequest(method, target, body string, hostID string) *http.Request {
 	var reader io.Reader
 	if body != "" {
@@ -60,7 +60,7 @@ func agentRequest(method, target, body string, hostID string) *http.Request {
 	return req
 }
 
-// enrolledHost legt einen Host im Fake-Store an.
+// enrolledHost creates a host in the fake store.
 func enrolledHost(hosts *fakeHostStore) *store.Host {
 	host := &store.Host{ID: uuid.New(), Name: "web1.example.com"}
 	hosts.hosts[host.ID] = host
@@ -83,22 +83,22 @@ func TestAgentRenew(t *testing.T) {
 		ValidBefore time.Time `json:"valid_before"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("antwort: %v", err)
+		t.Fatalf("response: %v", err)
 	}
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.Certificate))
 	if err != nil {
-		t.Fatalf("zertifikat: %v", err)
+		t.Fatalf("certificate: %v", err)
 	}
 	cert := parsed.(*ssh.Certificate)
 	if cert.CertType != ssh.HostCert || cert.ValidPrincipals[0] != "web1.example.com" {
-		t.Errorf("zertifikat falsch: typ=%d principals=%v", cert.CertType, cert.ValidPrincipals)
+		t.Errorf("certificate wrong: type=%d principals=%v", cert.CertType, cert.ValidPrincipals)
 	}
 	if resp.ValidBefore.Before(time.Now().Add(29 * 24 * time.Hour)) {
-		t.Errorf("laufzeit zu kurz: %s", resp.ValidBefore)
+		t.Errorf("validity too short: %s", resp.ValidBefore)
 	}
 }
 
-func TestAgentRenewFehlerfaelle(t *testing.T) {
+func TestAgentRenewErrorCases(t *testing.T) {
 	hosts := newFakeHostStore()
 	host := enrolledHost(hosts)
 	handler := newAgentHandler(t, hosts)
@@ -108,17 +108,17 @@ func TestAgentRenewFehlerfaelle(t *testing.T) {
 		req    *http.Request
 		status int
 	}{
-		{"ohne client-zertifikat", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", ""), http.StatusUnauthorized},
-		{"cn keine uuid", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", "kein-uuid"), http.StatusUnauthorized},
-		{"host unbekannt", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", uuid.NewString()), http.StatusUnauthorized},
-		{"kaputter body", agentRequest(http.MethodPost, "/v1/agent/renew", "kein json", host.ID.String()), http.StatusBadRequest},
-		{"kaputter key", agentRequest(http.MethodPost, "/v1/agent/renew", `{"public_key":"nix"}`, host.ID.String()), http.StatusBadRequest},
+		{"without client certificate", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", ""), http.StatusUnauthorized},
+		{"cn not a uuid", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", "not-a-uuid"), http.StatusUnauthorized},
+		{"host unknown", agentRequest(http.MethodPost, "/v1/agent/renew", "{}", uuid.NewString()), http.StatusUnauthorized},
+		{"broken body", agentRequest(http.MethodPost, "/v1/agent/renew", "not json", host.ID.String()), http.StatusBadRequest},
+		{"broken key", agentRequest(http.MethodPost, "/v1/agent/renew", `{"public_key":"nope"}`, host.ID.String()), http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, tc.req)
 		if rec.Code != tc.status {
-			t.Errorf("%s: status %d, erwartet %d", tc.name, rec.Code, tc.status)
+			t.Errorf("%s: status %d, expected %d", tc.name, rec.Code, tc.status)
 		}
 	}
 }
@@ -148,39 +148,39 @@ func TestAgentRenewMTLS(t *testing.T) {
 		Certificate string `json:"certificate"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("antwort: %v", err)
+		t.Fatalf("response: %v", err)
 	}
 	block, _ := pem.Decode([]byte(resp.Certificate))
 	if block == nil {
-		t.Fatalf("kein pem-zertifikat: %q", resp.Certificate)
+		t.Fatalf("no pem certificate: %q", resp.Certificate)
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		t.Fatalf("zertifikat parsen: %v", err)
+		t.Fatalf("parsing certificate: %v", err)
 	}
-	// Identität kommt aus dem mTLS-Peer-Zertifikat, nie aus dem CSR.
+	// Identity comes from the mTLS peer certificate, never from the CSR.
 	if cert.Subject.CommonName != host.ID.String() {
-		t.Errorf("cn = %q, erwartet host-id", cert.Subject.CommonName)
+		t.Errorf("cn = %q, expected host id", cert.Subject.CommonName)
 	}
 	if len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {
-		t.Errorf("extkeyusage = %v, erwartet clientauth", cert.ExtKeyUsage)
+		t.Errorf("extkeyusage = %v, expected clientauth", cert.ExtKeyUsage)
 	}
 
-	// Fehlerfälle: kaputter Body, kaputter CSR, ohne Client-Zertifikat.
+	// Error cases: broken body, broken CSR, without client certificate.
 	cases := []struct {
 		name   string
 		req    *http.Request
 		status int
 	}{
-		{"kaputter body", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", "kein json", host.ID.String()), http.StatusBadRequest},
-		{"kaputter csr", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", `{"csr":"nix"}`, host.ID.String()), http.StatusBadRequest},
-		{"ohne client-zertifikat", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", string(body), ""), http.StatusUnauthorized},
+		{"broken body", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", "not json", host.ID.String()), http.StatusBadRequest},
+		{"broken csr", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", `{"csr":"nope"}`, host.ID.String()), http.StatusBadRequest},
+		{"without client certificate", agentRequest(http.MethodPost, "/v1/agent/renew-mtls", string(body), ""), http.StatusUnauthorized},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, tc.req)
 		if rec.Code != tc.status {
-			t.Errorf("%s: status %d, erwartet %d", tc.name, rec.Code, tc.status)
+			t.Errorf("%s: status %d, expected %d", tc.name, rec.Code, tc.status)
 		}
 	}
 }
@@ -200,32 +200,32 @@ func TestAgentPrincipals(t *testing.T) {
 		Principals []string `json:"principals"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("antwort: %v", err)
+		t.Fatalf("response: %v", err)
 	}
 	if strings.Join(resp.Principals, ",") != "alice,alice@example.com" {
 		t.Errorf("principals = %v", resp.Principals)
 	}
 
-	// Ohne Grants: leere Liste, kein Fehler.
+	// Without grants: empty list, no error.
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, agentRequest(http.MethodGet, "/v1/agent/principals?user=root", "", host.ID.String()))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
 
-	// Fehlender user-Parameter.
+	// Missing user parameter.
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, agentRequest(http.MethodGet, "/v1/agent/principals", "", host.ID.String()))
 	if rec.Code != http.StatusBadRequest {
-		t.Errorf("ohne user: status %d, erwartet 400", rec.Code)
+		t.Errorf("without user: status %d, expected 400", rec.Code)
 	}
 
-	// Store-Fehler ⇒ 500 (Agent behandelt das fail-closed).
+	// Store error ⇒ 500 (agent treats this fail-closed).
 	hosts.principalsErr = context.DeadlineExceeded
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, agentRequest(http.MethodGet, "/v1/agent/principals?user=deploy", "", host.ID.String()))
 	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("store-fehler: status %d, erwartet 500", rec.Code)
+		t.Errorf("store error: status %d, expected 500", rec.Code)
 	}
 }
 

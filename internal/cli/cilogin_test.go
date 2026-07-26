@@ -8,9 +8,9 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const ciTestToken = "test-ci-job-token" //#nosec G101 -- Testwert, kein Credential
+const ciTestToken = "test-ci-job-token" //#nosec G101 -- test value, not a credential
 
-// runCILogin führt gssh ci-login mit Argumenten aus.
+// runCILogin runs gssh ci-login with arguments.
 func runCILogin(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
@@ -18,7 +18,7 @@ func runCILogin(t *testing.T, args ...string) (int, string, string) {
 	return code, stdout.String(), stderr.String()
 }
 
-func TestCILoginErfolg(t *testing.T) {
+func TestCILoginSuccess(t *testing.T) {
 	keyring := startAgent(t)
 	sign := newFakeSign(t, ciTestToken, time.Hour, false)
 	t.Setenv(envCIToken, ciTestToken)
@@ -28,9 +28,9 @@ func TestCILoginErfolg(t *testing.T) {
 		t.Fatalf("code %d: %s", code, stderr)
 	}
 	if stdout == "" {
-		t.Error("keine erfolgsmeldung")
+		t.Error("no success message")
 	}
-	// Schlüssel + Zertifikat liegen im Agenten (comment-präfix guided-ssh).
+	// Key + certificate are in the agent (comment prefix guided-ssh).
 	keys, err := keyring.List()
 	if err != nil {
 		t.Fatal(err)
@@ -46,26 +46,26 @@ func TestCILoginErfolg(t *testing.T) {
 		}
 	}
 	if len(keys) == 0 || !found {
-		t.Errorf("agent-einträge: %d, zertifikat gefunden: %t", len(keys), found)
+		t.Errorf("agent entries: %d, certificate found: %t", len(keys), found)
 	}
 }
 
-func TestCILoginTokenEnvUeberschreibbar(t *testing.T) {
+func TestCILoginTokenEnvOverridable(t *testing.T) {
 	startAgent(t)
 	sign := newFakeSign(t, ciTestToken, time.Hour, false)
-	t.Setenv("MEIN_JOB_TOKEN", ciTestToken)
+	t.Setenv("MY_JOB_TOKEN", ciTestToken)
 
 	code, _, stderr := runCILogin(t,
-		"--api-url", sign.server.URL, "--token-env", "MEIN_JOB_TOKEN", "--validity", "30m")
+		"--api-url", sign.server.URL, "--token-env", "MY_JOB_TOKEN", "--validity", "30m")
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, stderr)
 	}
 	if got := sign.lastValidity.Load(); got != 30*60 {
-		t.Errorf("validity_seconds = %d, erwartet 1800", got)
+		t.Errorf("validity_seconds = %d, expected 1800", got)
 	}
 }
 
-func TestCILoginAPIURLAusUmgebung(t *testing.T) {
+func TestCILoginAPIURLFromEnvironment(t *testing.T) {
 	startAgent(t)
 	sign := newFakeSign(t, ciTestToken, time.Hour, false)
 	t.Setenv(envCIToken, ciTestToken)
@@ -76,31 +76,31 @@ func TestCILoginAPIURLAusUmgebung(t *testing.T) {
 	}
 }
 
-func TestCILoginFehlerfaelle(t *testing.T) {
+func TestCILoginErrorCases(t *testing.T) {
 	startAgent(t)
 	sign := newFakeSign(t, ciTestToken, time.Hour, false)
 
-	// Ohne API-URL.
+	// Without API URL.
 	t.Setenv(envAPIURL, "")
 	t.Setenv(envCIToken, ciTestToken)
 	if code, _, stderr := runCILogin(t); code != 1 || stderr == "" {
-		t.Errorf("ohne api-url: code %d, stderr %q", code, stderr)
+		t.Errorf("without api-url: code %d, stderr %q", code, stderr)
 	}
 
-	// Ohne Token in der Env-Variable.
+	// Without token in the env variable.
 	t.Setenv(envCIToken, "")
 	if code, _, stderr := runCILogin(t, "--api-url", sign.server.URL); code != 1 || stderr == "" {
-		t.Errorf("ohne token: code %d, stderr %q", code, stderr)
+		t.Errorf("without token: code %d, stderr %q", code, stderr)
 	}
 
-	// Server lehnt das Token ab.
-	t.Setenv(envCIToken, "falsches-token")
+	// Server rejects the token.
+	t.Setenv(envCIToken, "wrong-token")
 	if code, _, _ := runCILogin(t, "--api-url", sign.server.URL); code != 1 {
-		t.Errorf("abgelehntes token: code %d, erwartet 1", code)
+		t.Errorf("rejected token: code %d, expected 1", code)
 	}
 
-	// Kaputtes Flag.
-	if code, _, _ := runCILogin(t, "--gibtsnicht"); code != 2 {
-		t.Errorf("kaputtes flag: code %d, erwartet 2", code)
+	// Broken flag.
+	if code, _, _ := runCILogin(t, "--doesnotexist"); code != 2 {
+		t.Errorf("broken flag: code %d, expected 2", code)
 	}
 }

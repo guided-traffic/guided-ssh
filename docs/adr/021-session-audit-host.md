@@ -1,67 +1,72 @@
-# ADR-021: Session-Audit auf dem Host — pam_exec, Serial-Korrelation, Opt-in
+# ADR-021: Session audit on the host — pam_exec, serial correlation, opt-in
 
 ## Status
 
-Akzeptiert (Phase 9). Konkretisiert ADR-005 Stufe 2.
+Accepted (Phase 9). Refines ADR-005 stage 2.
 
-## Kontext
+## Context
 
-Die Nachvollziehbarkeit endete bislang bei der Zertifikatsausstellung
-(serverseitig) und den lokalen sshd-Logs. Was nach dem Login geschieht —
-Session-Start/-Ende, `sudo`-Aufrufe — war zentral nicht sichtbar. ADR-005 hat
-für die Host-Integration „sshd-nativ zuerst, NSS/PAM später (kein C-Code im
-Login-Pfad)" festgelegt. Offene Fragen für Phase 9: Wie werden Session-Events
-erfasst und übertragen, wie an die Ausstellung korreliert, und wer entscheidet,
-ob ein Host das Feature bekommt?
+Traceability previously ended at certificate issuance (server-side) and the
+local sshd logs. What happened after login — session start/end, `sudo`
+invocations — was not visible centrally. ADR-005 established for host
+integration "sshd-native first, NSS/PAM later (no C code in the login
+path)." Open questions for Phase 9: how are session events captured and
+transmitted, how are they correlated with issuance, and who decides whether a
+host gets the feature?
 
-## Entscheidung
+## Decision
 
-1. **`pam_exec` statt C-PAM-Modul.** Eine `session optional pam_exec.so quiet …
-   gssh-agentd pam-session`-Zeile je Stack (`/etc/pam.d/sshd`, `/etc/pam.d/sudo`)
-   ruft den Agent bei Session-Open/-Close. `optional` + Helfer-Exit immer 0 ⇒
-   **fail-open**: ein Fehler blockiert niemals Login oder sudo. Kein C-Code
-   (ADR-005), kein Eingriff in die Authentifizierung selbst (nur `session`).
+1. **`pam_exec` instead of a C PAM module.** A single `session optional
+   pam_exec.so quiet … gssh-agentd pam-session` line per stack
+   (`/etc/pam.d/sshd`, `/etc/pam.d/sudo`) invokes the agent on session
+   open/close. `optional` + the helper always exiting 0 ⇒ **fail-open**: a
+   failure never blocks login or sudo. No C code (ADR-005), no interference
+   with authentication itself (only `session`).
 
-2. **Serial-Korrelation über sshd-Tokens `%s`/`%i`, nicht journald.** Der
-   bestehende `AuthorizedPrincipalsCommand`-Helfer erhält am Login zusätzlich
-   `-serial %s -keyid %i`. Er meldet den Serial best-effort an den Daemon
-   (`recentAuth`-Ring, TTL 2 min), der die nachfolgende Session-Open desselben
-   lokalen Benutzers damit anreichert. Server löst über `certificates.serial` den
-   Nutzer auf (`host_sessions.user_id`). Das vermeidet brüchiges Log-Parsing und
-   ist unit-testbar. `LogLevel VERBOSE` wird zusätzlich gesetzt (der Serial
-   erscheint so auch in den sshd-Logs als Rückfallebene).
+2. **Serial correlation via sshd tokens `%s`/`%i`, not journald.** The
+   existing `AuthorizedPrincipalsCommand` helper additionally receives
+   `-serial %s -keyid %i` at login. It reports the serial best-effort to the
+   daemon (`recentAuth` ring, TTL 2 min), which enriches the subsequent
+   session-open of the same local user with it. The server resolves the
+   user via `certificates.serial` (`host_sessions.user_id`). This avoids
+   fragile log parsing and is unit-testable. `LogLevel VERBOSE` is
+   additionally set (so the serial also appears in the sshd logs as a
+   fallback layer).
 
-3. **Daemon-Spool + asynchroner Flush.** pam-session-Helfer und Principals-Helfer
-   sind dünn und reden über den bestehenden Unix-Socket mit dem Daemon; der
-   Daemon puffert Events in `sessions-spool.jsonl` (0600, gedeckelt) und flusht
-   sie per mTLS an `POST /v1/agent/sessions`. Verlust-tolerant: bei nicht
-   erreichbarem Server bleiben die Events im Spool. Session-Ende wird
-   serverseitig über `(host, lokaler Benutzer, tty)` der jüngsten offenen Session
-   zugeordnet; sudo-Events werden nur als Audit-Event (`session.sudo`) geführt.
+3. **Daemon spool + asynchronous flush.** The pam-session helper and the
+   principals helper are thin and talk to the daemon over the existing Unix
+   socket; the daemon buffers events in `sessions-spool.jsonl` (0600,
+   capped) and flushes them via mTLS to `POST /v1/agent/sessions`.
+   Loss-tolerant: if the server is unreachable, events remain in the spool.
+   Session end is resolved server-side against the most recent open session
+   for `(host, local user, tty)`; sudo events are recorded only as an audit
+   event (`session.sudo`).
 
-4. **Schreibschutz der Socket-Endpunkte per Token.** Die neuen POST-Endpunkte
-   (`/auth`, `/session-event`) verlangen ein Token aus `<state>/socket-token`
-   (0600, nur root lesbar), damit lokale unprivilegierte Nutzer keine
-   Audit-Events fälschen. `GET /principals` bleibt unverändert offen.
+4. **Write protection on the socket endpoints via token.** The new POST
+   endpoints (`/auth`, `/session-event`) require a token from
+   `<state>/socket-token` (0600, root-readable only), so that local
+   unprivileged users cannot forge audit events. `GET /principals` remains
+   unchanged and open.
 
-5. **Aktivierung host-lokal, Opt-in.** `gssh-agentd enroll --session-audit`
-   (Default aus) entscheidet, ob die Verkabelung geschrieben wird. Die invasive
-   Änderung am PAM-Stack ist zwangsläufig lokal — nichts kann den Stack aus der
-   Ferne editieren, bevor der Agent verdrahtet ist. Kein zentraler Schalter in
-   dieser Ausbaustufe.
+5. **Activation is host-local, opt-in.** `gssh-agentd enroll --session-audit`
+   (default off) decides whether the wiring is written. The invasive change
+   to the PAM stack is necessarily local — nothing can remotely edit the
+   stack before the agent is wired up. There is no central switch at this
+   stage.
 
-## Konsequenzen
+## Consequences
 
-- Session-/sudo-Events erscheinen ohne UI-Änderung in der Audit-Ansicht (Phase 8)
-  als `session.opened`/`session.closed`/`session.sudo`.
-- Das **sudo-Kommando ist best-effort** (`SUDO_COMMAND` aus dem Session-Env);
-  vollständig zuverlässig nur über ein sudo-Logfile oder -Plugin — spätere
-  Härtung, bewusst nicht im MVP.
-- Die Serial↔Session-Zuordnung ist eine Heuristik (Benutzer + Zeitfenster); bei
-  parallelen Logins desselben lokalen Benutzers innerhalb weniger Sekunden kann
-  sie einen Serial vertauschen. Für Audit-Zwecke akzeptiert; der Login selbst ist
-  davon unberührt.
-- Enrollment ohne `--session-audit` verhält sich exakt wie Phase 5 (kein Token,
-  keine PAM-Änderung, sshd-Snippet ohne `-serial`).
-- NSS für zentrale Konten und UI-Dashboards (aktive Sessions je Host/Nutzer)
-  bleiben offen; das Backend (`host_sessions`, `ListActiveSessions`) steht bereit.
+- Session/sudo events appear in the audit view (Phase 8) without any UI
+  change, as `session.opened`/`session.closed`/`session.sudo`.
+- The **sudo command is best-effort** (`SUDO_COMMAND` from the session
+  environment); fully reliable only via a sudo logfile or plugin — future
+  hardening, deliberately not in the MVP.
+- The serial↔session correlation is a heuristic (user + time window); with
+  concurrent logins of the same local user within a few seconds, it can
+  mismatch a serial. Accepted for audit purposes; the login itself is
+  unaffected.
+- Enrollment without `--session-audit` behaves exactly like Phase 5 (no
+  token, no PAM change, sshd snippet without `-serial`).
+- NSS for centralized accounts and UI dashboards (active sessions per
+  host/user) remain open items; the backend (`host_sessions`,
+  `ListActiveSessions`) is ready.

@@ -2,15 +2,15 @@ openapi: 3.0.3
 info:
   title: guided-ssh API
   description: |
-    REST-API des guided-ssh-Servers: Zertifikatsausstellung (Mensch + CI),
-    Host-Enrollment, Grant-Verwaltung und die Read-/Audit-Endpunkte der
-    Web-UI. Diese Spezifikation ist die Single Source of Truth; der
-    Angular-API-Client wird daraus generiert (`make web-api`).
+    REST API of the guided-ssh server: certificate issuance (human + CI),
+    host enrollment, grant management, and the read/audit endpoints of the
+    web UI. This specification is the single source of truth; the
+    Angular API client is generated from it (`make web-api`).
 
-    Authentifizierung: OIDC-ID-Token als Bearer-Token. Rollen der Admin-API
-    (Phase 8): `admin` (alles), `auditor` (Audit lesen/exportieren + Read),
-    `readonly` (Ressourcen lesen); Rollen sind IdP-Gruppen zugeordnet und
-    schließen einander ein (admin ⊃ auditor ⊃ readonly).
+    Authentication: OIDC ID token as bearer token. Roles of the admin API
+    (phase 8): `admin` (everything), `auditor` (read/export audit + read),
+    `readonly` (read resources); roles are mapped to IdP groups and are
+    inclusive of one another (admin ⊃ auditor ⊃ readonly).
   version: "1.0"
   license:
     name: Apache-2.0
@@ -23,11 +23,11 @@ tags:
   - name: sign
   - name: enrollment
   - name: rollout
-    description: One-Command-Host-Install (Agent-Manifest, Binary-Download, install.sh, Token-Minting)
+    description: One-command host install (agent manifest, binary download, install.sh, token minting)
   - name: grants
   - name: ci-grants
   - name: directory
-    description: Read-Ansichten der Web-UI (Hosts, Benutzer, Gruppen, Service-Accounts, Zertifikate)
+    description: Read views for the web UI (hosts, users, groups, service accounts, certificates)
   - name: audit
 
 security:
@@ -37,12 +37,12 @@ paths:
   /healthz:
     get:
       tags: [system]
-      summary: Liveness-Check
+      summary: Liveness check
       security: []
       operationId: getHealth
       responses:
         "200":
-          description: Server lebt
+          description: Server is alive
           content:
             text/plain:
               schema: { type: string }
@@ -50,12 +50,12 @@ paths:
   /v1/ui/config:
     get:
       tags: [system]
-      summary: Bootstrap-Konfiguration der Web-UI (öffentlich)
+      summary: Bootstrap configuration for the web UI (public)
       security: []
       operationId: getUiConfig
       responses:
         "200":
-          description: OIDC- und Rollen-Konfiguration
+          description: OIDC and role configuration
           content:
             application/json:
               schema: { $ref: "#/components/schemas/UiConfig" }
@@ -63,12 +63,12 @@ paths:
   /v1/auth/me:
     get:
       tags: [system]
-      summary: Login-Zustand der UI-Session (server-seitiges OIDC, BFF)
+      summary: Login state of the UI session (server-side OIDC, BFF)
       security: []
       operationId: getAuthMe
       responses:
         "200":
-          description: Login-Zustand; unauthentifiziert ⇒ authenticated=false
+          description: Login state; unauthenticated ⇒ authenticated=false
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthSession" }
@@ -76,17 +76,17 @@ paths:
   /v1/auth/logout:
     post:
       tags: [system]
-      summary: UI-Session beenden (Session-Cookie löschen)
+      summary: End UI session (delete session cookie)
       security: []
       operationId: postAuthLogout
       responses:
         "204":
-          description: Session beendet
+          description: Session ended
 
   /v1/ca/bundle/{purpose}:
     get:
       tags: [ca]
-      summary: CA-Bundle im authorized_keys-Format
+      summary: CA bundle in authorized_keys format
       security: []
       operationId: getCaBundle
       parameters:
@@ -96,7 +96,7 @@ paths:
           schema: { type: string, enum: [user, host] }
       responses:
         "200":
-          description: CA-Bundle
+          description: CA bundle
           content:
             text/plain:
               schema: { type: string }
@@ -105,7 +105,7 @@ paths:
   /v1/sign/user:
     post:
       tags: [sign]
-      summary: ID-Token gegen SSH-Benutzerzertifikat tauschen
+      summary: Exchange ID token for SSH user certificate
       operationId: signUser
       requestBody:
         required: true
@@ -114,7 +114,7 @@ paths:
             schema: { $ref: "#/components/schemas/SignRequest" }
       responses:
         "200":
-          description: Signiertes Zertifikat
+          description: Signed certificate
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SignResponse" }
@@ -125,7 +125,7 @@ paths:
   /v1/sign/ci:
     post:
       tags: [sign]
-      summary: GitLab-Job-Token gegen CI-Zertifikat tauschen
+      summary: Exchange GitLab job token for CI certificate
       operationId: signCi
       requestBody:
         required: true
@@ -134,7 +134,7 @@ paths:
             schema: { $ref: "#/components/schemas/SignRequest" }
       responses:
         "200":
-          description: Signiertes Zertifikat
+          description: Signed certificate
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SignResponse" }
@@ -145,7 +145,7 @@ paths:
   /v1/enroll:
     post:
       tags: [enrollment]
-      summary: Host-Enrollment gegen einmaliges Token
+      summary: Host enrollment against a one-time token
       security: []
       operationId: enrollHost
       requestBody:
@@ -155,7 +155,7 @@ paths:
             schema: { $ref: "#/components/schemas/EnrollRequest" }
       responses:
         "200":
-          description: Host-Zertifikat und mTLS-Material
+          description: Host certificate and mTLS material
           content:
             application/json:
               schema: { $ref: "#/components/schemas/EnrollResponse" }
@@ -165,15 +165,15 @@ paths:
   /v1/agents:
     get:
       tags: [rollout]
-      summary: Agent-Manifest und Rollout-Bereitschaft (öffentlich)
+      summary: Agent manifest and rollout readiness (public)
       description: |
-        Antwortet auch bei geschlossenem Rollout-Gate mit 200 und weist die
-        fehlenden Bedingungen in `missing` aus (Diagnosequelle der UI).
+        Also responds with 200 when the rollout gate is closed and lists the
+        missing conditions in `missing` (diagnostic source for the UI).
       security: []
       operationId: getAgentManifest
       responses:
         "200":
-          description: Ausgelieferte Binaries, Rollout-Zustand und aktive Pin-Quelle
+          description: Delivered binaries, rollout state, and active pin source
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AgentManifest" }
@@ -181,7 +181,7 @@ paths:
   /v1/agents/{os}/{arch}:
     get:
       tags: [rollout]
-      summary: Agent-Binary herunterladen (öffentlich, eng rate-limited)
+      summary: Download agent binary (public, tightly rate-limited)
       security: []
       operationId: downloadAgent
       parameters:
@@ -189,7 +189,7 @@ paths:
         - { name: arch, in: path, required: true, schema: { type: string, example: amd64 } }
       responses:
         "200":
-          description: Binary-Stream
+          description: Binary stream
           content:
             application/octet-stream:
               schema: { type: string, format: binary }
@@ -199,12 +199,12 @@ paths:
   /install.sh:
     get:
       tags: [rollout]
-      summary: Getemplatetes Install-Script (öffentlich)
+      summary: Templated install script (public)
       security: []
       operationId: getInstallScript
       responses:
         "200":
-          description: POSIX-sh-Script mit URLs, SPKI-Pin und per-Arch-SHA-256
+          description: POSIX sh script with URLs, SPKI pin, and per-arch SHA-256
           content:
             text/x-shellscript:
               schema: { type: string }
@@ -213,10 +213,11 @@ paths:
   /v1/admin/enroll-tokens:
     post:
       tags: [rollout]
-      summary: Enrollment-Token für den One-Command-Install münzen (Rolle admin)
+      summary: Mint enrollment token for the one-command install (role admin)
       description: |
-        Der Klartext des Tokens wird genau einmal zurückgegeben (nie geloggt,
-        nie im Audit-Payload). Gegated wie die übrigen Rollout-Endpunkte.
+        The plaintext token is returned exactly once (never logged, never
+        included in the audit payload). Gated like the other rollout
+        endpoints.
       operationId: createEnrollToken
       requestBody:
         required: false
@@ -225,7 +226,7 @@ paths:
             schema: { $ref: "#/components/schemas/EnrollTokenRequest" }
       responses:
         "201":
-          description: Token, Ablauf und fertiger Install-Befehl
+          description: Token, expiry, and ready-to-use install command
           content:
             application/json:
               schema: { $ref: "#/components/schemas/EnrollTokenResponse" }
@@ -237,11 +238,11 @@ paths:
   /v1/admin/grants:
     get:
       tags: [grants]
-      summary: Zugriffsregeln auflisten (Rolle readonly)
+      summary: List access rules (role readonly)
       operationId: listGrants
       responses:
         "200":
-          description: Alle Grants
+          description: All grants
           content:
             application/json:
               schema:
@@ -251,7 +252,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [grants]
-      summary: Zugriffsregel anlegen (Rolle admin)
+      summary: Create access rule (role admin)
       operationId: createGrant
       requestBody:
         required: true
@@ -260,7 +261,7 @@ paths:
             schema: { $ref: "#/components/schemas/GrantRequest" }
       responses:
         "201":
-          description: Angelegter Grant
+          description: Created grant
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Grant" }
@@ -273,7 +274,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       tags: [grants]
-      summary: Zugriffsregel lesen (Rolle readonly)
+      summary: Read access rule (role readonly)
       operationId: getGrant
       responses:
         "200":
@@ -284,7 +285,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [grants]
-      summary: Zugriffsregel aktualisieren (Rolle admin)
+      summary: Update access rule (role admin)
       operationId: updateGrant
       requestBody:
         required: true
@@ -293,7 +294,7 @@ paths:
             schema: { $ref: "#/components/schemas/GrantRequest" }
       responses:
         "200":
-          description: Aktualisierter Grant
+          description: Updated grant
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Grant" }
@@ -301,16 +302,16 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [grants]
-      summary: Zugriffsregel löschen (Rolle admin)
+      summary: Delete access rule (role admin)
       operationId: deleteGrant
       responses:
-        "204": { description: Gelöscht }
+        "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/admin/grants/apply:
     post:
       tags: [grants]
-      summary: Deklarativer Vollabgleich der Grants (Rolle admin)
+      summary: Declarative full reconciliation of grants (role admin)
       operationId: applyGrants
       requestBody:
         required: true
@@ -324,7 +325,7 @@ paths:
                   items: { $ref: "#/components/schemas/GrantRequest" }
       responses:
         "200":
-          description: Abgleich-Ergebnis
+          description: Reconciliation result
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApplyResult" }
@@ -333,11 +334,11 @@ paths:
   /v1/admin/ci-grants:
     get:
       tags: [ci-grants]
-      summary: CI-Zugriffsregeln auflisten (Rolle readonly)
+      summary: List CI access rules (role readonly)
       operationId: listCiGrants
       responses:
         "200":
-          description: Alle CI-Grants
+          description: All CI grants
           content:
             application/json:
               schema:
@@ -345,7 +346,7 @@ paths:
                 items: { $ref: "#/components/schemas/CiGrant" }
     post:
       tags: [ci-grants]
-      summary: CI-Zugriffsregel anlegen (Rolle admin)
+      summary: Create CI access rule (role admin)
       operationId: createCiGrant
       requestBody:
         required: true
@@ -354,7 +355,7 @@ paths:
             schema: { $ref: "#/components/schemas/CiGrantRequest" }
       responses:
         "201":
-          description: Angelegter CI-Grant
+          description: Created CI grant
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CiGrant" }
@@ -365,18 +366,18 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       tags: [ci-grants]
-      summary: CI-Zugriffsregel lesen (Rolle readonly)
+      summary: Read CI access rule (role readonly)
       operationId: getCiGrant
       responses:
         "200":
-          description: CI-Grant
+          description: CI grant
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CiGrant" }
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [ci-grants]
-      summary: CI-Zugriffsregel aktualisieren (Rolle admin)
+      summary: Update CI access rule (role admin)
       operationId: updateCiGrant
       requestBody:
         required: true
@@ -385,7 +386,7 @@ paths:
             schema: { $ref: "#/components/schemas/CiGrantRequest" }
       responses:
         "200":
-          description: Aktualisierter CI-Grant
+          description: Updated CI grant
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CiGrant" }
@@ -393,16 +394,16 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [ci-grants]
-      summary: CI-Zugriffsregel löschen (Rolle admin)
+      summary: Delete CI access rule (role admin)
       operationId: deleteCiGrant
       responses:
-        "204": { description: Gelöscht }
+        "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/admin/ci-grants/apply:
     post:
       tags: [ci-grants]
-      summary: Deklarativer Vollabgleich der CI-Grants (Rolle admin)
+      summary: Declarative full reconciliation of CI grants (role admin)
       operationId: applyCiGrants
       requestBody:
         required: true
@@ -416,7 +417,7 @@ paths:
                   items: { $ref: "#/components/schemas/CiGrantRequest" }
       responses:
         "200":
-          description: Abgleich-Ergebnis
+          description: Reconciliation result
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApplyResult" }
@@ -425,11 +426,11 @@ paths:
   /v1/admin/hosts:
     get:
       tags: [directory]
-      summary: Hosts mit Tags und Zertifikatsablauf (Rolle readonly)
+      summary: Hosts with tags and certificate expiry (role readonly)
       operationId: listHosts
       responses:
         "200":
-          description: Alle Hosts
+          description: All hosts
           content:
             application/json:
               schema:
@@ -439,11 +440,11 @@ paths:
   /v1/admin/users:
     get:
       tags: [directory]
-      summary: Benutzer mit Gruppen (Rolle readonly)
+      summary: Users with groups (role readonly)
       operationId: listUsers
       responses:
         "200":
-          description: Alle Benutzer
+          description: All users
           content:
             application/json:
               schema:
@@ -453,11 +454,11 @@ paths:
   /v1/admin/groups:
     get:
       tags: [directory]
-      summary: IdP-Gruppen (Rolle readonly)
+      summary: IdP groups (role readonly)
       operationId: listGroups
       responses:
         "200":
-          description: Alle Gruppen
+          description: All groups
           content:
             application/json:
               schema:
@@ -467,11 +468,11 @@ paths:
   /v1/admin/service-accounts:
     get:
       tags: [directory]
-      summary: Service-Accounts / CI-Identitäten (Rolle readonly)
+      summary: Service accounts / CI identities (role readonly)
       operationId: listServiceAccounts
       responses:
         "200":
-          description: Alle Service-Accounts
+          description: All service accounts
           content:
             application/json:
               schema:
@@ -481,7 +482,7 @@ paths:
   /v1/admin/service-accounts/{id}:
     patch:
       tags: [directory]
-      summary: Service-Account aktivieren/deaktivieren — Not-Aus (Rolle admin)
+      summary: Activate/deactivate service account — kill switch (role admin)
       operationId: updateServiceAccount
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -496,7 +497,7 @@ paths:
                 active: { type: boolean }
       responses:
         "200":
-          description: Aktualisierter Service-Account
+          description: Updated service account
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ServiceAccount" }
@@ -506,13 +507,13 @@ paths:
   /v1/admin/certificates:
     get:
       tags: [directory]
-      summary: Zuletzt ausgestellte Zertifikate (Rolle readonly)
+      summary: Most recently issued certificates (role readonly)
       operationId: listCertificates
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
       responses:
         "200":
-          description: Zertifikats-Metadaten, neueste zuerst
+          description: Certificate metadata, newest first
           content:
             application/json:
               schema:
@@ -522,22 +523,22 @@ paths:
   /v1/admin/audit:
     get:
       tags: [audit]
-      summary: Audit-Events filtern (Rolle auditor)
+      summary: Filter audit events (role auditor)
       description: |
-        Filterbar nach Ereignistyp, Actor, Zeitraum und Volltext (`q` matcht
-        Actor und Payload — deckt Host- und Pipeline-Filter ab).
+        Filterable by event type, actor, time range, and full text (`q`
+        matches actor and payload — covers host and pipeline filters).
       operationId: listAudit
       parameters:
         - { name: event_type, in: query, schema: { type: string } }
         - { name: actor, in: query, schema: { type: string } }
-        - { name: q, in: query, schema: { type: string }, description: Teilstring über Actor und Payload }
+        - { name: q, in: query, schema: { type: string }, description: Substring match over actor and payload }
         - { name: since, in: query, schema: { type: string, format: date-time } }
         - { name: until, in: query, schema: { type: string, format: date-time } }
         - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
         - { name: offset, in: query, schema: { type: integer, default: 0 } }
       responses:
         "200":
-          description: Gefilterte Events mit Gesamtzahl
+          description: Filtered events with total count
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuditList" }
@@ -546,7 +547,7 @@ paths:
   /v1/admin/audit/export:
     get:
       tags: [audit]
-      summary: Audit-Export als CSV- oder JSON-Download (Rolle auditor)
+      summary: Audit export as CSV or JSON download (role auditor)
       operationId: exportAudit
       parameters:
         - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
@@ -557,7 +558,7 @@ paths:
         - { name: until, in: query, schema: { type: string, format: date-time } }
       responses:
         "200":
-          description: Download (max. 100000 Zeilen)
+          description: Download (max. 100000 rows)
           content:
             application/json:
               schema:
@@ -576,23 +577,23 @@ components:
 
   responses:
     BadRequest:
-      description: Ungültige Anfrage
+      description: Invalid request
       content:
         text/plain: { schema: { type: string } }
     Unauthorized:
-      description: Token fehlt oder ist ungültig
+      description: Token missing or invalid
       content:
         text/plain: { schema: { type: string } }
     Forbidden:
-      description: Keine ausreichende Rolle/Berechtigung
+      description: Insufficient role/permission
       content:
         text/plain: { schema: { type: string } }
     NotFound:
-      description: Nicht gefunden
+      description: Not found
       content:
         text/plain: { schema: { type: string } }
     RolloutUnavailable:
-      description: Host-Rollout nicht konfiguriert (fehlende Bedingungen in `missing`)
+      description: Host rollout not configured (missing conditions in `missing`)
       content:
         application/json:
           schema: { $ref: "#/components/schemas/RolloutUnavailable" }
@@ -624,11 +625,11 @@ components:
       properties:
         public_key:
           type: string
-          description: SSH-Public-Key im authorized_keys-Format
+          description: SSH public key in authorized_keys format
         validity_seconds:
           type: integer
           format: int64
-          description: Gewünschte Laufzeit; wird durch Policy und Grants gedeckelt
+          description: Requested validity; capped by policy and grants
 
     SignResponse:
       type: object
@@ -648,7 +649,7 @@ components:
         token: { type: string }
         hostname: { type: string }
         ssh_public_key: { type: string }
-        mtls_csr: { type: string, description: PEM-kodierter CSR für das mTLS-Client-Zertifikat }
+        mtls_csr: { type: string, description: PEM-encoded CSR for the mTLS client certificate }
         tags:
           type: object
           additionalProperties: { type: string }
@@ -669,12 +670,12 @@ components:
       required: [version, rollout_ready, missing, pin_source, pin_error, agents]
       properties:
         version: { type: string }
-        rollout_ready: { type: boolean, description: false ⇒ Rollout-Endpunkte antworten mit 503 }
+        rollout_ready: { type: boolean, description: false ⇒ rollout endpoints respond with 503 }
         missing:
           type: array
           description: >-
-            Fehlende Rollout-Bedingungen. Die *_https-Einträge melden eine
-            gesetzte, aber nicht-https-URL — http passiert das Gate nie.
+            Missing rollout conditions. The *_https entries report a URL that
+            is set but not https — http never passes the gate.
           items:
             type: string
             enum:
@@ -686,12 +687,12 @@ components:
                 agent_public_url_https,
                 public_url_https,
               ]
-        pin_source: { type: string, description: Aktive SPKI-Pin-Quelle (leer ⇒ kein Pin) }
+        pin_source: { type: string, description: Active SPKI pin source (empty ⇒ no pin) }
         pin_error:
           type: string
           description: >-
-            Grobe Kategorie des letzten Pin-Fehlers (leer ⇒ keiner). Kein
-            Volltext — der steht nur im Server-Log.
+            Coarse category of the last pin error (empty ⇒ none). No full
+            text — that is only in the server log.
           enum: ["", no_public_url, chain_untrusted, dial_failed, cert_file_unreadable]
         agents:
           type: array
@@ -704,7 +705,7 @@ components:
         os: { type: string }
         arch: { type: string }
         size: { type: integer, format: int64 }
-        sha256: { type: string, description: Hex-SHA-256 (sha256sum-kompatibel) }
+        sha256: { type: string, description: Hex SHA-256 (sha256sum-compatible) }
 
     RolloutUnavailable:
       type: object
@@ -716,20 +717,20 @@ components:
     EnrollTokenRequest:
       type: object
       properties:
-        hostname: { type: string, description: leer ⇒ Token nicht an einen Hostnamen gebunden }
+        hostname: { type: string, description: empty ⇒ token not bound to a hostname }
         tags:
           type: object
           additionalProperties: { type: string }
         ttl_seconds: { type: integer, format: int64, default: 3600, minimum: 60, maximum: 86400 }
         session_audit:
           type: boolean
-          description: Setzt nur --session-audit im install_command; nicht am Token gespeichert
+          description: Only sets --session-audit in install_command; not stored on the token
 
     EnrollTokenResponse:
       type: object
       required: [token, expires_at, install_command]
       properties:
-        token: { type: string, description: Klartext, wird genau einmal ausgeliefert }
+        token: { type: string, description: Plaintext, delivered exactly once }
         expires_at: { type: string, format: date-time }
         install_command: { type: string }
 
@@ -738,7 +739,7 @@ components:
       required: [id, group, issuer, tag_selector, principals, sudo, max_validity_seconds, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
-        group: { type: string, description: Gruppenname im IdP }
+        group: { type: string, description: Group name in the IdP }
         issuer: { type: string }
         tag_selector:
           type: object
@@ -753,8 +754,8 @@ components:
       type: object
       required: [principals, max_validity_seconds]
       properties:
-        group: { type: string, description: Pflicht bei POST }
-        issuer: { type: string, description: leer ⇒ Issuer des Admin-Tokens }
+        group: { type: string, description: Required on POST }
+        issuer: { type: string, description: empty ⇒ issuer of the admin token }
         tag_selector:
           type: object
           additionalProperties: { type: string }
@@ -776,7 +777,7 @@ components:
       required: [id, project, protected_only, tag_selector, principals, max_validity_seconds, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
-        project: { type: string, description: GitLab-Projekt- oder Namespace-Pfad }
+        project: { type: string, description: GitLab project or namespace path }
         ref_pattern: { type: string }
         protected_only: { type: boolean }
         environment_pattern: { type: string }
@@ -792,7 +793,7 @@ components:
       type: object
       required: [principals, max_validity_seconds]
       properties:
-        project: { type: string, description: Pflicht bei POST }
+        project: { type: string, description: Required on POST }
         ref_pattern: { type: string }
         protected_only: { type: boolean }
         environment_pattern: { type: string }
@@ -817,7 +818,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: Spätestes valid_before der Host-Zertifikate
+          description: Latest valid_before among the host certificates
         created_at: { type: string, format: date-time }
 
     User:
@@ -854,7 +855,7 @@ components:
         claim_matcher:
           type: object
           additionalProperties: { type: string }
-        active: { type: boolean, description: false wirkt als Not-Aus pro Projekt }
+        active: { type: boolean, description: false acts as a kill switch per project }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -871,7 +872,7 @@ components:
         valid_before: { type: string, format: date-time }
         issuer_context:
           type: object
-          description: Kontext der Ausstellung (SSO-Session, CI-Pipeline-Claims)
+          description: Context of issuance (SSO session, CI pipeline claims)
         created_at: { type: string, format: date-time }
 
     AuditEvent:
@@ -882,11 +883,11 @@ components:
         occurred_at: { type: string, format: date-time }
         event_type:
           type: string
-          description: z. B. cert.issued, grant.created/updated/deleted, host.enrolled, user.deactivated, service_account.updated
+          description: e.g. cert.issued, grant.created/updated/deleted, host.enrolled, user.deactivated, service_account.updated
         actor: { type: string }
         payload:
           type: object
-          description: Ereignis-Details als JSON
+          description: Event details as JSON
 
     AuditList:
       type: object
@@ -898,4 +899,4 @@ components:
         total:
           type: integer
           format: int64
-          description: Gesamtzahl zum Filter (für Pagination)
+          description: Total count for the filter (for pagination)

@@ -4,7 +4,7 @@
 export interface ServiceAccount {
 
   /**
-   * false wirkt als Not-Aus pro Projekt
+   * false acts as a kill switch per project
    */
   active: boolean;
   claim_matcher: {

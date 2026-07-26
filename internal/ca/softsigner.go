@@ -14,20 +14,20 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// NewCAKey erzeugt einen Ed25519-CA-Key für den gegebenen Zweck ("user" oder
-// "host"), verschlüsselt den Private Key mit dem Master-Key und liefert den
-// persistierbaren Datensatz (State active, noch ohne ID — die vergibt der Store).
+// NewCAKey generates an Ed25519 CA key for the given purpose ("user" or
+// "host"), encrypts the private key with the master key, and returns the
+// persistable record (state active, still without an ID — the store assigns that).
 func NewCAKey(purpose string, masterKey []byte) (*store.CAKey, error) {
 	if purpose != store.CertTypeUser && purpose != store.CertTypeHost {
-		return nil, fmt.Errorf("ca: unbekannter key-zweck %q", purpose)
+		return nil, fmt.Errorf("ca: unknown key purpose %q", purpose)
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("ca: schlüssel erzeugen: %w", err)
+		return nil, fmt.Errorf("ca: generate key: %w", err)
 	}
 	pemBlock, err := ssh.MarshalPrivateKey(priv, "guided-ssh "+purpose+" ca")
 	if err != nil {
-		return nil, fmt.Errorf("ca: private key serialisieren: %w", err)
+		return nil, fmt.Errorf("ca: marshal private key: %w", err)
 	}
 	encrypted, err := encryptPrivateKey(masterKey, pem.EncodeToMemory(pemBlock))
 	if err != nil {
@@ -35,7 +35,7 @@ func NewCAKey(purpose string, masterKey []byte) (*store.CAKey, error) {
 	}
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
-		return nil, fmt.Errorf("ca: public key konvertieren: %w", err)
+		return nil, fmt.Errorf("ca: convert public key: %w", err)
 	}
 	return &store.CAKey{
 		Purpose:             purpose,
@@ -46,44 +46,44 @@ func NewCAKey(purpose string, masterKey []byte) (*store.CAKey, error) {
 	}, nil
 }
 
-// SoftwareSigner signiert mit einem in der Datenbank abgelegten,
-// AES-GCM-verschlüsselten Ed25519-CA-Key.
+// SoftwareSigner signs with an Ed25519 CA key that is stored AES-GCM
+// encrypted in the database.
 type SoftwareSigner struct {
 	caKeyID uuid.UUID
 	signer  ssh.Signer
 }
 
-// NewSoftwareSigner entschlüsselt den Private Key des CA-Keys mit dem
-// Master-Key und liefert einen einsatzbereiten Signer.
+// NewSoftwareSigner decrypts the CA key's private key with the master key
+// and returns a ready-to-use signer.
 func NewSoftwareSigner(k *store.CAKey, masterKey []byte) (*SoftwareSigner, error) {
 	if len(k.EncryptedPrivateKey) == 0 {
-		return nil, fmt.Errorf("ca: ca-key %s hat keinen private key (KMS/HSM-Key?)", k.ID)
+		return nil, fmt.Errorf("ca: ca key %s has no private key (KMS/HSM key?)", k.ID)
 	}
 	pemBytes, err := decryptPrivateKey(masterKey, k.EncryptedPrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("ca: ca-key %s: %w", k.ID, err)
+		return nil, fmt.Errorf("ca: ca key %s: %w", k.ID, err)
 	}
 	signer, err := ssh.ParsePrivateKey(pemBytes)
 	if err != nil {
-		return nil, fmt.Errorf("ca: ca-key %s parsen: %w", k.ID, err)
+		return nil, fmt.Errorf("ca: parse ca key %s: %w", k.ID, err)
 	}
 	return &SoftwareSigner{caKeyID: k.ID, signer: signer}, nil
 }
 
-// Sign baut das SSH-Zertifikat aus dem Request und signiert es.
+// Sign builds the SSH certificate from the request and signs it.
 func (s *SoftwareSigner) Sign(_ context.Context, req CertRequest) (*ssh.Certificate, error) {
 	cert, err := buildCert(req)
 	if err != nil {
 		return nil, err
 	}
 	if err := cert.SignCert(rand.Reader, s.signer); err != nil {
-		return nil, fmt.Errorf("ca: signieren: %w", err)
+		return nil, fmt.Errorf("ca: sign: %w", err)
 	}
 	return cert, nil
 }
 
-// CAKeyID ist die Datenbank-ID des verwendeten CA-Keys.
+// CAKeyID is the database ID of the CA key used.
 func (s *SoftwareSigner) CAKeyID() uuid.UUID { return s.caKeyID }
 
-// PublicKey ist der öffentliche Schlüssel des CA-Keys.
+// PublicKey is the public key of the CA key.
 func (s *SoftwareSigner) PublicKey() ssh.PublicKey { return s.signer.PublicKey() }

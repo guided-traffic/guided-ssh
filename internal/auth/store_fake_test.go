@@ -10,8 +10,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeAuthStore ist ein In-Memory-Fake der auth.Store-Schnittstelle
-// (mutex-geschützt, da der Syncer-Test nebenläufig zugreift).
+// fakeAuthStore is an in-memory fake of the auth.Store interface
+// (mutex-protected, since the syncer test accesses it concurrently).
 type fakeAuthStore struct {
 	mu         sync.Mutex
 	users      map[uuid.UUID]*store.User
@@ -19,11 +19,11 @@ type fakeAuthStore struct {
 	userGroups map[uuid.UUID][]uuid.UUID
 	audits     []store.AuditEvent
 
-	// failOn lässt die benannte Methode fehlschlagen (Fehlerpfade).
+	// failOn makes the named method fail (error paths).
 	failOn string
 }
 
-var errFakeStore = fmt.Errorf("fake-store-fehler")
+var errFakeStore = fmt.Errorf("fake store error")
 
 func newFakeAuthStore() *fakeAuthStore {
 	return &fakeAuthStore{
@@ -141,14 +141,14 @@ func (f *fakeAuthStore) AppendAuditEvent(_ context.Context, e *store.AuditEvent)
 	return nil
 }
 
-// auditCount liefert die Anzahl der Audit-Events (nebenläufigkeitssicher).
+// auditCount returns the number of audit events (concurrency-safe).
 func (f *fakeAuthStore) auditCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.audits)
 }
 
-// groupNames liefert die Gruppennamen eines Benutzers (sortierfrei).
+// groupNames returns a user's group names (unsorted).
 func (f *fakeAuthStore) groupNames(userID uuid.UUID) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

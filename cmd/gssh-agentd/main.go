@@ -1,6 +1,6 @@
-// gssh-agentd ist der Host-Agent von guided-ssh (Phase 5): Enrollment,
-// automatische Host-Zertifikatserneuerung, TrustedUserCAKeys-Pflege und
-// AuthorizedPrincipalsCommand-Helper (fail-closed).
+// gssh-agentd is the host agent of guided-ssh (Phase 5): enrollment,
+// automatic host certificate renewal, TrustedUserCAKeys maintenance, and
+// the AuthorizedPrincipalsCommand helper (fail-closed).
 package main
 
 import (

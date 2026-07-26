@@ -16,9 +16,9 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeStreamStore ist ein threadsicherer In-Memory-Store für den Streamer;
-// started wird geschlossen, sobald der Streamer seinen Startpunkt bestimmt
-// hat (Synchronisation der Tests: ab dann zählen Events als "neu").
+// fakeStreamStore is a thread-safe in-memory store for the streamer;
+// started is closed once the streamer has determined its start point (test
+// synchronization: from then on, events count as "new").
 type fakeStreamStore struct {
 	mu      sync.Mutex
 	events  []store.AuditEvent
@@ -59,7 +59,7 @@ func (f *fakeStreamStore) add(e store.AuditEvent) {
 	f.events = append(f.events, e)
 }
 
-// syncBuffer ist ein threadsicherer Log-Puffer (Streamer läuft als Goroutine).
+// syncBuffer is a thread-safe log buffer (the streamer runs as a goroutine).
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -77,9 +77,9 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-func TestStreamerEmittiertNurNeueEvents(t *testing.T) {
+func TestStreamerEmitsOnlyNewEvents(t *testing.T) {
 	st := newFakeStreamStore()
-	// Historie vor dem Start — darf nicht erneut emittiert werden.
+	// History before start — must not be emitted again.
 	st.add(store.AuditEvent{ID: 1, EventType: "grant.created", Actor: "user:alt@idp", Payload: []byte(`{}`)})
 	st.add(store.AuditEvent{ID: 2, EventType: "ca.cert_issued", Actor: "user:alt@idp", Payload: []byte(`{}`)})
 
@@ -89,7 +89,7 @@ func TestStreamerEmittiertNurNeueEvents(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		var batch []map[string]any
 		if err := json.Unmarshal(body, &batch); err != nil {
-			t.Errorf("webhook-body ungültig: %v", err)
+			t.Errorf("invalid webhook body: %v", err)
 		}
 		webhookMu.Lock()
 		received = append(received, batch...)
@@ -111,7 +111,7 @@ func TestStreamerEmittiertNurNeueEvents(t *testing.T) {
 	done := make(chan struct{})
 	go func() { streamer.Run(ctx); close(done) }()
 
-	// Neue Events erst, nachdem der Streamer seinen Startpunkt kennt.
+	// New events only after the streamer knows its start point.
 	<-st.started
 	st.add(store.AuditEvent{ID: 3, EventType: "grant.updated", Actor: "user:admin@idp", Payload: []byte(`{"grant_id":"g1"}`)})
 	st.add(store.AuditEvent{ID: 4, EventType: "service_account.updated", Actor: "user:admin@idp", Payload: []byte(`{"active":false}`)})
@@ -125,7 +125,7 @@ func TestStreamerEmittiertNurNeueEvents(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("webhook hat nur %d events erhalten", count)
+			t.Fatalf("webhook received only %d events", count)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -135,23 +135,23 @@ func TestStreamerEmittiertNurNeueEvents(t *testing.T) {
 	webhookMu.Lock()
 	defer webhookMu.Unlock()
 	if len(received) != 2 {
-		t.Fatalf("%d webhook-events, erwartet 2 (keine historie)", len(received))
+		t.Fatalf("%d webhook events, expected 2 (no history)", len(received))
 	}
 	if received[0]["id"].(float64) != 3 || received[1]["id"].(float64) != 4 {
-		t.Errorf("webhook-events falsch: %v", received)
+		t.Errorf("wrong webhook events: %v", received)
 	}
 
 	logged := logs.String()
 	if !bytes.Contains([]byte(logged), []byte(`"event_type":"grant.updated"`)) ||
 		!bytes.Contains([]byte(logged), []byte(`"event_type":"service_account.updated"`)) {
-		t.Errorf("strukturierte logs unvollständig: %s", logged)
+		t.Errorf("incomplete structured logs: %s", logged)
 	}
 	if bytes.Contains([]byte(logged), []byte("user:alt@idp")) {
-		t.Errorf("historie wurde erneut geloggt: %s", logged)
+		t.Errorf("history was logged again: %s", logged)
 	}
 }
 
-func TestStreamerOhneWebhookNurLogs(t *testing.T) {
+func TestStreamerWithoutWebhookOnlyLogs(t *testing.T) {
 	st := newFakeStreamStore()
 	logs := &syncBuffer{}
 	streamer := auditstream.New(st, auditstream.Config{
@@ -169,7 +169,7 @@ func TestStreamerOhneWebhookNurLogs(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for !bytes.Contains([]byte(logs.String()), []byte("host.enrolled")) {
 		if time.Now().After(deadline) {
-			t.Fatalf("event nicht geloggt: %s", logs.String())
+			t.Fatalf("event not logged: %s", logs.String())
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

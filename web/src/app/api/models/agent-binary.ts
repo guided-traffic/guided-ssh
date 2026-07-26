@@ -6,7 +6,7 @@ export interface AgentBinary {
   os: string;
 
   /**
-   * Hex-SHA-256 (sha256sum-kompatibel)
+   * Hex SHA-256 (sha256sum-compatible)
    */
   sha256: string;
   size: number;

@@ -6,9 +6,9 @@ metadata:
 spec:
   chart:
     spec:
-      # Staging folgt Patch-/Minor-Releases automatisch: Flux prüft das
-      # Helm-Repo im chart.spec.interval und rollt neue Versionen ohne
-      # Commit aus — Frühwarnung, bevor production gepinnt nachzieht.
+      # Staging follows patch/minor releases automatically: Flux checks the
+      # Helm repo on chart.spec.interval and rolls out new versions without
+      # a commit — an early warning before production, which is pinned, catches up.
       version: ">=0.1.0 <0.2.0"
   values:
     config:

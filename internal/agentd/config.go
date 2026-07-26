@@ -1,7 +1,7 @@
-// Package agentd implementiert den Host-Agenten gssh-agentd (Phase 5):
-// Enrollment gegen den gssh-server, automatische Erneuerung des
-// Host-Zertifikats, Pflege des TrustedUserCAKeys-Bundles und der
-// AuthorizedPrincipalsCommand-Helper mit Fail-closed-Cache.
+// Package agentd implements the host agent gssh-agentd (phase 5):
+// enrollment against the gssh server, automatic renewal of the host
+// certificate, maintenance of the TrustedUserCAKeys bundle, and the
+// AuthorizedPrincipalsCommand helper with a fail-closed cache.
 package agentd
 
 import (
@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Default-Pfade und -Intervalle des Agenten.
+// Default paths and intervals of the agent.
 const (
 	DefaultStateDir = "/var/lib/guided-ssh"
 	DefaultSSHDir   = "/etc/ssh"
@@ -25,62 +25,62 @@ const (
 	defaultRenewInterval  = 5 * time.Minute
 )
 
-// Config ist die beim Enrollment geschriebene Agent-Konfiguration
+// Config is the agent configuration written during enrollment
 // (<state-dir>/config.yaml).
 type Config struct {
-	// AgentURL ist die mTLS-Agent-API des Servers (https://…).
+	// AgentURL is the mTLS agent API of the server (https://…).
 	AgentURL string `yaml:"agent_url"`
-	// HostID ist die beim Enrollment vergebene Host-UUID.
+	// HostID is the host UUID assigned during enrollment.
 	HostID string `yaml:"host_id"`
-	// HostName ist der registrierte Hostname.
+	// HostName is the registered hostname.
 	HostName string `yaml:"host_name"`
-	// SSHKeyPath ist der SSH-Host-Public-Key, dessen Zertifikat gepflegt wird.
+	// SSHKeyPath is the SSH host public key whose certificate is maintained.
 	SSHKeyPath string `yaml:"ssh_key_path"`
-	// SSHDir ist das sshd-Konfigurationsverzeichnis (Bundle, Zertifikat, Snippet).
+	// SSHDir is the sshd configuration directory (bundle, certificate, snippet).
 	SSHDir string `yaml:"ssh_dir"`
-	// SocketPath ist der Unix-Socket des Principals-Helpers.
+	// SocketPath is the unix socket of the principals helper.
 	SocketPath string `yaml:"socket_path"`
-	// CacheTTL: solange werden Principals bei nicht erreichbarer API noch aus
-	// dem Cache beantwortet; danach fail-closed.
+	// CacheTTL: how long principals are still served from the cache while the
+	// API is unreachable; fail-closed afterward.
 	CacheTTL Duration `yaml:"cache_ttl"`
-	// BundleInterval ist das Aktualisierungsintervall des CA-Bundles.
+	// BundleInterval is the refresh interval of the CA bundle.
 	BundleInterval Duration `yaml:"bundle_interval"`
-	// RenewInterval ist das Prüfintervall der Zertifikatserneuerung.
+	// RenewInterval is the check interval for certificate renewal.
 	RenewInterval Duration `yaml:"renew_interval"`
-	// ReloadCommand wird nach dem Schreiben eines neuen Host-Zertifikats
-	// ausgeführt (z. B. "systemctl reload sshd"); leer = nichts.
+	// ReloadCommand runs after writing a new host certificate (e.g.
+	// "systemctl reload sshd"); empty = nothing.
 	ReloadCommand string `yaml:"reload_command,omitempty"`
-	// SessionAudit aktiviert das Host-Session-/sudo-Audit (Phase 9, Opt-in beim
-	// Enroll): schreibende Socket-Endpunkte, Spool und Flush an den Server. Ohne
-	// das Flag verhält sich der Daemon wie in Phase 5.
+	// SessionAudit enables host session/sudo audit (phase 9, opt-in at
+	// enroll): writable socket endpoints, spool, and flush to the server.
+	// Without the flag the daemon behaves as in phase 5.
 	SessionAudit bool `yaml:"session_audit,omitempty"`
 }
 
-// Duration ist time.Duration mit YAML-Marshalling als Go-Duration-String
-// ("5m") — menschenlesbar in config.yaml (analog internal/cli, dort nur lesend).
+// Duration is time.Duration with YAML marshalling as a Go duration string
+// ("5m") — human-readable in config.yaml (mirrors internal/cli, read-only there).
 type Duration time.Duration
 
-// UnmarshalYAML implementiert yaml.Unmarshaler.
+// UnmarshalYAML implements yaml.Unmarshaler.
 func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 	parsed, err := time.ParseDuration(node.Value)
 	if err != nil {
-		return fmt.Errorf("ungültige dauer %q: %w", node.Value, err)
+		return fmt.Errorf("invalid duration %q: %w", node.Value, err)
 	}
 	*d = Duration(parsed)
 	return nil
 }
 
-// MarshalYAML implementiert yaml.Marshaler.
+// MarshalYAML implements yaml.Marshaler.
 func (d Duration) MarshalYAML() (any, error) {
 	return time.Duration(d).String(), nil
 }
 
-// Paths sind die abgeleiteten Dateipfade eines State-Verzeichnisses.
+// Paths are the derived file paths of a state directory.
 type Paths struct {
 	StateDir string
 }
 
-// Dateien im State-Verzeichnis.
+// Files in the state directory.
 func (p Paths) ConfigFile() string    { return filepath.Join(p.StateDir, "config.yaml") }
 func (p Paths) AgentKeyFile() string  { return filepath.Join(p.StateDir, "agent.key") }
 func (p Paths) AgentCertFile() string { return filepath.Join(p.StateDir, "agent.crt") }
@@ -88,31 +88,31 @@ func (p Paths) ServerCAFile() string  { return filepath.Join(p.StateDir, "server
 func (p Paths) CacheFile() string     { return filepath.Join(p.StateDir, "principals-cache.json") }
 func (p Paths) DefaultSocket() string { return filepath.Join(p.StateDir, "agentd.sock") }
 
-// SocketTokenFile schützt die schreibenden Socket-Endpunkte (Phase 9): nur
-// root-Helfer können das Token lesen und Events einliefern (0600).
+// SocketTokenFile protects the writable socket endpoints (phase 9): only
+// the root helper can read the token and submit events (0600).
 func (p Paths) SocketTokenFile() string { return filepath.Join(p.StateDir, "socket-token") }
 
-// SpoolFile ist der lokale, verlust-tolerante Puffer der Session-Events
-// (JSON-Lines), bis der Daemon sie an den Server flusht.
+// SpoolFile is the local, loss-tolerant buffer of session events (JSON
+// lines) until the daemon flushes them to the server.
 func (p Paths) SpoolFile() string { return filepath.Join(p.StateDir, "sessions-spool.jsonl") }
 
-// HostCertPath leitet den Zertifikatspfad aus dem Public-Key-Pfad ab
+// HostCertPath derives the certificate path from the public key path
 // (ssh_host_ed25519_key.pub → ssh_host_ed25519_key-cert.pub).
 func HostCertPath(sshKeyPath string) string {
 	return strings.TrimSuffix(sshKeyPath, ".pub") + "-cert.pub"
 }
 
-// UserCAPath ist die TrustedUserCAKeys-Datei im sshd-Verzeichnis.
+// UserCAPath is the TrustedUserCAKeys file in the sshd directory.
 func UserCAPath(sshDir string) string {
 	return filepath.Join(sshDir, "guided-ssh-user-ca.pub")
 }
 
-// SnippetPath ist der generierte sshd-Konfigurations-Schnipsel.
+// SnippetPath is the generated sshd configuration snippet.
 func SnippetPath(sshDir string) string {
 	return filepath.Join(sshDir, "sshd_config.d", "guided-ssh.conf")
 }
 
-// applyDefaults füllt leere Intervalle mit den Defaults.
+// applyDefaults fills empty intervals with their defaults.
 func (c *Config) applyDefaults(paths Paths) {
 	if c.CacheTTL <= 0 {
 		c.CacheTTL = Duration(defaultCacheTTL)
@@ -131,25 +131,25 @@ func (c *Config) applyDefaults(paths Paths) {
 	}
 }
 
-// LoadConfig liest die Agent-Konfiguration aus dem State-Verzeichnis.
+// LoadConfig reads the agent configuration from the state directory.
 func LoadConfig(stateDir string) (*Config, error) {
 	paths := Paths{StateDir: stateDir}
 	raw, err := os.ReadFile(paths.ConfigFile())
 	if err != nil {
-		return nil, fmt.Errorf("agent-konfiguration lesen (enrollment fehlt?): %w", err)
+		return nil, fmt.Errorf("reading agent configuration (missing enrollment?): %w", err)
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("agent-konfiguration %s: %w", paths.ConfigFile(), err)
+		return nil, fmt.Errorf("agent configuration %s: %w", paths.ConfigFile(), err)
 	}
 	if cfg.AgentURL == "" || cfg.HostID == "" || cfg.SSHKeyPath == "" {
-		return nil, fmt.Errorf("agent-konfiguration %s unvollständig", paths.ConfigFile())
+		return nil, fmt.Errorf("agent configuration %s incomplete", paths.ConfigFile())
 	}
 	cfg.applyDefaults(paths)
 	return &cfg, nil
 }
 
-// writeConfig persistiert die Agent-Konfiguration.
+// writeConfig persists the agent configuration.
 func writeConfig(paths Paths, cfg *Config) error {
 	raw, err := yaml.Marshal(cfg)
 	if err != nil {

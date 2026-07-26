@@ -1,12 +1,12 @@
-# Default-Werte für das guided-ssh-Chart.
-# Secrets werden NIE im Chart erzeugt — ausschließlich existingSecret-Referenzen
-# (kompatibel mit external-secrets und SOPS), siehe README.
+# Default values for the guided-ssh chart.
+# Secrets are NEVER created by the chart — only existingSecret references
+# (compatible with external-secrets and SOPS), see README.
 
 replicaCount: 1
 
 image:
   repository: docker.io/guidedtraffic/guided-ssh
-  # Default: Chart-appVersion
+  # Default: chart appVersion
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -14,15 +14,15 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Secrets (Pflicht): existierende Secrets — das Chart erzeugt keine.
-# Postgres-Zugang und CA-Master-Key sind getrennt referenzierbar; beide dürfen
-# auch auf dasselbe Secret zeigen. Die Key-Namen sind frei belegbar, damit
-# vorhandene Secrets (z. B. das App-Secret von CloudNativePG) direkt nutzbar
-# sind — Details und Beispiele im README.
+# Secrets (mandatory): existing secrets — the chart creates none.
+# Postgres access and CA master key can be referenced separately; both may
+# also point to the same secret. Key names are freely assignable so
+# existing secrets (e.g. CloudNativePG's app secret) can be used directly
+# — details and examples in the README.
 secrets:
   db:
-    # Name des Secrets mit den Postgres-Verbindungsdaten (Pflicht).
-    # Beispiel:
+    # Name of the secret with the Postgres connection data (mandatory).
+    # Example:
     #   kubectl create secret generic guided-ssh-db \
     #     --from-literal=host=db.example.com \
     #     --from-literal=port=5432 \
@@ -31,12 +31,12 @@ secrets:
     #     --from-literal=database=gssh \
     #     --from-literal=sslmode=require
     existingSecret: ""
-    # Keys im Secret → GSSH_DB_*-Env. An das vorhandene Secret anpassen
-    # (CloudNativePG-App-Secret: database: dbname, username: user).
+    # Keys in the secret → GSSH_DB_* env. Adjust to match the existing secret
+    # (CloudNativePG app secret: database: dbname, username: user).
     keys:
       # GSSH_DB_HOST
       host: host
-      # GSSH_DB_PORT — optional: fehlt der Key im Secret, gilt 5432
+      # GSSH_DB_PORT — optional: if the key is missing from the secret, 5432 applies
       port: port
       # GSSH_DB_USER
       username: username
@@ -44,65 +44,65 @@ secrets:
       password: password
       # GSSH_DB_NAME
       database: database
-      # GSSH_DB_SSLMODE — optional: fehlt der Key im Secret, gilt der
-      # Treiber-Default "prefer"
+      # GSSH_DB_SSLMODE — optional: if the key is missing from the secret, the
+      # driver default "prefer" applies
       sslmode: sslmode
   ca:
-    # Herkunft der CA-Private-Keys (GSSH_CA_MODE):
-    #   managed      — der Server erzeugt sie beim ersten Start und legt sie
-    #                  AES-256-GCM-verschlüsselt in der Datenbank ab (Default,
-    #                  bisheriges Verhalten).
-    #   self-managed — alle drei CAs (user, host, mtls) kommen als Dateien aus
-    #                  einem Secret (GitOps/SOPS); die Datenbank speichert kein
-    #                  privates Schlüsselmaterial. Erfordert
+    # Origin of the CA private keys (GSSH_CA_MODE):
+    #   managed      — the server generates them on first start and stores
+    #                  them AES-256-GCM-encrypted in the database (default,
+    #                  previous behavior).
+    #   self-managed — all three CAs (user, host, mtls) come as files from
+    #                  a secret (GitOps/SOPS); the database stores no
+    #                  private key material. Requires
     #                  secrets.ca.selfManaged.existingSecret.
     mode: managed
-    # Name des Secrets mit dem CA-Master-Key (Pflicht in BEIDEN Modi; darf
-    # secrets.db entsprechen). Beispiel:
+    # Name of the secret with the CA master key (mandatory in BOTH modes; may
+    # match secrets.db). Example:
     #   kubectl create secret generic guided-ssh-ca \
     #     --from-literal=ca-master-key="$(openssl rand -base64 32)"
     existingSecret: ""
     keys:
-      # GSSH_CA_MASTER_KEY — Base64, 32 Bytes (AES-256)
+      # GSSH_CA_MASTER_KEY — base64, 32 bytes (AES-256)
       masterKey: ca-master-key
-    # Nur bei mode=self-managed ausgewertet.
+    # Only evaluated when mode=self-managed.
     selfManaged:
-      # Secret mit den vier CA-Dateien; wird read-only unter mountPath
-      # gemountet (Erzeugung: siehe README). Darf secrets.ca.existingSecret
-      # entsprechen — gemountet werden ausschließlich die vier Keys unten.
+      # Secret with the four CA files; mounted read-only under mountPath
+      # (generation: see README). May match secrets.ca.existingSecret
+      # — only the four keys below get mounted.
       existingSecret: ""
-      # Key-Namen im Secret. Der Key-Name ist zugleich der Dateiname unter
-      # mountPath und damit der Wert der jeweiligen GSSH_CA_*_FILE-Variable.
+      # Key names in the secret. The key name is also the file name under
+      # mountPath and thus the value of the respective GSSH_CA_*_FILE variable.
       keys:
-        # GSSH_CA_USER_KEY_FILE — OpenSSH-Private-Key-PEM der Benutzer-CA
+        # GSSH_CA_USER_KEY_FILE — OpenSSH private key PEM of the user CA
         userKey: user-ca
-        # GSSH_CA_HOST_KEY_FILE — OpenSSH-Private-Key-PEM der Host-CA
+        # GSSH_CA_HOST_KEY_FILE — OpenSSH private key PEM of the host CA
         hostKey: host-ca
-        # GSSH_CA_MTLS_KEY_FILE — PKCS#8-PEM des Agent-mTLS-CA-Keys
+        # GSSH_CA_MTLS_KEY_FILE — PKCS#8 PEM of the agent mTLS CA key
         mtlsKey: mtls-ca.key
-        # GSSH_CA_MTLS_CERT_FILE — X.509-CA-Zertifikat der Agent-mTLS-CA
+        # GSSH_CA_MTLS_CERT_FILE — X.509 CA certificate of the agent mTLS CA
         mtlsCert: mtls-ca.crt
-      # Mount-Pfad im Server-Container (read-only).
+      # Mount path in the server container (read-only).
       mountPath: /etc/gssh/ca
 
-# Interne Datenbank — NUR für Test-Umgebungen. Startet Postgres als nativen
-# Sidecar (Init-Container mit restartPolicy Always, benötigt Kubernetes >= 1.29)
-# im Server-Pod: nur über 127.0.0.1 erreichbar, feste Dev-Credentials, Daten
-# in einem emptyDir — jeder Pod-Neustart beginnt mit leerer Datenbank.
-# Schließt secrets.db.existingSecret aus (Render-Fehler, Schutz vor
-# versehentlicher Nutzung) und erfordert replicaCount=1 ohne Autoscaling.
+# Internal database — ONLY for test environments. Starts Postgres as a native
+# sidecar (init container with restartPolicy Always, requires Kubernetes >= 1.29)
+# in the server pod: reachable only via 127.0.0.1, fixed dev credentials, data
+# in an emptyDir — every pod restart begins with an empty database.
+# Excludes secrets.db.existingSecret (render error, protection against
+# accidental use) and requires replicaCount=1 without autoscaling.
 internalDatabase:
   enabled: false
   image: docker.io/library/postgres:18-alpine
-  # Eigene Pull-Policy: image.pullPolicy des Servers (z. B. Never bei lokal
-  # gebauten Images) passt für das öffentliche Postgres-Image nicht.
+  # Separate pull policy: the server's image.pullPolicy (e.g. Never for locally
+  # built images) doesn't fit the public Postgres image.
   pullPolicy: IfNotPresent
   resources: {}
 
-# Laufzeit-Konfiguration (landet als Env im Deployment; 1:1-Mapping auf die
-# GSSH_*-Variablen des Servers).
+# Runtime configuration (ends up as env in the Deployment; 1:1 mapping to the
+# server's GSSH_* variables).
 config:
-  # Benutzer-OIDC (IdP). Ohne Issuer bleibt /v1/sign/user deaktiviert.
+  # User OIDC (IdP). Without an issuer, /v1/sign/user stays disabled.
   oidc:
     # GSSH_OIDC_ISSUER
     issuer: ""
@@ -110,72 +110,72 @@ config:
     clientID: ""
     # GSSH_UI_OIDC_CLIENT_ID (leer = clientID)
     uiClientID: ""
-    # Server-seitiger UI-Login (BFF): Secret mit dem OIDC-Client-Secret der
-    # UI. Gesetzt ⇒ der Server führt den Login selbst aus (/v1/auth/…,
-    # Session-Cookie, kein CORS gegen den IdP); leer ⇒ UI-Login deaktiviert.
+    # Server-side UI login (BFF): secret with the UI's OIDC client secret.
+    # Set ⇒ the server performs the login itself (/v1/auth/…,
+    # session cookie, no CORS against the IdP); empty ⇒ UI login disabled.
     uiExistingSecret: ""
-    # Key im Secret mit dem Client-Secret (GSSH_UI_OIDC_CLIENT_SECRET).
+    # Key in the secret with the client secret (GSSH_UI_OIDC_CLIENT_SECRET).
     uiExistingSecretKey: "client-secret"
-    # GSSH_UI_BASE_URL: externe Basis-URL der UI für die OIDC-Redirect-URL,
-    # z. B. https://gssh.example.com (leer = aus dem Request abgeleitet).
+    # GSSH_UI_BASE_URL: external base URL of the UI for the OIDC redirect URL,
+    # e.g. https://gssh.example.com (empty = derived from the request).
     uiBaseURL: ""
-  # GitLab-CI-Issuer. Ohne Issuer bleibt /v1/sign/ci deaktiviert.
+  # GitLab CI issuer. Without an issuer, /v1/sign/ci stays disabled.
   ci:
-    # GSSH_CI_ISSUER (GitLab-Basis-URL)
+    # GSSH_CI_ISSUER (GitLab base URL)
     issuer: ""
-    # GSSH_CI_AUDIENCE (leer = Default guided-ssh)
+    # GSSH_CI_AUDIENCE (empty = default guided-ssh)
     audience: ""
-  # Rollen-Gruppen des IdP.
+  # Role groups of the IdP.
   groups:
-    # GSSH_ADMIN_GROUP (leer ⇒ Admin-API deaktiviert)
+    # GSSH_ADMIN_GROUP (empty ⇒ admin API disabled)
     admin: ""
     # GSSH_AUDITOR_GROUP
     auditor: ""
     # GSSH_READONLY_GROUP
     readOnly: ""
-  # Gruppen-Sync via Keycloak-Admin-API (optional).
+  # Group sync via the Keycloak admin API (optional).
   keycloak:
     # GSSH_KC_BASE_URL
     baseURL: ""
     # GSSH_KC_REALM
     realm: ""
-    # GSSH_KC_CLIENT_ID (leer ⇒ Sync deaktiviert)
+    # GSSH_KC_CLIENT_ID (empty ⇒ sync disabled)
     clientID: ""
-    # GSSH_KC_CLIENT_SECRET aus einem Secret (leer ⇒ nicht gesetzt)
+    # GSSH_KC_CLIENT_SECRET from a secret (empty ⇒ not set)
     existingSecret: ""
     existingSecretKey: kc-client-secret
-    # GSSH_KC_SYNC_INTERVAL (Go-Duration, leer = 5m)
+    # GSSH_KC_SYNC_INTERVAL (Go duration, empty = 5m)
     syncInterval: ""
-  # Audit-Streaming (SIEM).
+  # Audit streaming (SIEM).
   auditStream:
-    # GSSH_AUDIT_STREAM ("true" aktiviert JSON-Log-Streaming)
+    # GSSH_AUDIT_STREAM ("true" enables JSON log streaming)
     logs: false
     # GSSH_AUDIT_WEBHOOK_URL
     webhookURL: ""
-    # GSSH_AUDIT_STREAM_INTERVAL (Go-Duration, leer = 10s)
+    # GSSH_AUDIT_STREAM_INTERVAL (Go duration, empty = 10s)
     interval: ""
-  # Rate-Limiting der Sign-/Enroll-Endpunkte.
+  # Rate limiting of the sign/enroll endpoints.
   rateLimit:
-    # GSSH_SIGN_RATE_PER_MINUTE (leer = 60; "0" deaktiviert)
+    # GSSH_SIGN_RATE_PER_MINUTE (empty = 60; "0" disables it)
     perMinute: ""
-    # GSSH_SIGN_FAIL_PER_MINUTE (leer = 10)
+    # GSSH_SIGN_FAIL_PER_MINUTE (empty = 10)
     failPerMinute: ""
-    # GSSH_RATE_TRUST_PROXY — hinter Ingress i. d. R. true (Client-IP aus X-Forwarded-For)
+    # GSSH_RATE_TRUST_PROXY — usually true behind an ingress (client IP from X-Forwarded-For)
     trustProxy: true
-  # Zusätzliche Env-Einträge (Liste von EnvVar-Objekten).
+  # Additional env entries (list of EnvVar objects).
   extraEnv: []
 
-# Agent-API (mTLS) auf eigenem Port.
+# Agent API (mTLS) on its own port.
 agent:
   enabled: true
   port: 8443
-  # GSSH_AGENT_TLS_NAMES: SANs des mTLS-Server-Zertifikats. Leer ⇒ Default
-  # "<fullname>-agent.<namespace>.svc" + externer Zugriff braucht den
-  # öffentlichen DNS-Namen, z. B. "gssh-agent.example.com".
+  # GSSH_AGENT_TLS_NAMES: SANs of the mTLS server certificate. Empty ⇒ default
+  # "<fullname>-agent.<namespace>.svc" + external access needs the
+  # public DNS name, e.g. "gssh-agent.example.com".
   tlsNames: ""
-  # Separater Service für die Agent-API; für Agents außerhalb des Clusters
-  # type auf LoadBalancer stellen — mTLS erfordert TLS-Passthrough, kein
-  # normaler Ingress.
+  # Separate service for the agent API; for agents outside the cluster,
+  # set type to LoadBalancer — mTLS requires TLS passthrough, not a
+  # normal ingress.
   service:
     enabled: true
     type: ClusterIP
@@ -183,39 +183,39 @@ agent:
     annotations: {}
 
 hostRollout:
-  # One-Command-Host-Install (UI-Button "Host hinzufügen"). Bei true werden
-  # die Pflicht-Envs verlangt (helm scheitert sonst beim Rendern).
+  # One-command host install (UI button "Add host"). When true, the
+  # required envs are enforced (helm otherwise fails at render time).
   enabled: false
-  # Externe mTLS-Agent-URL für enrollte Agenten (Pflicht bei enabled).
+  # External mTLS agent URL for enrolled agents (mandatory when enabled).
   agentPublicUrl: ""
-  # Externe Public-URL (install_command + Pin-Dial); leer = config.oidc.uiBaseURL.
+  # External public URL (install_command + pin dial); empty = config.oidc.uiBaseURL.
   publicUrl: ""
   pin:
-    # Pin-Quelle: dial (Default) | file | static — siehe Tabelle im README.
+    # Pin source: dial (default) | file | static — see the table in the README.
     source: dial
-    # source=static: Base64-SPKI-Pin (openssl-Snippet im README).
+    # source=static: base64 SPKI pin (openssl snippet in the README).
     static: ""
-    # source=file: TLS-Secret des Ingress; Chart mountet NUR tls.crt.
+    # source=file: TLS secret of the ingress; the chart mounts ONLY tls.crt.
     certSecretName: ""
-    # Refresh-Intervall des Pin-Dials (Go-Duration).
+    # Refresh interval of the pin dial (Go duration).
     refreshInterval: 5m
-  # Binary-Downloads pro Client-IP und Minute (0 = aus).
+  # Binary downloads per client IP and minute (0 = off).
   downloadRpm: 10
 
-# Prometheus-Metriken auf eigenem, nicht ingress-exponiertem Port.
+# Prometheus metrics on their own, non-ingress-exposed port.
 metrics:
   enabled: true
   port: 9090
   serviceMonitor:
-    # Benötigt die Prometheus-Operator-CRDs.
+    # Requires the Prometheus Operator CRDs.
     enabled: false
     interval: 30s
     scrapeTimeout: 10s
-    # Zusätzliche Labels, z. B. { release: kube-prometheus-stack }
+    # Additional labels, e.g. { release: kube-prometheus-stack }
     labels: {}
 
-# DB-Migrationen als Init-Container (goose, Postgres-Advisory-Lock —
-# parallele Replikas/Rollouts sind serialisiert).
+# DB migrations as an init container (goose, Postgres advisory lock —
+# parallel replicas/rollouts are serialized).
 migrations:
   enabled: true
   resources: {}
@@ -241,7 +241,7 @@ serviceAccount:
   annotations: {}
   name: ""
 
-# Der Server braucht keine Kubernetes-API.
+# The server doesn't need the Kubernetes API.
 automountServiceAccountToken: false
 
 podAnnotations: {}
@@ -296,18 +296,18 @@ autoscaling:
 
 networkPolicy:
   enabled: false
-  # Ingress-Quellen für den HTTP-Port (leer = alle); Liste von
-  # NetworkPolicyPeer-Objekten, z. B. namespaceSelector des Ingress-Controllers.
+  # Ingress sources for the HTTP port (empty = all); list of
+  # NetworkPolicyPeer objects, e.g. namespaceSelector of the ingress controller.
   httpFrom: []
-  # Quellen für den Metrics-Port (leer = alle), z. B. Monitoring-Namespace.
+  # Sources for the metrics port (empty = all), e.g. monitoring namespace.
   metricsFrom: []
-  # Quellen für den Agent-mTLS-Port (leer = alle; Agents stehen meist
-  # außerhalb des Clusters und kommen über den LoadBalancer).
+  # Sources for the agent mTLS port (empty = all; agents usually sit
+  # outside the cluster and come in through the LoadBalancer).
   agentFrom: []
-  # Egress offen lassen (DB, IdP, GitLab und Webhook liegen i. d. R.
-  # außerhalb; false ⇒ nur DNS + egressRules).
+  # Leave egress open (DB, IdP, GitLab, and webhook usually sit
+  # outside; false ⇒ only DNS + egressRules).
   egressAllowAll: true
-  # Eigene Egress-Regeln, falls egressAllowAll=false.
+  # Custom egress rules, if egressAllowAll=false.
   egressRules: []
 
 nodeSelector: {}
@@ -315,11 +315,11 @@ tolerations: []
 affinity: {}
 topologySpreadConstraints: []
 
-# Dev-only PostgreSQL-Subchart (bitnami/postgresql). Produktiv: extern oder
-# CloudNativePG, siehe README.
+# Dev-only PostgreSQL subchart (bitnami/postgresql). In production: external
+# or CloudNativePG, see README.
 postgresql:
   enabled: false
   auth:
     username: gssh
     database: gssh
-    # Passwort für Entwicklung explizit setzen oder existingSecret nutzen.
+    # Set the password explicitly for development or use existingSecret.

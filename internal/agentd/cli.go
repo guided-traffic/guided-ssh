@@ -15,8 +15,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
 
-// Run führt das Agent-CLI aus und liefert den Exit-Code (0 ok, 1 Fehler,
-// 2 Aufruffehler).
+// Run executes the agent CLI and returns the exit code (0 ok, 1 error,
+// 2 usage error).
 func Run(stdout, stderr io.Writer, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -35,7 +35,7 @@ func Run(stdout, stderr io.Writer, args []string) int {
 		return runPrincipalsCmd(ctx, rest, stdout, stderr)
 	case "pam-session":
 		runPAMSessionCmd(ctx, rest, stderr)
-		return 0 // fail-open: pam_exec darf niemals blockieren
+		return 0 // fail-open: pam_exec must never block
 	case "version":
 		fmt.Fprintln(stdout, version.String())
 		return 0
@@ -43,44 +43,44 @@ func Run(stdout, stderr io.Writer, args []string) int {
 		usage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "gssh-agentd: unbekanntes kommando %q\n\n", command)
+		fmt.Fprintf(stderr, "gssh-agentd: unknown command %q\n\n", command)
 		usage(stderr)
 		return 2
 	}
 }
 
-// usage gibt die Kommandoübersicht aus.
+// usage prints the command overview.
 func usage(w io.Writer) {
-	fmt.Fprint(w, `gssh-agentd — host-agent von guided-ssh
+	fmt.Fprint(w, `gssh-agentd — host agent of guided-ssh
 
-kommandos:
+commands:
   enroll --server url --agent-url url --token t [--hostname n] [--tags k=v,…]
-         [--pin b64] [--require-pin] [--state-dir d] [--ssh-dir d] [--ssh-key pfad]
+         [--pin b64] [--require-pin] [--state-dir d] [--ssh-dir d] [--ssh-key path]
          [--session-audit]
-         host registrieren: zertifikate holen, sshd-konfiguration schreiben;
-         --session-audit aktiviert zusätzlich session-/sudo-audit (pam_exec);
-         --require-pin bricht ohne --pin ab (bedienfehler-schutz)
+         register the host: fetch certificates, write sshd configuration;
+         --session-audit additionally enables session/sudo audit (pam_exec);
+         --require-pin aborts without --pin (protects against operator mistakes)
   run [--state-dir d]
-         daemon: zertifikat erneuern (2/3 laufzeit), ca-bundle pflegen,
-         principals-cache + unix-socket für sshd bedienen
+         daemon: renew certificate (at 2/3 of its validity), maintain ca bundle,
+         serve principals cache + unix socket for sshd
   principals -user <name> [-serial N] [-keyid ID] [-state-dir d]
-         AuthorizedPrincipalsCommand-helper (fail-closed); serial/keyid (sshd-
-         tokens) nur bei aktivem session-audit (korrelation session↔zertifikat)
+         AuthorizedPrincipalsCommand helper (fail-closed); serial/keyid (sshd
+         tokens) only with session audit enabled (correlates session ↔ certificate)
   pam-session [-state-dir d]
-         pam_exec-ziel (session open/close in sshd/sudo); meldet session-/sudo-
-         events an den daemon, beendet sich immer mit 0 (fail-open)
+         pam_exec target (session open/close in sshd/sudo); reports session/sudo
+         events to the daemon, always exits 0 (fail-open)
   version
-         version ausgeben
+         print version
 `)
 }
 
-// envRequirePin ist das Env-Äquivalent zu --require-pin.
+// envRequirePin is the env equivalent of --require-pin.
 const envRequirePin = "GSSH_ENROLL_REQUIRE_PIN"
 
-// requirePinFromEnv liest GSSH_ENROLL_REQUIRE_PIN als Default für
-// --require-pin. Jeder Wert außer "0"/"false" aktiviert die Prüfung: eine
-// gesetzte, aber unerwartet geschriebene Variable soll nicht still wirkungslos
-// bleiben (fail-closed).
+// requirePinFromEnv reads GSSH_ENROLL_REQUIRE_PIN as the default for
+// --require-pin. Any value other than "0"/"false" enables the check: a
+// variable that is set but written unexpectedly should not silently have no
+// effect (fail-closed).
 func requirePinFromEnv() bool {
 	switch strings.ToLower(os.Getenv(envRequirePin)) {
 	case "", "0", "false":
@@ -90,28 +90,28 @@ func requirePinFromEnv() bool {
 	}
 }
 
-// runEnrollCmd behandelt gssh-agentd enroll.
+// runEnrollCmd handles gssh-agentd enroll.
 func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh-agentd enroll", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	server := fs.String("server", "", "öffentliche api des gssh-servers (POST /v1/enroll)")
-	agentURL := fs.String("agent-url", "", "mtls-agent-api des gssh-servers")
-	token := fs.String("token", "", "einmaliges enrollment-token")
+	server := fs.String("server", "", "public api of the gssh server (POST /v1/enroll)")
+	agentURL := fs.String("agent-url", "", "mtls agent api of the gssh server")
+	token := fs.String("token", "", "one-time enrollment token")
 	hostname := fs.String("hostname", "", "hostname (default: os.Hostname)")
-	tagsFlag := fs.String("tags", "", "host-tags, z. B. env=prod,role=web")
-	pin := fs.String("pin", "", "spki-sha-256-pin des enroll-endpoints (base64)")
-	// --require-pin ist Bedienfehler-Schutz, kein MITM-Schutz: es verhindert,
-	// dass jemand die enroll-Zeile aus dem servierten install.sh kopiert,
-	// --pin weglässt und still ungepinnt enrollt. Wer das gepipte Script
-	// manipulieren kann, entfernt auch dieses Flag — dagegen schützen der
-	// HTTPS-Abruf und die serverseitigen Pin-Quellen, nicht dieses Flag.
-	// Das getemplatete install.sh setzt es immer; der manuelle und der
-	// deb/rpm-Pfad bleiben unverändert (Default aus).
-	requirePin := fs.Bool("require-pin", requirePinFromEnv(), "ohne --pin abbrechen (bedienfehler-schutz, kein mitm-schutz)")
-	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
-	sshDir := fs.String("ssh-dir", DefaultSSHDir, "sshd-konfigurationsverzeichnis")
-	sshKey := fs.String("ssh-key", "", "ssh-host-public-key (default: <ssh-dir>/ssh_host_ed25519_key.pub)")
-	sessionAudit := fs.Bool("session-audit", false, "host-session-/sudo-audit aktivieren (pam_exec-hooks, opt-in)")
+	tagsFlag := fs.String("tags", "", "host tags, e.g. env=prod,role=web")
+	pin := fs.String("pin", "", "spki sha-256 pin of the enroll endpoint (base64)")
+	// --require-pin protects against operator mistakes, not MITM: it prevents
+	// someone from copying the enroll line out of the served install.sh,
+	// dropping --pin, and enrolling unpinned without noticing. Anyone able to
+	// tamper with the piped script can also strip this flag — the HTTPS
+	// fetch and the server-side pin sources guard against that, not this flag.
+	// The templated install.sh always sets it; the manual and the deb/rpm
+	// path stay unchanged (default off).
+	requirePin := fs.Bool("require-pin", requirePinFromEnv(), "abort without --pin (protects against operator mistakes, not mitm)")
+	stateDir := fs.String("state-dir", DefaultStateDir, "state directory of the agent")
+	sshDir := fs.String("ssh-dir", DefaultSSHDir, "sshd configuration directory")
+	sshKey := fs.String("ssh-key", "", "ssh host public key (default: <ssh-dir>/ssh_host_ed25519_key.pub)")
+	sessionAudit := fs.Bool("session-audit", false, "enable host session/sudo audit (pam_exec hooks, opt-in)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -120,9 +120,9 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stderr, "gssh-agentd: %v\n", err)
 		return 2
 	}
-	// Abbruch vor jedem Netzwerk-Call: das Token bleibt unverbraucht.
+	// Abort before any network call: the token stays unused.
 	if *requirePin && *pin == "" {
-		fmt.Fprintf(stderr, "gssh-agentd: --require-pin gesetzt (oder %s), aber --pin fehlt — enrollment abgebrochen\n", envRequirePin)
+		fmt.Fprintf(stderr, "gssh-agentd: --require-pin set (or %s), but --pin is missing — enrollment aborted\n", envRequirePin)
 		return 2
 	}
 	opts := EnrollOptions{
@@ -132,17 +132,17 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		SessionAudit: *sessionAudit,
 	}
 	if err := Enroll(ctx, opts, stdout); err != nil {
-		fmt.Fprintf(stderr, "gssh-agentd: enrollment fehlgeschlagen: %v\n", err)
+		fmt.Fprintf(stderr, "gssh-agentd: enrollment failed: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-// runDaemonCmd behandelt gssh-agentd run.
+// runDaemonCmd handles gssh-agentd run.
 func runDaemonCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh-agentd run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
+	stateDir := fs.String("state-dir", DefaultStateDir, "state directory of the agent")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -153,20 +153,20 @@ func runDaemonCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		return 1
 	}
 	if err := daemon.Run(ctx); err != nil {
-		logger.Error("daemon beendet", "error", err)
+		logger.Error("daemon stopped", "error", err)
 		return 1
 	}
 	return 0
 }
 
-// runPrincipalsCmd behandelt gssh-agentd principals (sshd-Helper).
+// runPrincipalsCmd handles gssh-agentd principals (sshd helper).
 func runPrincipalsCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh-agentd principals", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
-	user := fs.String("user", "", "lokaler benutzername (%u aus sshd)")
-	serial := fs.Int64("serial", 0, "zertifikats-serial (%s aus sshd); 0 = keiner")
-	keyid := fs.String("keyid", "", "zertifikats-key-id (%i aus sshd)")
+	stateDir := fs.String("state-dir", DefaultStateDir, "state directory of the agent")
+	user := fs.String("user", "", "local username (%u from sshd)")
+	serial := fs.Int64("serial", 0, "certificate serial (%s from sshd); 0 = none")
+	keyid := fs.String("keyid", "", "certificate key id (%i from sshd)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -177,22 +177,22 @@ func runPrincipalsCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-// runPAMSessionCmd behandelt gssh-agentd pam-session (pam_exec-Ziel). Ein Fehler
-// wird nach stderr geloggt; der Aufrufer beendet sich immer mit 0 (fail-open),
-// damit der Hook niemals Login oder sudo blockiert.
+// runPAMSessionCmd handles gssh-agentd pam-session (pam_exec target). An error
+// is logged to stderr; the caller always exits 0 (fail-open) so the hook
+// never blocks login or sudo.
 func runPAMSessionCmd(ctx context.Context, args []string, stderr io.Writer) {
 	fs := flag.NewFlagSet("gssh-agentd pam-session", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	stateDir := fs.String("state-dir", DefaultStateDir, "state-verzeichnis des agenten")
+	stateDir := fs.String("state-dir", DefaultStateDir, "state directory of the agent")
 	if err := fs.Parse(args); err != nil {
 		return
 	}
 	if err := RunPAMSession(ctx, *stateDir, os.Getenv, time.Now); err != nil {
-		fmt.Fprintf(stderr, "gssh-agentd: pam-session (ignoriert): %v\n", err)
+		fmt.Fprintf(stderr, "gssh-agentd: pam-session (ignored): %v\n", err)
 	}
 }
 
-// parseTags parst "k=v,k2=v2" in eine Map (identisch zu gssh-server).
+// parseTags parses "k=v,k2=v2" into a map (identical to gssh-server).
 func parseTags(raw string) (map[string]string, error) {
 	tags := map[string]string{}
 	if raw == "" {
@@ -201,7 +201,7 @@ func parseTags(raw string) (map[string]string, error) {
 	for _, pair := range strings.Split(raw, ",") {
 		key, value, found := strings.Cut(pair, "=")
 		if !found || key == "" {
-			return nil, fmt.Errorf("ungültiges tag %q (erwartet key=value)", pair)
+			return nil, fmt.Errorf("invalid tag %q (expected key=value)", pair)
 		}
 		tags[key] = value
 	}

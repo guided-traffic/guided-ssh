@@ -11,41 +11,41 @@ import { pinErrorText, rolloutMissingText } from './hosts';
 const COMMAND =
   'curl -fsSL https://gssh.example.com/install.sh | sudo sh -s -- --token gssh-et-abcdefgh1234';
 
-describe('Host-hinzufügen-Dialog', () => {
-  it('maskToken zeigt nur Prefix und die letzten vier Zeichen', () => {
+describe('Add Host dialog', () => {
+  it('maskToken shows only the prefix and the last four characters', () => {
     const masked = maskToken('gssh-et-abcdefgh1234');
     expect(masked.startsWith('gssh-et-')).toBe(true);
     expect(masked.endsWith('1234')).toBe(true);
     expect(masked).not.toContain('abcdefgh');
   });
 
-  it('withArch hängt die Auswahl an, „auto“ lässt den Befehl unverändert', () => {
+  it('withArch appends the selection, "auto" leaves the command unchanged', () => {
     expect(withArch(COMMAND, '')).toBe(COMMAND);
     expect(withArch(COMMAND, 'arm64')).toBe(`${COMMAND} --arch arm64`);
   });
 
-  it('twoStepCommands baut die Variante ohne curl | sh mit gleichen Flags', () => {
+  it('twoStepCommands builds the variant without curl | sh with the same flags', () => {
     const lines = twoStepCommands(`${COMMAND} --session-audit`).split('\n');
     expect(lines[0]).toBe('curl -fsSLO https://gssh.example.com/install.sh');
     expect(lines[2]).toBe('sudo sh install.sh --token gssh-et-abcdefgh1234 --session-audit');
   });
 
-  it('rolloutMissingText übersetzt die Gate-Bedingungen in Klartext', () => {
+  it('rolloutMissingText translates the gate conditions into plain text', () => {
     const text = rolloutMissingText(['pin', 'agent_public_url']);
-    expect(text).toContain('SPKI-Pin');
+    expect(text).toContain('SPKI pin');
     expect(text).toContain('GSSH_AGENT_PUBLIC_URL');
-    expect(rolloutMissingText(['unbekannt'])).toBe('unbekannt');
+    expect(rolloutMissingText(['unknown-key'])).toBe('unknown-key');
   });
 
-  it('pinErrorText übersetzt die Fehlerkategorie und verweist aufs Server-Log', () => {
+  it('pinErrorText translates the error category and points to the server log', () => {
     expect(pinErrorText('')).toBe('');
     const text = pinErrorText('chain_untrusted');
-    expect(text).toContain('nicht vertrauenswürdig');
-    expect(text).toContain('Server-Log');
-    expect(pinErrorText('unbekannt')).toContain('unbekannt');
+    expect(text).toContain('not trusted');
+    expect(text).toContain('server log');
+    expect(pinErrorText('unknown-category')).toContain('unknown-category');
   });
 
-  it('mintet und zeigt Token maskiert, Befehl folgt der Arch-Auswahl', async () => {
+  it('mints and shows the token masked, command follows the arch selection', async () => {
     const manifest: AgentManifest = {
       version: '1.2.3',
       rollout_ready: true,
@@ -84,7 +84,7 @@ describe('Host-hinzufügen-Dialog', () => {
       installLine(): string;
     };
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Session-Audit');
+    expect(fixture.nativeElement.textContent).toContain('session audit');
 
     dialog.tags = 'env=prod';
     dialog.sessionAudit = true;
@@ -98,12 +98,12 @@ describe('Host-hinzufügen-Dialog', () => {
       ttl_seconds: 3600,
       session_audit: true,
     });
-    // Das Token-Feld zeigt nur die maskierte Form; im Install-Befehl steht der
-    // Klartext bewusst (ohne ihn ist der Befehl nicht ausführbar).
+    // The token field shows only the masked form; the install command
+    // deliberately contains the plaintext (without it, the command isn't runnable).
     const rendered = fixture.nativeElement.textContent as string;
     expect(rendered).toContain(maskToken(minted.token));
     expect(rendered).toContain(COMMAND);
-    expect(rendered).toContain('14,8 MB');
+    expect(rendered).toContain('14.8 MB');
 
     dialog.arch = 'amd64';
     expect(dialog.installLine()).toBe(`${COMMAND} --arch amd64`);

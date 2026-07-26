@@ -11,7 +11,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// newTestSigner liefert eine Wegwerf-CA für Agent-Tests.
+// newTestSigner returns a throwaway CA for agent tests.
 func newTestSigner(t *testing.T) ssh.Signer {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -25,30 +25,30 @@ func newTestSigner(t *testing.T) ssh.Signer {
 	return signer
 }
 
-// addForeignKey legt einen fremden (nicht guided-ssh) Eintrag in den Agenten.
+// addForeignKey adds a foreign (non-guided-ssh) entry to the agent.
 func addForeignKey(t *testing.T, ag agent.Agent) {
 	t.Helper()
 	priv, _ := testKeyPair(t)
-	if err := ag.Add(agent.AddedKey{PrivateKey: priv, Comment: "fremder schlüssel"}); err != nil {
-		t.Fatalf("fremden key laden: %v", err)
+	if err := ag.Add(agent.AddedKey{PrivateKey: priv, Comment: "foreign key"}); err != nil {
+		t.Fatalf("loading foreign key: %v", err)
 	}
 }
 
-func TestConnectAgentOhneSocket(t *testing.T) {
+func TestConnectAgentWithoutSocket(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	if _, _, err := connectAgent(); err == nil || !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
-		t.Fatalf("erwartete SSH_AUTH_SOCK-fehler, bekam %v", err)
+		t.Fatalf("expected SSH_AUTH_SOCK error, got %v", err)
 	}
 }
 
-func TestConnectAgentSocketKaputt(t *testing.T) {
-	t.Setenv("SSH_AUTH_SOCK", "/nicht/vorhanden.sock")
+func TestConnectAgentSocketBroken(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "/does/not/exist.sock")
 	if _, _, err := connectAgent(); err == nil {
-		t.Fatal("erwartete verbindungsfehler")
+		t.Fatal("expected connection error")
 	}
 }
 
-func TestLoadIntoAgentUndGsshCerts(t *testing.T) {
+func TestLoadIntoAgentAndGsshCerts(t *testing.T) {
 	keyring := agent.NewKeyring()
 	signer := newTestSigner(t)
 	addForeignKey(t, keyring)
@@ -64,34 +64,34 @@ func TestLoadIntoAgentUndGsshCerts(t *testing.T) {
 		t.Fatalf("gsshCerts: %v", err)
 	}
 	if len(certs) != 1 || certs[0].KeyId != cert.KeyId {
-		t.Fatalf("erwartete genau unser zertifikat, bekam %d", len(certs))
+		t.Fatalf("expected exactly our certificate, got %d", len(certs))
 	}
 
-	// Zweiter Login ersetzt den Eintrag, der fremde Schlüssel bleibt.
+	// Second login replaces the entry; the foreign key remains.
 	priv2, pub2 := testKeyPair(t)
 	cert2 := testSignCert(t, signer, pub2, 2*time.Hour)
 	if err := loadIntoAgent(keyring, priv2, cert2); err != nil {
-		t.Fatalf("zweites loadIntoAgent: %v", err)
+		t.Fatalf("second loadIntoAgent: %v", err)
 	}
 	keys, err := keyring.List()
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(keys) != 2 { // fremder Schlüssel + genau ein guided-ssh-Eintrag
-		t.Errorf("agent hat %d einträge, erwartet 2", len(keys))
+	if len(keys) != 2 { // foreign key + exactly one guided-ssh entry
+		t.Errorf("agent has %d entries, expected 2", len(keys))
 	}
 }
 
-func TestLoadIntoAgentAbgelaufen(t *testing.T) {
+func TestLoadIntoAgentExpired(t *testing.T) {
 	keyring := agent.NewKeyring()
 	priv, pub := testKeyPair(t)
 	cert := testSignCert(t, newTestSigner(t), pub, -time.Hour)
 	if err := loadIntoAgent(keyring, priv, cert); err == nil {
-		t.Fatal("fehler erwartet (abgelaufen)")
+		t.Fatal("expected error (expired)")
 	}
 }
 
-func TestRemoveGsshKeysLaesstFremdeStehen(t *testing.T) {
+func TestRemoveGsshKeysKeepsForeignKey(t *testing.T) {
 	keyring := agent.NewKeyring()
 	addForeignKey(t, keyring)
 	priv, pub := testKeyPair(t)
@@ -101,11 +101,11 @@ func TestRemoveGsshKeysLaesstFremdeStehen(t *testing.T) {
 
 	removed, err := removeGsshKeys(keyring)
 	if err != nil || removed != 1 {
-		t.Fatalf("removeGsshKeys = %d, %v — erwartet 1, nil", removed, err)
+		t.Fatalf("removeGsshKeys = %d, %v — expected 1, nil", removed, err)
 	}
 	keys, _ := keyring.List()
-	if len(keys) != 1 || keys[0].Comment != "fremder schlüssel" {
-		t.Errorf("fremder schlüssel muss übrig bleiben: %+v", keys)
+	if len(keys) != 1 || keys[0].Comment != "foreign key" {
+		t.Errorf("foreign key must remain: %+v", keys)
 	}
 }
 
@@ -115,34 +115,34 @@ func TestCertValid(t *testing.T) {
 
 	valid := testSignCert(t, signer, pub, time.Hour)
 	if !certValid(valid, 0) {
-		t.Error("frisches zertifikat muss gültig sein")
+		t.Error("fresh certificate must be valid")
 	}
 	if certValid(valid, 2*time.Hour) {
-		t.Error("margin größer als restlaufzeit ⇒ ungültig")
+		t.Error("margin larger than remaining validity ⇒ invalid")
 	}
 
 	expired := testSignCert(t, signer, pub, -time.Minute)
 	if certValid(expired, 0) {
-		t.Error("abgelaufenes zertifikat darf nicht gültig sein")
+		t.Error("expired certificate must not be valid")
 	}
 
 	notYet := testSignCert(t, signer, pub, time.Hour)
-	notYet.ValidAfter = uint64(time.Now().Add(30 * time.Minute).Unix()) //nolint:gosec // Unix-Zeit nach 1970
+	notYet.ValidAfter = uint64(time.Now().Add(30 * time.Minute).Unix()) //nolint:gosec // Unix time after 1970
 	if certValid(notYet, 0) {
-		t.Error("noch nicht gültiges zertifikat darf nicht gültig sein")
+		t.Error("not-yet-valid certificate must not be valid")
 	}
 
 	if anyValidCert([]*ssh.Certificate{expired, valid}, 0) != true {
-		t.Error("anyValidCert muss das gültige finden")
+		t.Error("anyValidCert must find the valid one")
 	}
 	if anyValidCert([]*ssh.Certificate{expired}, 0) {
-		t.Error("anyValidCert ohne gültige ⇒ false")
+		t.Error("anyValidCert with none valid ⇒ false")
 	}
 }
 
 func TestCertTimeClamp(t *testing.T) {
-	// ssh.CertTimeInfinity (max uint64) darf nicht überlaufen.
+	// ssh.CertTimeInfinity (max uint64) must not overflow.
 	if certTime(^uint64(0)).Before(time.Now()) {
-		t.Error("certTime(max) muss in der zukunft liegen")
+		t.Error("certTime(max) must be in the future")
 	}
 }

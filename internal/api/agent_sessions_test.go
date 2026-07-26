@@ -14,7 +14,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeSessionStore zählt die dispatchten Store-Aufrufe.
+// fakeSessionStore counts the dispatched store calls.
 type fakeSessionStore struct {
 	opened []store.SessionEvent
 	closed []store.SessionEvent
@@ -58,7 +58,7 @@ func TestAgentSessionsDispatch(t *testing.T) {
 		{"phase": "open", "service": "sshd", "local_user": "deploy", "serial": 42, "remote_addr": "10.0.0.9"},
 		{"phase": "close", "service": "sshd", "local_user": "deploy"},
 		{"phase": "open", "service": "sudo", "local_user": "root", "remote_user": "deploy", "command": "/usr/bin/id"},
-		{"phase": "close", "service": "sudo", "local_user": "root"}, // wird verworfen
+		{"phase": "close", "service": "sudo", "local_user": "root"}, // gets discarded
 	}})
 	req := agentRequest(http.MethodPost, "/v1/agent/sessions", string(body), host.ID.String())
 	rec := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func TestAgentSessionsDispatch(t *testing.T) {
 		t.Fatalf("opened = %+v", sessions.opened)
 	}
 	if sessions.opened[0].CertSerial == nil || *sessions.opened[0].CertSerial != 42 {
-		t.Errorf("serial nicht übernommen: %+v", sessions.opened[0].CertSerial)
+		t.Errorf("serial not applied: %+v", sessions.opened[0].CertSerial)
 	}
 	if sessions.opened[0].HostName != host.Name {
 		t.Errorf("hostname = %q", sessions.opened[0].HostName)
@@ -84,13 +84,13 @@ func TestAgentSessionsDispatch(t *testing.T) {
 	}
 }
 
-func TestAgentSessionsOhneClientCert(t *testing.T) {
+func TestAgentSessionsWithoutClientCert(t *testing.T) {
 	hosts := newFakeHostStore()
 	handler := newSessionsHandler(t, hosts, &fakeSessionStore{})
 	req := agentRequest(http.MethodPost, "/v1/agent/sessions", `{"events":[]}`, "")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d (401 erwartet)", rec.Code)
+		t.Fatalf("status = %d (expected 401)", rec.Code)
 	}
 }

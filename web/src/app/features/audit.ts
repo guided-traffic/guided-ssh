@@ -19,7 +19,7 @@ import { formatTimestamp, prettyJson } from '../core/format';
 
 const PAGE_SIZE = 50;
 
-// Bekannte Ereignistypen (Volltext-Feld deckt neue/unbekannte ab).
+// Known event types (the full-text field covers new/unknown ones).
 const EVENT_TYPES = [
   'ca.cert_issued',
   'ca.agent_cert_issued',
@@ -59,7 +59,7 @@ const EVENT_TYPES = [
         <div>
           <h1>Audit</h1>
           <div class="page-sub">
-            Jede Ausstellung, jedes Enrollment, jede Regel-Änderung — append-only
+            Every issuance, every enrollment, every rule change — append-only
           </div>
         </div>
         <div>
@@ -74,54 +74,54 @@ const EVENT_TYPES = [
 
       <div class="glass-panel filter-bar">
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Ereignistyp</mat-label>
+          <mat-label>Event type</mat-label>
           <mat-select [(ngModel)]="eventType">
-            <mat-option value="">alle</mat-option>
+            <mat-option value="">all</mat-option>
             @for (type of eventTypes; track type) {
               <mat-option [value]="type">{{ type }}</mat-option>
             }
           </mat-select>
         </mat-form-field>
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Actor (exakt)</mat-label>
+          <mat-label>Actor (exact)</mat-label>
           <input matInput [(ngModel)]="actor" placeholder="user:… / ci:… " (keyup.enter)="apply()" />
         </mat-form-field>
         <mat-form-field appearance="outline" subscriptSizing="dynamic" class="grow">
-          <mat-label>Suche (Nutzer, Host, Pipeline …)</mat-label>
+          <mat-label>Search (user, host, pipeline …)</mat-label>
           <input matInput [(ngModel)]="search" (keyup.enter)="apply()" />
           <mat-icon matSuffix svgIcon="search" />
         </mat-form-field>
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Von</mat-label>
+          <mat-label>From</mat-label>
           <input matInput [matDatepicker]="fromPicker" [(ngModel)]="since" />
           <mat-datepicker-toggle matIconSuffix [for]="fromPicker" />
           <mat-datepicker #fromPicker />
         </mat-form-field>
         <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Bis</mat-label>
+          <mat-label>To</mat-label>
           <input matInput [matDatepicker]="untilPicker" [(ngModel)]="until" />
           <mat-datepicker-toggle matIconSuffix [for]="untilPicker" />
           <mat-datepicker #untilPicker />
         </mat-form-field>
-        <button mat-flat-button (click)="apply()">Filtern</button>
-        <button mat-button (click)="reset()">Zurücksetzen</button>
+        <button mat-flat-button (click)="apply()">Filter</button>
+        <button mat-button (click)="reset()">Reset</button>
       </div>
 
       <div class="glass-panel table-scroll" style="margin-top: 16px">
         @if (loading()) {
           <div class="empty-state"><mat-spinner diameter="28" /></div>
         } @else if (events().length === 0) {
-          <div class="empty-state">Keine Audit-Events zum Filter.</div>
+          <div class="empty-state">No audit events for this filter.</div>
         } @else {
           <table mat-table [dataSource]="events()" multiTemplateDataRows>
             <ng-container matColumnDef="time">
-              <th mat-header-cell *matHeaderCellDef>Zeitpunkt</th>
+              <th mat-header-cell *matHeaderCellDef>Time</th>
               <td mat-cell *matCellDef="let e" class="mono" style="white-space: nowrap">
                 {{ formatTimestamp(e.occurred_at) }}
               </td>
             </ng-container>
             <ng-container matColumnDef="type">
-              <th mat-header-cell *matHeaderCellDef>Ereignis</th>
+              <th mat-header-cell *matHeaderCellDef>Event</th>
               <td mat-cell *matCellDef="let e">
                 <span [class]="'pill ' + typeClass(e.event_type)">{{ e.event_type }}</span>
               </td>

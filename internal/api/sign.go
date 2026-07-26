@@ -17,27 +17,27 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// TokenVerifier validiert rohe ID-Tokens (implementiert von *auth.Verifier;
-// Tests nutzen einen Fake).
+// TokenVerifier validates raw ID tokens (implemented by *auth.Verifier;
+// tests use a fake).
 type TokenVerifier interface {
 	Verify(ctx context.Context, rawToken string) (*auth.Claims, error)
 }
 
-// GrantSource liefert die Zugriffsregeln eines Benutzers (Phase 6;
-// *store.Store erfüllt das Interface, Tests nutzen einen Fake).
+// GrantSource returns the access grants of a user (phase 6; *store.Store
+// satisfies the interface, tests use a fake).
 type GrantSource interface {
 	ListGrantsForUser(ctx context.Context, userID uuid.UUID) ([]store.AccessGrant, error)
 }
 
-// signUserRequest ist der Body von POST /v1/sign/user.
+// signUserRequest is the body of POST /v1/sign/user.
 type signUserRequest struct {
-	// PublicKey im authorized_keys-Format (z. B. "ssh-ed25519 AAAA…").
+	// PublicKey in authorized_keys format (e.g. "ssh-ed25519 AAAA…").
 	PublicKey string `json:"public_key"`
-	// ValiditySeconds ist die gewünschte Laufzeit; 0 ⇒ Server-Default.
+	// ValiditySeconds is the requested lifetime; 0 ⇒ server default.
 	ValiditySeconds int64 `json:"validity_seconds,omitempty"`
 }
 
-// signUserResponse ist die Antwort: das signierte Zertifikat plus Metadaten.
+// signUserResponse is the response: the signed certificate plus metadata.
 type signUserResponse struct {
 	Certificate string    `json:"certificate"`
 	Serial      int64     `json:"serial"`
@@ -47,15 +47,15 @@ type signUserResponse struct {
 	ValidBefore time.Time `json:"valid_before"`
 }
 
-// defaultUserValidity ist die Standard-Laufzeit von Benutzer-Zertifikaten
-// (Plan: ~16 h, Policy-Maximum greift zusätzlich).
+// defaultUserValidity is the default lifetime of user certificates
+// (plan: ~16h, the policy maximum applies on top).
 const defaultUserValidity = 16 * time.Hour
 
-// signBackdate datiert ValidAfter leicht zurück (Clock-Skew zu Hosts);
-// bleibt unter dem Policy-Limit von 5 Minuten.
+// signBackdate dates ValidAfter back slightly (clock skew relative to
+// hosts); stays under the policy limit of 5 minutes.
 const signBackdate = time.Minute
 
-// userExtensions sind die Standard-Extensions von Benutzer-Zertifikaten.
+// userExtensions are the default extensions of user certificates.
 func userExtensions() map[string]string {
 	return map[string]string{
 		"permit-X11-forwarding":   "",
@@ -66,25 +66,25 @@ func userExtensions() map[string]string {
 	}
 }
 
-// handleSignUser tauscht ein validiertes ID-Token gegen ein kurzlebiges
-// SSH-Benutzerzertifikat: Token prüfen, Claims auf Benutzer/Gruppen mappen
-// (inkl. Aktiv-Check), Grants auswerten (ohne Grant kein Zertifikat, Laufzeit
-// gedeckelt), Policy-geprüft signieren, Audit transaktional.
+// handleSignUser exchanges a validated ID token for a short-lived SSH user
+// certificate: check the token, map claims onto a user/groups (including
+// an active check), evaluate grants (no grant means no certificate,
+// lifetime capped), sign policy-checked, audit transactionally.
 //
-// Die Zertifikats-Principals bleiben Identitäts-Principals (Username,
-// E-Mail) — welche lokalen Benutzer sie auf einem Host erreichen, entscheidet
-// der Host über AuthorizedPrincipalsCommand anhand der Grants (ADR-018).
+// The certificate principals stay identity principals (username, email) —
+// which local users they can reach on a host is decided by the host via
+// AuthorizedPrincipalsCommand based on the grants (ADR-018).
 func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.Mapper, grants GrantSource, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rawToken, ok := bearerToken(r)
 		if !ok {
-			http.Error(w, "authorization: bearer-token fehlt", http.StatusUnauthorized)
+			http.Error(w, "authorization: bearer token missing", http.StatusUnauthorized)
 			return
 		}
 		claims, err := verifier.Verify(r.Context(), rawToken)
 		if err != nil {
-			logger.Info("sign/user: token abgelehnt", "error", err)
-			http.Error(w, "id-token ungültig", http.StatusUnauthorized)
+			logger.Info("sign/user: token rejected", "error", err)
+			http.Error(w, "id token invalid", http.StatusUnauthorized)
 			return
 		}
 
@@ -95,24 +95,24 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 
 		user, err := mapper.EnsureUser(r.Context(), claims)
 		if errors.Is(err, auth.ErrUserInactive) {
-			http.Error(w, "benutzer ist deaktiviert", http.StatusForbidden)
+			http.Error(w, "user is disabled", http.StatusForbidden)
 			return
 		}
 		if err != nil {
-			logger.Error("sign/user: benutzer-mapping fehlgeschlagen", "subject", claims.Subject, "error", err)
+			logger.Error("sign/user: user mapping failed", "subject", claims.Subject, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
 		userGrants, err := grants.ListGrantsForUser(r.Context(), user.ID)
 		if err != nil {
-			logger.Error("sign/user: grants laden fehlgeschlagen", "subject", claims.Subject, "error", err)
+			logger.Error("sign/user: loading grants failed", "subject", claims.Subject, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		if len(userGrants) == 0 {
-			logger.Info("sign/user: keine grants", "subject", claims.Subject, "groups", claims.Groups)
-			http.Error(w, "keine zugriffsregeln (grants) für diesen benutzer — zertifikat wird nicht ausgestellt", http.StatusForbidden)
+			logger.Info("sign/user: no grants", "subject", claims.Subject, "groups", claims.Groups)
+			http.Error(w, "no access grants for this user — certificate will not be issued", http.StatusForbidden)
 			return
 		}
 
@@ -120,13 +120,13 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 		if req.ValiditySeconds > 0 {
 			validity = time.Duration(req.ValiditySeconds) * time.Second
 		}
-		// Grants sind additiv: es gilt die höchste erlaubte Laufzeit über alle
-		// Grants des Benutzers; eine höhere Anfrage wird gekappt (ADR-018).
+		// Grants are additive: the highest allowed lifetime across all of
+		// the user's grants applies; a higher request is capped (ADR-018).
 		if allowed := maxGrantValidity(userGrants); validity > allowed {
 			validity = allowed
 		}
-		// Laufzeit zählt ab dem rückdatierten ValidAfter, damit die
-		// Gesamtlaufzeit exakt der angeforderten entspricht (Policy-Maximum).
+		// Lifetime is counted from the backdated ValidAfter, so the total
+		// lifetime matches exactly the requested one (policy maximum).
 		validAfter := time.Now().Add(-signBackdate)
 		certReq := ca.CertRequest{
 			CertType:    store.CertTypeUser,
@@ -153,7 +153,7 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 			return
 		}
 		if err != nil {
-			logger.Error("sign/user: ausstellung fehlgeschlagen", "key_id", certReq.KeyID, "error", err)
+			logger.Error("sign/user: issuance failed", "key_id", certReq.KeyID, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -170,8 +170,8 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 	}
 }
 
-// maxGrantValidity liefert die höchste maximale Laufzeit über alle Grants
-// (additive Semantik: jeder Grant berechtigt unabhängig bis zu seinem Maximum).
+// maxGrantValidity returns the highest maximum lifetime across all grants
+// (additive semantics: each grant independently authorizes up to its own maximum).
 func maxGrantValidity(grants []store.AccessGrant) time.Duration {
 	var allowed time.Duration
 	for _, g := range grants {
@@ -182,32 +182,32 @@ func maxGrantValidity(grants []store.AccessGrant) time.Duration {
 	return allowed
 }
 
-// maxRequestBody begrenzt die Bodies der unauthentifizierten Endpunkte
-// (Public Key, CSR und Metadaten bleiben weit darunter) — Speicherschutz
-// gegen absichtlich große Anfragen (Phase 10).
+// maxRequestBody bounds the bodies of the unauthenticated endpoints
+// (public key, CSR, and metadata stay well under it) — memory protection
+// against deliberately large requests (phase 10).
 const maxRequestBody = 64 << 10
 
-// decodeSignRequest parst Body und Public Key eines Sign-Requests; bei
-// Fehlern ist die 400-Antwort bereits geschrieben (ok = false).
+// decodeSignRequest parses the body and public key of a sign request; on
+// error the 400 response has already been written (ok = false).
 func decodeSignRequest(w http.ResponseWriter, r *http.Request) (ssh.PublicKey, signUserRequest, bool) {
 	var req signUserRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
-		http.Error(w, "request-body ungültig", http.StatusBadRequest)
+		http.Error(w, "request body invalid", http.StatusBadRequest)
 		return nil, req, false
 	}
 	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.PublicKey))
 	if err != nil {
-		http.Error(w, "public_key ungültig (authorized_keys-format erwartet)", http.StatusBadRequest)
+		http.Error(w, "public_key invalid (authorized_keys format expected)", http.StatusBadRequest)
 		return nil, req, false
 	}
 	if _, isCert := publicKey.(*ssh.Certificate); isCert {
-		http.Error(w, "public_key ist bereits ein zertifikat", http.StatusBadRequest)
+		http.Error(w, "public_key is already a certificate", http.StatusBadRequest)
 		return nil, req, false
 	}
 	return publicKey, req, true
 }
 
-// bearerToken extrahiert das Bearer-Token aus dem Authorization-Header.
+// bearerToken extracts the bearer token from the Authorization header.
 func bearerToken(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
 	scheme, token, found := strings.Cut(header, " ")

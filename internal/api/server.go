@@ -1,6 +1,6 @@
-// Package api stellt die HTTP-API des gssh-servers bereit.
-// Phase 2: CA-Bundle-Endpoint und Health-Check; Phase 3: POST /v1/sign/user
-// (ID-Token rein, SSH-Benutzerzertifikat raus).
+// Package api provides the HTTP API of the gssh server.
+// Phase 2: CA bundle endpoint and health check; phase 3: POST /v1/sign/user
+// (ID token in, SSH user certificate out).
 package api
 
 import (
@@ -18,11 +18,11 @@ import (
 	"github.com/guided-traffic/guided-ssh/web"
 )
 
-// Deps sind die Abhängigkeiten des HTTP-Handlers. Verifier, Store und Grants
-// sind optional: ohne sie antwortet der Sign-Endpoint mit 503 (OIDC nicht
-// konfiguriert). Ohne CIVerifier/CIStore bleibt /v1/sign/ci deaktiviert (503);
-// ohne Hosts bleibt das Enrollment deaktiviert (Tests); ohne Admin/AdminGroup
-// antwortet die Admin-API mit 503.
+// Deps are the dependencies of the HTTP handler. Verifier, Store, and
+// Grants are optional: without them, the sign endpoint responds with 503
+// (OIDC not configured). Without CIVerifier/CIStore, /v1/sign/ci stays
+// disabled (503); without Hosts, enrollment stays disabled (tests);
+// without Admin/AdminGroup, the admin API responds with 503.
 type Deps struct {
 	CA         *ca.CA
 	Store      auth.Store
@@ -34,57 +34,57 @@ type Deps struct {
 	CIVerifier CITokenVerifier
 	CIStore    CIStore
 	Logger     *slog.Logger
-	// RateLimit drosselt die unauthentifizierten Endpunkte (Sign, Enroll)
-	// pro Client-IP (Phase 10); nil ⇒ kein Rate-Limiting (Tests).
+	// RateLimit throttles the unauthenticated endpoints (sign, enroll)
+	// per client IP (phase 10); nil ⇒ no rate limiting (tests).
 	RateLimit *RateLimiter
-	// DownloadRateLimit drosselt allein den Binary-Download
-	// (GET /v1/agents/{os}/{arch}). Eigene, engere Instanz: das Binary ist
-	// 15–40 MB groß, der reguläre 60/min-Limiter wäre als Flood-Schutz zu
-	// locker. nil ⇒ kein Rate-Limiting (Tests).
+	// DownloadRateLimit throttles only the binary download
+	// (GET /v1/agents/{os}/{arch}). Its own, tighter instance: the binary
+	// is 15-40 MB in size, the regular 60/min limiter would be too loose
+	// as flood protection. nil ⇒ no rate limiting (tests).
 	DownloadRateLimit *RateLimiter
-	// HostCertValidity ist die Laufzeit ausgestellter Host-Zertifikate;
-	// 0 ⇒ Default (30 Tage). Das Policy-Maximum greift immer.
+	// HostCertValidity is the lifetime of issued host certificates;
+	// 0 ⇒ default (30 days). The policy maximum always applies.
 	HostCertValidity time.Duration
-	// AdminGroup ist die IdP-Gruppe, deren Mitglieder die Admin-API voll
-	// nutzen dürfen; leer ⇒ keine Mutationen möglich (fail-closed).
+	// AdminGroup is the IdP group whose members may fully use the admin
+	// API; empty ⇒ no mutations possible (fail-closed).
 	AdminGroup string
-	// AuditorGroup darf zusätzlich zu den Read-only-Ansichten das Audit-Log
-	// lesen und exportieren; AdminGroup schließt die Rolle ein.
+	// AuditorGroup may, in addition to the read-only views, read and
+	// export the audit log; AdminGroup includes this role.
 	AuditorGroup string
-	// ReadOnlyGroup darf die Ressourcen-Ansichten (Hosts, Grants, Benutzer,
-	// Service-Accounts) lesen; Auditor und Admin schließen die Rolle ein.
-	// Sind alle drei Gruppen leer, bleibt die gesamte Admin-API deaktiviert.
+	// ReadOnlyGroup may read the resource views (hosts, grants, users,
+	// service accounts); auditor and admin include this role. If all
+	// three groups are empty, the entire admin API stays disabled.
 	ReadOnlyGroup string
-	// UIConfig wird unauthentifiziert unter /v1/ui/config ausgeliefert und
-	// bootstrapt die Web-UI (OIDC-Discovery + Rollen-Mapping im Frontend).
+	// UIConfig is served unauthenticated under /v1/ui/config and
+	// bootstraps the web UI (OIDC discovery + role mapping in the frontend).
 	UIConfig UIConfig
-	// UIAuth aktiviert den server-seitigen OIDC-Login der Web-UI
-	// (/v1/auth/…, BFF); nil ⇒ Endpunkte antworten mit 503.
+	// UIAuth enables the web UI's server-side OIDC login (/v1/auth/…,
+	// BFF); nil ⇒ endpoints respond with 503.
 	UIAuth *UIAuthConfig
-	// Agents liefert die eingebetteten gssh-agentd-Binaries des
-	// One-Command-Host-Installs; nil oder leer ⇒ Rollout-Gate zu.
+	// Agents provides the embedded gssh-agentd binaries of the
+	// one-command host install; nil or empty ⇒ rollout gate closed.
 	Agents AgentSource
-	// Pins ermittelt den SPKI-Pin des öffentlichen TLS-Endpunkts; nil oder
-	// „kein Pin ermittelbar" ⇒ Rollout-Gate zu (fail-closed, Regel 3).
+	// Pins determines the SPKI pin of the public TLS endpoint; nil or
+	// "no pin determinable" ⇒ rollout gate closed (fail-closed, rule 3).
 	Pins *PinProvider
-	// AgentPublicURL ist die externe mTLS-Agent-URL (GSSH_AGENT_PUBLIC_URL),
-	// die enrollte Hosts in ihre config.yaml schreiben; leer ⇒ Gate zu.
+	// AgentPublicURL is the external mTLS agent URL (GSSH_AGENT_PUBLIC_URL)
+	// that enrolled hosts write into their config.yaml; empty ⇒ gate closed.
 	AgentPublicURL string
-	// PublicBaseURL ist die externe Basis-URL des Public-Listeners
-	// (GSSH_PUBLIC_URL, Fallback GSSH_UI_BASE_URL); leer ⇒ Gate zu.
+	// PublicBaseURL is the external base URL of the public listener
+	// (GSSH_PUBLIC_URL, falling back to GSSH_UI_BASE_URL); empty ⇒ gate closed.
 	PublicBaseURL string
 }
 
-// AgentSource liefert Metadaten und Inhalt der eingebetteten Agent-Binaries
-// (*agentdist.Source erfüllt es; Tests nutzen agentdist.NewFromFS).
+// AgentSource provides metadata and content of the embedded agent binaries
+// (*agentdist.Source satisfies it; tests use agentdist.NewFromFS).
 type AgentSource interface {
 	List() []agentdist.Info
-	// Open streamt das Binary für os/arch; ist keines eingebettet, ist der
-	// Fehler agentdist.ErrNotFound.
+	// Open streams the binary for os/arch; if none is embedded, the error
+	// is agentdist.ErrNotFound.
 	Open(osName, arch string) (io.ReadCloser, agentdist.Info, error)
 }
 
-// UIConfig ist die öffentliche Bootstrap-Konfiguration der Web-UI.
+// UIConfig is the web UI's public bootstrap configuration.
 type UIConfig struct {
 	OIDCIssuer    string `json:"oidc_issuer"`
 	OIDCClientID  string `json:"oidc_client_id"`
@@ -93,23 +93,23 @@ type UIConfig struct {
 	ReadOnlyGroup string `json:"readonly_group"`
 }
 
-// New baut den HTTP-Handler.
+// New builds the HTTP handler.
 //
-// Routen:
+// Routes:
 //
-//	GET  /healthz                  – Liveness
-//	GET  /v1/ca/bundle/{purpose}   – CA-Bundle (authorized_keys-Format), purpose: user|host
-//	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
-//	POST /v1/sign/ci               – GitLab-Job-Token gegen CI-Zertifikat tauschen
-//	POST /v1/enroll                – Host-Enrollment gegen einmaliges Token
-//	GET  /v1/agents                – Manifest der Agent-Binaries + Rollout-Status
-//	GET  /v1/agents/{os}/{arch}    – Agent-Binary (One-Command-Host-Install)
-//	GET  /install.sh               – getemplatetes Install-Script für Hosts
-//	/v1/admin/grants…              – Grant-Verwaltung (CRUD + deklaratives Apply),
-//	                                 nur für Mitglieder der Admin-Gruppe
-//	/v1/admin/ci-grants…           – CI-Grant-Verwaltung (analog)
+//	GET  /healthz                  – liveness
+//	GET  /v1/ca/bundle/{purpose}   – CA bundle (authorized_keys format), purpose: user|host
+//	POST /v1/sign/user             – exchange ID token for an SSH user certificate
+//	POST /v1/sign/ci               – exchange a GitLab job token for a CI certificate
+//	POST /v1/enroll                – host enrollment against a one-time token
+//	GET  /v1/agents                – manifest of agent binaries + rollout status
+//	GET  /v1/agents/{os}/{arch}    – agent binary (one-command host install)
+//	GET  /install.sh               – templated install script for hosts
+//	/v1/admin/grants…              – grant management (CRUD + declarative apply),
+//	                                 members of the admin group only
+//	/v1/admin/ci-grants…           – CI grant management (analogous)
 //
-// Die Agent-Endpunkte (/v1/agent/…) liegen im separaten mTLS-Handler, siehe NewAgent.
+// The agent endpoints (/v1/agent/…) live in the separate mTLS handler, see NewAgent.
 func New(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
@@ -118,8 +118,8 @@ func New(deps Deps) http.Handler {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 
-	// Bootstrap-Konfiguration der Web-UI: bewusst unauthentifiziert, enthält
-	// nur öffentliche Werte (Issuer, Client-ID, Rollen-Gruppennamen).
+	// Web UI bootstrap configuration: deliberately unauthenticated, contains
+	// only public values (issuer, client ID, role group names).
 	mux.HandleFunc("GET /v1/ui/config", func(w http.ResponseWriter, _ *http.Request) {
 		cfg := deps.UIConfig
 		cfg.AdminGroup = deps.AdminGroup
@@ -131,12 +131,12 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("GET /v1/ca/bundle/{purpose}", func(w http.ResponseWriter, r *http.Request) {
 		purpose := r.PathValue("purpose")
 		if purpose != store.CertTypeUser && purpose != store.CertTypeHost {
-			http.Error(w, "unbekannter zweck (erlaubt: user, host)", http.StatusNotFound)
+			http.Error(w, "unknown purpose (allowed: user, host)", http.StatusNotFound)
 			return
 		}
 		bundle, err := deps.CA.Bundle(r.Context(), purpose)
 		if err != nil {
-			deps.Logger.Error("ca-bundle laden fehlgeschlagen", "purpose", purpose, "error", err)
+			deps.Logger.Error("loading ca bundle failed", "purpose", purpose, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -153,7 +153,7 @@ func New(deps Deps) http.Handler {
 			deps.RateLimit.limit(handleSignUser(deps.CA, deps.Verifier, auth.NewMapper(deps.Store), deps.Grants, deps.Logger)))
 	} else {
 		mux.HandleFunc("POST /v1/sign/user", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "oidc nicht konfiguriert", http.StatusServiceUnavailable)
+			http.Error(w, "oidc not configured", http.StatusServiceUnavailable)
 		})
 	}
 
@@ -162,7 +162,7 @@ func New(deps Deps) http.Handler {
 			deps.RateLimit.limit(handleSignCI(deps.CA, deps.CIVerifier, deps.CIStore, deps.Logger)))
 	} else {
 		mux.HandleFunc("POST /v1/sign/ci", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "gitlab-ci nicht konfiguriert", http.StatusServiceUnavailable)
+			http.Error(w, "gitlab ci not configured", http.StatusServiceUnavailable)
 		})
 	}
 
@@ -170,13 +170,13 @@ func New(deps Deps) http.Handler {
 	registerUIAuthRoutes(mux, deps)
 	registerAdminRoutes(mux, deps)
 
-	// Web-UI (Phase 8): eingebetteter Angular-Build als SPA unter /.
-	// Bewusst ohne Methoden-Pattern (Konflikt mit "/v1/admin/"); der Handler
-	// beschränkt sich selbst auf GET/HEAD.
+	// Web UI (phase 8): embedded Angular build as an SPA under /.
+	// Deliberately without a method pattern (conflicts with "/v1/admin/");
+	// the handler restricts itself to GET/HEAD.
 	if dist, err := fs.Sub(web.Dist, "dist"); err == nil {
 		mux.Handle("/", NewUIHandler(dist))
 	}
 
-	// Antwort-Zähler nach Status-Code für die Fehlerraten-Metrik (Phase 11).
+	// Response counter by status code for the error rate metric (phase 11).
 	return metrics.Middleware(mux)
 }

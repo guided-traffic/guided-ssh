@@ -1,20 +1,20 @@
 //go:build e2e
 
-// Package e2e enthält die End-to-End-Suite (Plan Phase 13): kind-Cluster,
-// Helm-Deployment, Dex+GLAuth als IdP, simuliertes GitLab-OIDC und zwei
-// sshd-Testhosts als Pods. Die Szenarien fahren den kompletten Durchstich
-// Mensch (gssh login --device im Workstation-Pod) und CI (gssh ci-login +
-// Ansible) und decken Offboarding, Grant-Änderung, Host-Rotation, Chaos
-// (API down) und Audit-Vollständigkeit ab.
+// Package e2e contains the end-to-end suite (plan Phase 13): kind cluster,
+// Helm deployment, Dex+GLAuth as IdP, simulated GitLab OIDC, and two sshd
+// test hosts as pods. The scenarios drive the complete path for humans
+// (gssh login --device in the workstation pod) and CI (gssh ci-login +
+// Ansible), and cover offboarding, grant changes, host rotation, chaos
+// (API down), and audit completeness.
 //
-// Aufruf: make e2e (bzw. go test -tags e2e ./test/e2e). Benötigt Docker,
-// kind, kubectl, helm; ansible optional (sonst Go-SSH-Fallback).
+// Invocation: make e2e (or go test -tags e2e ./test/e2e). Requires Docker,
+// kind, kubectl, helm; ansible is optional (otherwise falls back to Go-SSH).
 //
-// Env-Schalter:
+// Env switches:
 //
-//	E2E_KEEP=1        Cluster nach dem Lauf stehen lassen (Debugging)
-//	E2E_SKIP_BUILD=1  Docker-Builds überspringen (Images bereits geladen)
-//	E2E_CLUSTER=name  kind-Cluster-Name (Default gssh-e2e)
+//	E2E_KEEP=1        keep the cluster running after the test (debugging)
+//	E2E_SKIP_BUILD=1  skip Docker builds (images already loaded)
+//	E2E_CLUSTER=name  kind cluster name (default gssh-e2e)
 package e2e
 
 import (
@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-// run führt ein Kommando aus und liefert kombinierte Ausgabe + Fehler.
+// run executes a command and returns combined output + error.
 func run(stdin, dir, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
@@ -43,13 +43,13 @@ func run(stdin, dir, name string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-// kubectl führt kubectl im Cluster-Kontext und Test-Namespace aus.
+// kubectl runs kubectl in the cluster context and test namespace.
 func (e *env) kubectl(args ...string) (string, error) {
 	full := append([]string{"--context", e.context(), "-n", e.ns}, args...)
 	return run("", "", "kubectl", full...)
 }
 
-// mustKubectl wie kubectl, bricht den Test bei Fehlern ab.
+// mustKubectl like kubectl, aborts the test on error.
 func (e *env) mustKubectl(args ...string) string {
 	e.t.Helper()
 	out, err := e.kubectl(args...)
@@ -59,7 +59,7 @@ func (e *env) mustKubectl(args ...string) string {
 	return out
 }
 
-// applyYAML wendet ein Manifest über stdin an.
+// applyYAML applies a manifest via stdin.
 func (e *env) applyYAML(yaml string) {
 	e.t.Helper()
 	full := []string{"--context", e.context(), "-n", e.ns, "apply", "-f", "-"}
@@ -68,13 +68,13 @@ func (e *env) applyYAML(yaml string) {
 	}
 }
 
-// execPod führt ein Shell-Kommando in einem Pod/Deployment aus
-// (target z. B. "deploy/testhost-web" oder ein Pod-Name).
+// execPod runs a shell command in a pod/deployment (target e.g.
+// "deploy/testhost-web" or a pod name).
 func (e *env) execPod(target, command string) (string, error) {
 	return e.kubectl("exec", target, "--", "sh", "-c", command)
 }
 
-// mustExecPod wie execPod, bricht bei Fehlern ab.
+// mustExecPod like execPod, aborts on error.
 func (e *env) mustExecPod(target, command string) string {
 	e.t.Helper()
 	out, err := e.execPod(target, command)
@@ -84,14 +84,14 @@ func (e *env) mustExecPod(target, command string) string {
 	return out
 }
 
-// ws führt ein Kommando im Workstation-Pod aus — mit ssh-agent-Socket und
-// gssh-Konfiguration im Environment (der komplette "Mensch"-Pfad läuft dort).
+// ws runs a command in the workstation pod — with the ssh-agent socket and
+// gssh configuration in the environment (the entire "human" path runs there).
 func (e *env) ws(command string) (string, error) {
 	return e.execPod("pod/workstation",
 		"export SSH_AUTH_SOCK=/tmp/agent.sock GSSH_CONFIG=/etc/gssh/config.yaml HOME=/root; "+command)
 }
 
-// mustWS wie ws, bricht bei Fehlern ab.
+// mustWS like ws, aborts on error.
 func (e *env) mustWS(command string) string {
 	e.t.Helper()
 	out, err := e.ws(command)
@@ -101,15 +101,15 @@ func (e *env) mustWS(command string) string {
 	return out
 }
 
-// sshCmd baut das ssh-Kommando der Workstation gegen einen Testhost:
-// striktes Host-Key-Checking gegen die CA (known_hosts mit @cert-authority).
+// sshCmd builds the workstation's ssh command against a test host: strict
+// host key checking against the CA (known_hosts with @cert-authority).
 func sshCmd(user, host, remote string) string {
 	return fmt.Sprintf(
 		"ssh -o UserKnownHostsFile=/root/known_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -o BatchMode=yes %s@%s %q",
 		user, host, remote)
 }
 
-// poll wiederholt fn bis Erfolg oder Timeout (Abbruch via t.Fatalf).
+// poll retries fn until success or timeout (aborts via t.Fatalf).
 func (e *env) poll(timeout time.Duration, desc string, fn func() error) {
 	e.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -120,10 +120,10 @@ func (e *env) poll(timeout time.Duration, desc string, fn func() error) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	e.t.Fatalf("%s: timeout nach %s, letzter fehler: %v", desc, timeout, last)
+	e.t.Fatalf("%s: timeout after %s, last error: %v", desc, timeout, last)
 }
 
-// waitError wiederholt fn bis es FEHLSCHLÄGT (für fail-closed-Erwartungen).
+// waitError retries fn until it FAILS (for fail-closed expectations).
 func (e *env) waitError(timeout time.Duration, desc string, fn func() error) {
 	e.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -133,13 +133,13 @@ func (e *env) waitError(timeout time.Duration, desc string, fn func() error) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	e.t.Fatalf("%s: schlägt nach %s immer noch nicht fehl", desc, timeout)
+	e.t.Fatalf("%s: still not failing after %s", desc, timeout)
 }
 
-// portForward hält einen kubectl port-forward-Prozess und seinen lokalen Port.
+// portForward holds a kubectl port-forward process and its local port.
 type portForward struct {
 	e      *env
-	target string // z. B. svc/dex
+	target string // e.g. svc/dex
 	remote int
 	local  int
 	cmd    *exec.Cmd
@@ -147,7 +147,7 @@ type portForward struct {
 
 var forwardRe = regexp.MustCompile(`Forwarding from 127\.0\.0\.1:(\d+)`)
 
-// portForward startet kubectl port-forward auf einen zufälligen lokalen Port.
+// portForward starts kubectl port-forward on a random local port.
 func (e *env) portForward(target string, remote int) *portForward {
 	e.t.Helper()
 	pf := &portForward{e: e, target: target, remote: remote}
@@ -179,14 +179,14 @@ func (p *portForward) start() {
 				break
 			}
 		}
-		// Restliche Ausgabe verwerfen, damit der Prozess nicht blockiert.
+		// Discard remaining output so the process does not block.
 		_, _ = io.Copy(io.Discard, stdout)
 	}()
 	select {
 	case p.local = <-portCh:
 	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
-		p.e.t.Fatalf("port-forward %s: kein lokaler port nach 30s", p.target)
+		p.e.t.Fatalf("port-forward %s: no local port after 30s", p.target)
 	}
 	p.cmd = cmd
 }
@@ -198,19 +198,19 @@ func (p *portForward) stop() {
 	}
 }
 
-// restart beendet den Forward und startet ihn neu (nach Pod-Neustarts nötig —
-// port-forward pinnt den Pod, der beim Start ausgewählt wurde).
+// restart stops the forward and starts it again (needed after pod restarts —
+// port-forward pins the pod that was selected at start).
 func (p *portForward) restart() {
 	p.stop()
 	p.start()
 }
 
-// URL liefert die lokale Basis-URL des Forwards.
+// URL returns the forward's local base URL.
 func (p *portForward) URL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", p.local)
 }
 
-// render ersetzt {{KEY}}-Platzhalter in einem Manifest-Template.
+// render replaces {{KEY}} placeholders in a manifest template.
 func render(template string, vars map[string]string) string {
 	pairs := make([]string, 0, len(vars)*2)
 	for k, v := range vars {
@@ -219,7 +219,7 @@ func render(template string, vars map[string]string) string {
 	return strings.NewReplacer(pairs...).Replace(template)
 }
 
-// envOrDefault liest eine Env-Variable mit Fallback.
+// envOrDefault reads an env variable with a fallback.
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -227,12 +227,12 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// requireTools bricht ab, wenn ein benötigtes Werkzeug fehlt.
+// requireTools aborts if a required tool is missing.
 func requireTools(t *testing.T, tools ...string) {
 	t.Helper()
 	for _, tool := range tools {
 		if _, err := exec.LookPath(tool); err != nil {
-			t.Fatalf("benötigtes werkzeug fehlt: %s", tool)
+			t.Fatalf("required tool missing: %s", tool)
 		}
 	}
 }

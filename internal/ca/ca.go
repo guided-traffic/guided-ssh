@@ -15,7 +15,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// Audit-Event-Typen der CA.
+// Audit event types of the CA.
 const (
 	EventCertIssued = "ca.cert_issued"
 	EventKeyCreated = "ca.key_created"
@@ -24,8 +24,8 @@ const (
 	EventKeyAdopted = "ca.key_adopted"
 )
 
-// Store ist die von der CA benötigte Persistenz-Schnittstelle
-// (*store.Store erfüllt sie; Tests nutzen einen Fake).
+// Store is the persistence interface the CA needs
+// (*store.Store satisfies it; tests use a fake).
 type Store interface {
 	NextCertificateSerial(ctx context.Context) (int64, error)
 	CreateCertificateWithAudit(ctx context.Context, c *store.Certificate, e *store.AuditEvent) error
@@ -36,9 +36,9 @@ type Store interface {
 	AppendAuditEvent(ctx context.Context, e *store.AuditEvent) error
 }
 
-// IssueRef verknüpft eine Ausstellung mit ihrem Kontext: wer hat angefordert
-// (Audit-Actor), welche Entität (User/Service-Account/Host) und beliebige
-// Zusatzinfos (SSO-Session, Pipeline-Claims) für issuer_context und Audit-Payload.
+// IssueRef links an issuance to its context: who requested it (audit actor),
+// which entity (user/service account/host), and any extra info (SSO session,
+// pipeline claims) for issuer_context and the audit payload.
 type IssueRef struct {
 	Actor            string
 	UserID           *uuid.UUID
@@ -47,21 +47,20 @@ type IssueRef struct {
 	Context          map[string]any
 }
 
-// CA orchestriert Policy-Prüfung, Signatur und transaktionale Persistenz.
-// Pro Zweck (user/host) wird der Signer des neuesten aktiven CA-Keys gecacht;
-// getrennte Keys für Benutzer- und Host-Zertifikate sind damit strukturell
-// erzwungen.
+// CA orchestrates policy validation, signing, and transactional persistence.
+// Per purpose (user/host) the signer of the newest active CA key is cached;
+// this structurally enforces separate keys for user and host certificates.
 type CA struct {
 	store     Store
 	masterKey []byte
 	policies  *PolicyEngine
 
-	// external ist im Self-Managed-Modus gesetzt (unveränderlich nach New) und
-	// ersetzt jede Key-Erzeugung durch das gemountete Dateimaterial.
+	// external is set in self-managed mode (immutable after New) and
+	// replaces all key generation with the mounted file material.
 	external *ExternalKeys
 
 	mu      sync.Mutex
-	signers map[string]Signer // Zweck → Signer des neuesten aktiven Keys
+	signers map[string]Signer // purpose → signer of the newest active key
 }
 
 // Option configures a CA at construction time.
@@ -75,12 +74,12 @@ func WithExternalKeys(keys *ExternalKeys) Option {
 	return func(c *CA) { c.external = keys }
 }
 
-// New baut eine CA. Der Master-Key muss MasterKeySize Bytes lang sein.
+// New builds a CA. The master key must be MasterKeySize bytes long.
 // Options select the key source; without any option the CA runs in managed
 // mode and keeps its keys encrypted in the database.
 func New(st Store, masterKey []byte, policies *PolicyEngine, opts ...Option) (*CA, error) {
 	if len(masterKey) != MasterKeySize {
-		return nil, fmt.Errorf("%w: %d Bytes statt %d", ErrInvalidMasterKey, len(masterKey), MasterKeySize)
+		return nil, fmt.Errorf("%w: %d bytes instead of %d", ErrInvalidMasterKey, len(masterKey), MasterKeySize)
 	}
 	c := &CA{
 		store:     st,
@@ -160,8 +159,8 @@ func (ca *CA) AdoptExternalKeys(ctx context.Context) error {
 	return nil
 }
 
-// EnsureCAKeys legt für jeden Zweck (user, host) einen aktiven CA-Key an,
-// falls noch keiner existiert (Bootstrap beim ersten Start).
+// EnsureCAKeys creates an active CA key for each purpose (user, host) if none
+// exists yet (bootstrap on first start).
 // In self-managed mode this bootstrap is refused; use AdoptExternalKeys.
 func (ca *CA) EnsureCAKeys(ctx context.Context) error {
 	if ca.selfManaged() {
@@ -182,9 +181,10 @@ func (ca *CA) EnsureCAKeys(ctx context.Context) error {
 	return nil
 }
 
-// Issue prüft den Request gegen die Policy des Requester-Typs, signiert mit dem
-// aktiven CA-Key des passenden Zwecks und persistiert Zertifikats-Metadaten und
-// Audit-Event in einer Transaktion. Serial wird von der CA vergeben.
+// Issue validates the request against the requester type's policy, signs it
+// with the active CA key of the matching purpose, and persists the
+// certificate metadata and audit event in one transaction. The CA assigns
+// the serial.
 func (ca *CA) Issue(ctx context.Context, requesterType string, req CertRequest, ref IssueRef) (*ssh.Certificate, *store.Certificate, error) {
 	if err := ca.policies.Validate(requesterType, req); err != nil {
 		return nil, nil, err
@@ -195,9 +195,9 @@ func (ca *CA) Issue(ctx context.Context, requesterType string, req CertRequest, 
 	}
 	serial, err := ca.store.NextCertificateSerial(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ca: serial vergeben: %w", err)
+		return nil, nil, fmt.Errorf("ca: allocate serial: %w", err)
 	}
-	req.Serial = uint64(serial) //nolint:gosec // Sequence beginnt bei 1, nie negativ
+	req.Serial = uint64(serial) //nolint:gosec // sequence starts at 1, never negative
 
 	cert, err := signer.Sign(ctx, req)
 	if err != nil {
@@ -206,7 +206,7 @@ func (ca *CA) Issue(ctx context.Context, requesterType string, req CertRequest, 
 
 	issuerContext, err := json.Marshal(ref.Context)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ca: issuer-kontext serialisieren: %w", err)
+		return nil, nil, fmt.Errorf("ca: marshal issuer context: %w", err)
 	}
 	record := &store.Certificate{
 		Serial:           serial,
@@ -234,7 +234,7 @@ func (ca *CA) Issue(ctx context.Context, requesterType string, req CertRequest, 
 		"context":        ref.Context,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("ca: audit-payload serialisieren: %w", err)
+		return nil, nil, fmt.Errorf("ca: marshal audit payload: %w", err)
 	}
 	event := &store.AuditEvent{EventType: EventCertIssued, Actor: ref.Actor, Payload: payload}
 	if err := ca.store.CreateCertificateWithAudit(ctx, record, event); err != nil {
@@ -244,9 +244,9 @@ func (ca *CA) Issue(ctx context.Context, requesterType string, req CertRequest, 
 	return cert, record, nil
 }
 
-// Rotate legt einen neuen aktiven CA-Key für den Zweck an und setzt bisherige
-// aktive Keys auf "retiring" (Übergangsfenster: sie bleiben im Bundle, bis sie
-// via RetireKey ausgemustert werden).
+// Rotate creates a new active CA key for the purpose and sets previously
+// active keys to "retiring" (transition window: they stay in the bundle
+// until retired via RetireKey).
 // In self-managed mode rotation is refused: it happens by committing a new key
 // file to the SOPS-encrypted secret (SELF_MANAGED_CA.md, D6).
 func (ca *CA) Rotate(ctx context.Context, purpose string) (*store.CAKey, error) {
@@ -267,15 +267,15 @@ func (ca *CA) Rotate(ctx context.Context, purpose string) (*store.CAKey, error) 
 			continue
 		}
 		if _, err := ca.store.UpdateCAKeyState(ctx, previous[i].ID, store.CAKeyStateRetiring); err != nil {
-			return nil, fmt.Errorf("ca: key %s auf retiring setzen: %w", previous[i].ID, err)
+			return nil, fmt.Errorf("ca: set key %s to retiring: %w", previous[i].ID, err)
 		}
 	}
 	ca.invalidateSigner(purpose)
 	return newKey, nil
 }
 
-// RetireKey mustert einen CA-Key endgültig aus (fliegt aus dem Bundle) und
-// schreibt ein Audit-Event.
+// RetireKey permanently retires a CA key (drops it from the bundle) and
+// writes an audit event.
 func (ca *CA) RetireKey(ctx context.Context, id uuid.UUID) error {
 	key, err := ca.store.UpdateCAKeyState(ctx, id, store.CAKeyStateRetired)
 	if err != nil {
@@ -292,12 +292,12 @@ func (ca *CA) RetireKey(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Bundle liefert die Public Keys aller nicht ausgemusterten CA-Keys eines
-// Zwecks im authorized_keys-Format — der Inhalt für TrustedUserCAKeys auf
-// Hosts (Zweck user) bzw. @cert-authority für Clients (Zweck host).
+// Bundle returns the public keys of all non-retired CA keys of a purpose in
+// authorized_keys format — the content for TrustedUserCAKeys on hosts
+// (purpose user) or @cert-authority for clients (purpose host).
 func (ca *CA) Bundle(ctx context.Context, purpose string) (string, error) {
 	if purpose != store.CertTypeUser && purpose != store.CertTypeHost {
-		return "", fmt.Errorf("ca: unbekannter key-zweck %q", purpose)
+		return "", fmt.Errorf("ca: unknown key purpose %q", purpose)
 	}
 	keys, err := ca.store.ListActiveCAKeys(ctx, purpose)
 	if err != nil {
@@ -311,7 +311,7 @@ func (ca *CA) Bundle(ctx context.Context, purpose string) (string, error) {
 	return b.String(), nil
 }
 
-// createKey erzeugt und persistiert einen neuen aktiven CA-Key inkl. Audit-Event.
+// createKey generates and persists a new active CA key, including its audit event.
 // In self-managed mode no key material may be generated in-process.
 func (ca *CA) createKey(ctx context.Context, purpose, eventType string) (*store.CAKey, error) {
 	if ca.selfManaged() {
@@ -322,7 +322,7 @@ func (ca *CA) createKey(ctx context.Context, purpose, eventType string) (*store.
 		return nil, err
 	}
 	if err := ca.store.CreateCAKey(ctx, key); err != nil {
-		return nil, fmt.Errorf("ca: key persistieren: %w", err)
+		return nil, fmt.Errorf("ca: persist key: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"ca_key_id":  key.ID,
@@ -339,8 +339,8 @@ func (ca *CA) createKey(ctx context.Context, purpose, eventType string) (*store.
 	return key, nil
 }
 
-// activeSigner liefert den (gecachten) Signer des neuesten aktiven CA-Keys
-// für den Zweck.
+// activeSigner returns the (cached) signer of the newest active CA key
+// for the purpose.
 // In self-managed mode only the signer adopted from the mounted key file is
 // used: the adopted row may sit in state "retiring" after a rotation, so
 // selecting by state would pick the wrong key — and the database holds no
@@ -368,10 +368,10 @@ func (ca *CA) activeSigner(ctx context.Context, purpose string) (Signer, error) 
 			return signer, nil
 		}
 	}
-	return nil, fmt.Errorf("ca: kein aktiver ca-key für zweck %q", purpose)
+	return nil, fmt.Errorf("ca: no active ca key for purpose %q", purpose)
 }
 
-// invalidateSigner wirft den gecachten Signer eines Zwecks weg (nach Rotation).
+// invalidateSigner drops the cached signer of a purpose (after rotation).
 // In self-managed mode this is a no-op: the cached signers are built from the
 // mounted key files by AdoptExternalKeys and are the source of truth there, so
 // no ca_keys state change can invalidate them — and the database holds no

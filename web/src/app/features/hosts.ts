@@ -15,45 +15,45 @@ import { HostAddDialog } from './host-add-dialog';
 const CERT_WARN_DAYS = 7;
 
 /**
- * Klartext zu den Bedingungen des Rollout-Gates (siehe internal/api/rollout.go).
- * Der Button wird bewusst nicht versteckt, sondern deaktiviert — der Operator
- * soll sehen, warum der One-Command-Install gerade nicht geht.
+ * Plain-text explanations for the rollout gate's conditions (see internal/api/rollout.go).
+ * The button is deliberately disabled rather than hidden — the operator
+ * should be able to see why the one-command install isn't available right now.
  */
 const ROLLOUT_MISSING_LABELS: Record<string, string> = {
-  binaries: 'Server-Build ohne Agent-Binaries',
-  pin: 'SPKI-Pin nicht ermittelt (GSSH_PUBLIC_PIN / Cert-Datei / Selbst-Dial)',
-  agent_public_url: 'GSSH_AGENT_PUBLIC_URL fehlt',
-  public_url: 'GSSH_PUBLIC_URL bzw. GSSH_UI_BASE_URL fehlt',
-  agent_public_url_https: 'GSSH_AGENT_PUBLIC_URL ist kein https-URL',
-  public_url_https: 'GSSH_PUBLIC_URL bzw. GSSH_UI_BASE_URL ist kein https-URL',
+  binaries: 'Server build without agent binaries',
+  pin: 'SPKI pin not determined (GSSH_PUBLIC_PIN / cert file / self-dial)',
+  agent_public_url: 'GSSH_AGENT_PUBLIC_URL is missing',
+  public_url: 'GSSH_PUBLIC_URL or GSSH_UI_BASE_URL is missing',
+  agent_public_url_https: 'GSSH_AGENT_PUBLIC_URL is not an https URL',
+  public_url_https: 'GSSH_PUBLIC_URL or GSSH_UI_BASE_URL is not an https URL',
 };
 
 /**
- * Klartext zu den Pin-Fehlerkategorien des Manifests (`pin_error`, siehe
- * internal/api/pinprovider.go). Der Volltext des Fehlers steht bewusst nur im
- * Server-Log — hier landet nur die Kategorie plus der Hinweis, wo man nachsieht.
+ * Plain-text explanations for the manifest's pin error categories (`pin_error`, see
+ * internal/api/pinprovider.go). The full error text is deliberately kept only in the
+ * server log — only the category plus a pointer to where to look shows up here.
  */
 const PIN_ERROR_LABELS: Record<string, string> = {
-  no_public_url: 'keine bzw. keine https-Public-URL konfiguriert',
-  chain_untrusted: 'Zertifikatskette der Public-URL nicht vertrauenswürdig',
-  dial_failed: 'Selbst-Dial auf die Public-URL fehlgeschlagen',
-  cert_file_unreadable: 'Pin-Zertifikatsdatei fehlt oder ist unlesbar',
+  no_public_url: 'no https public URL configured (or none at all)',
+  chain_untrusted: 'certificate chain of the public URL is not trusted',
+  dial_failed: 'self-dial to the public URL failed',
+  cert_file_unreadable: 'pin certificate file is missing or unreadable',
 };
 
-/** rolloutMissingText fasst die fehlenden Bedingungen lesbar zusammen. */
+/** rolloutMissingText summarizes the missing conditions in readable form. */
 export function rolloutMissingText(missing: readonly string[]): string {
   return missing.map((key) => ROLLOUT_MISSING_LABELS[key] ?? key).join(' · ');
 }
 
 /**
- * pinErrorText übersetzt die Fehlerkategorie; leer, wenn keine gemeldet ist.
- * Unbekannte Kategorien werden roh durchgereicht (neuer Server, alte UI).
+ * pinErrorText translates the error category; empty if none is reported.
+ * Unknown categories are passed through as-is (newer server, older UI).
  */
 export function pinErrorText(pinError: string): string {
   if (!pinError) {
     return '';
   }
-  return `${PIN_ERROR_LABELS[pinError] ?? pinError} (Details: Server-Log)`;
+  return `${PIN_ERROR_LABELS[pinError] ?? pinError} (details: server log)`;
 }
 
 @Component({
@@ -64,11 +64,11 @@ export function pinErrorText(pinError: string): string {
       <div class="page-header">
         <div>
           <h1>Hosts</h1>
-          <div class="page-sub">Verwaltete Hosts mit Tags, Status und Zertifikatsablauf</div>
+          <div class="page-sub">Managed hosts with tags, status, and certificate expiry</div>
         </div>
         <div>
           <button mat-stroked-button (click)="load()" [disabled]="loading()">
-            <mat-icon svgIcon="refresh" />Aktualisieren
+            <mat-icon svgIcon="refresh" />Refresh
           </button>
           @if (session.isAdmin()) {
             <button
@@ -77,15 +77,15 @@ export function pinErrorText(pinError: string): string {
               [disabled]="!manifest()?.rollout_ready"
               (click)="addHost()"
             >
-              <mat-icon svgIcon="add" />Host hinzufügen
+              <mat-icon svgIcon="add" />Add Host
             </button>
             @if (manifest(); as m) {
               @if (!m.rollout_ready) {
                 <div class="page-sub rollout-hint">
-                  Host-Rollout nicht konfiguriert:
+                  Host rollout not configured:
                   {{ rolloutMissingText(m.missing) }}
                   @if (pinErrorText(m.pin_error); as pinError) {
-                    <div>Pin-Fehler: {{ pinError }}</div>
+                    <div>Pin error: {{ pinError }}</div>
                   }
                 </div>
               }
@@ -98,7 +98,7 @@ export function pinErrorText(pinError: string): string {
         @if (loading()) {
           <div class="empty-state"><mat-spinner diameter="28" /></div>
         } @else if (hosts().length === 0) {
-          <div class="empty-state">Noch keine Hosts enrolled.</div>
+          <div class="empty-state">No hosts enrolled yet.</div>
         } @else {
           <table mat-table [dataSource]="hosts()">
             <ng-container matColumnDef="name">
@@ -116,13 +116,13 @@ export function pinErrorText(pinError: string): string {
               </td>
             </ng-container>
             <ng-container matColumnDef="seen">
-              <th mat-header-cell *matHeaderCellDef>Zuletzt gesehen</th>
+              <th mat-header-cell *matHeaderCellDef>Last Seen</th>
               <td mat-cell *matCellDef="let h">
                 <span [class]="'pill ' + seenClass(h)">{{ relativeTime(h.last_seen_at) }}</span>
               </td>
             </ng-container>
             <ng-container matColumnDef="cert">
-              <th mat-header-cell *matHeaderCellDef>Host-Zertifikat</th>
+              <th mat-header-cell *matHeaderCellDef>Host Certificate</th>
               <td mat-cell *matCellDef="let h">
                 <span [class]="'pill ' + certClass(h)">{{ certLabel(h) }}</span>
               </td>
@@ -156,7 +156,7 @@ export class HostsPage implements OnInit {
   protected readonly columns = ['name', 'tags', 'seen', 'cert', 'enrolled'];
   protected readonly hosts = signal<Host[]>([]);
   protected readonly loading = signal(false);
-  /** Manifest des Rollouts; null, solange es nicht geladen ist. */
+  /** Rollout manifest; null while it hasn't been loaded yet. */
   protected readonly manifest = signal<AgentManifest | null>(null);
 
   protected readonly relativeTime = relativeTime;
@@ -180,8 +180,8 @@ export class HostsPage implements OnInit {
   }
 
   /**
-   * loadManifest holt den Rollout-Zustand. Fehlschlag ⇒ kein Manifest, der
-   * Button bleibt deaktiviert (nichts wird stillschweigend angeboten).
+   * loadManifest fetches the rollout state. On failure ⇒ no manifest, the
+   * button stays disabled (nothing is silently offered).
    */
   private loadManifest(): void {
     this.api
@@ -215,12 +215,12 @@ export class HostsPage implements OnInit {
 
   certLabel(host: Host): string {
     if (!host.cert_valid_before) {
-      return 'kein Zertifikat';
+      return 'no certificate';
     }
     const expiry = new Date(host.cert_valid_before);
     return expiry.getTime() < Date.now()
-      ? `abgelaufen ${relativeTime(host.cert_valid_before)}`
-      : `gültig bis ${formatTimestamp(host.cert_valid_before)}`;
+      ? `expired ${relativeTime(host.cert_valid_before)}`
+      : `valid until ${formatTimestamp(host.cert_valid_before)}`;
   }
 
   certClass(host: Host): string {

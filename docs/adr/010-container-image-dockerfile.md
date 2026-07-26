@@ -1,27 +1,28 @@
-# ADR-010: Container-Image via Dockerfile (statt ko)
+# ADR-010: Container image via Dockerfile (instead of ko)
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Der Plan ließ `ko` oder Dockerfile offen. `ko` baut Go-Images ohne Docker-Daemon,
-kann aber nur Go — der Angular-Build (ADR-003) muss vor dem `go build` laufen,
-und der self-hosted Runner braucht Docker ohnehin für Testcontainer.
+The plan left `ko` vs. Dockerfile open. `ko` builds Go images without a
+Docker daemon, but only handles Go — the Angular build (ADR-003) must run
+before `go build`, and the self-hosted runner needs Docker anyway for
+Testcontainers.
 
-## Entscheidung
+## Decision
 
-Multi-Stage-Dockerfile: Build-Stage `golang`, Runtime-Stage
-`gcr.io/distroless/static-debian12:nonroot`, statisches Binary, non-root.
-Der Angular-Build kommt in Phase 8 als zusätzliche Stage (oder CI-Schritt) hinzu.
-Push nach `docker.io/guidedtraffic` (Docker Hub) via `docker/build-push-action`,
-nur auf main und Tags; Credentials als GitHub-Secrets (`DOCKERHUB_USERNAME`,
-`DOCKERHUB_TOKEN`). Tagging: SemVer (bei Git-Tags) + `sha-<commit>`.
+Multi-stage Dockerfile: build stage `golang`, runtime stage
+`gcr.io/distroless/static-debian12:nonroot`, static binary, non-root. The
+Angular build is added in Phase 8 as an additional stage (or CI step). Push
+to `docker.io/guidedtraffic` (Docker Hub) via `docker/build-push-action`,
+only on main and tags; credentials as GitHub secrets (`DOCKERHUB_USERNAME`,
+`DOCKERHUB_TOKEN`). Tagging: SemVer (on Git tags) + `sha-<commit>`.
 
-## Konsequenzen
+## Consequences
 
-- Ein Werkzeug (Docker/buildx) für Tests und Image-Builds — kein `ko` zu installieren.
-- Distroless + non-root + statisches Binary: minimale Angriffsfläche, passt zu den
-  PodSecurityContext-Vorgaben aus Phase 11.
-- Version/Commit werden als Build-Args in `internal/version` eingebrannt —
-  identische Mechanik wie `make build`.
+- A single tool (Docker/buildx) for tests and image builds — no `ko` to install.
+- Distroless + non-root + static binary: minimal attack surface, matching the
+  PodSecurityContext requirements from Phase 11.
+- Version/commit are baked in as build args in `internal/version` — the same
+  mechanism as `make build`.

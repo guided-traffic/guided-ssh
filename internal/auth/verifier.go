@@ -1,8 +1,8 @@
-// Package auth implementiert die Benutzer-Authentifizierung über OIDC
-// (Phase 3): Token-Validierung gegen den IdP (Issuer, Audience, Signatur via
-// JWKS, Ablauf), Claim-Mapping auf interne Benutzer inkl. Principal-Ableitung,
-// CLI-Login-Flows (Authorization Code + PKCE, Device-Flow) sowie den
-// periodischen Gruppen-Sync vom IdP.
+// Package auth implements user authentication via OIDC (Phase 3): token
+// validation against the IdP (issuer, audience, signature via JWKS,
+// expiry), claim mapping onto internal users including principal
+// derivation, CLI login flows (Authorization Code + PKCE, Device Flow), and
+// the periodic group sync from the IdP.
 package auth
 
 import (
@@ -14,12 +14,11 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
-// ErrInvalidToken kapselt alle Validierungsfehler eines ID-Tokens; die API
-// macht daraus 401 statt 500.
-var ErrInvalidToken = errors.New("auth: ungültiges id-token")
+// ErrInvalidToken wraps all validation errors of an ID token; the API turns
+// it into a 401 instead of a 500.
+var ErrInvalidToken = errors.New("auth: invalid id token")
 
-// Claims sind die für guided-ssh relevanten Ansprüche eines validierten
-// ID-Tokens.
+// Claims are the guided-ssh-relevant claims of a validated ID token.
 type Claims struct {
 	Issuer            string
 	Subject           string
@@ -28,8 +27,8 @@ type Claims struct {
 	Groups            []string
 }
 
-// Username leitet den internen Benutzernamen ab: preferred_username,
-// sonst der lokale Teil der E-Mail, sonst das Subject.
+// Username derives the internal username: preferred_username, else the
+// local part of the email, else the subject.
 func (c *Claims) Username() string {
 	if c.PreferredUsername != "" {
 		return c.PreferredUsername
@@ -40,10 +39,10 @@ func (c *Claims) Username() string {
 	return c.Subject
 }
 
-// Principals sind die SSH-Principals des Benutzers (Username, E-Mail).
-// Zertifikate tragen bewusst nur diese Identitäts-Principals — welche
-// lokalen Benutzer sie erreichen, entscheiden die Grants auf dem Host
-// (ADR-018); Grants steuern bei der Ausstellung nur ob und wie lange.
+// Principals are the user's SSH principals (username, email). Certificates
+// deliberately carry only these identity principals — which local users
+// they can reach is decided by the grants on the host (ADR-018); grants
+// only control whether and for how long at issuance time.
 func (c *Claims) Principals() []string {
 	principals := []string{c.Username()}
 	if c.Email != "" && c.Email != principals[0] {
@@ -52,27 +51,28 @@ func (c *Claims) Principals() []string {
 	return principals
 }
 
-// VerifierConfig konfiguriert die Token-Validierung.
+// VerifierConfig configures token validation.
 type VerifierConfig struct {
-	// IssuerURL ist die OIDC-Issuer-URL (Discovery unter
+	// IssuerURL is the OIDC issuer URL (discovery under
 	// <issuer>/.well-known/openid-configuration).
 	IssuerURL string
-	// ClientID ist die erwartete Audience der ID-Tokens.
+	// ClientID is the expected audience of the ID tokens.
 	ClientID string
 }
 
-// Verifier validiert ID-Tokens gegen den IdP. Die JWKS werden von go-oidc
-// gecacht und bei unbekannter Key-ID automatisch neu geladen.
+// Verifier validates ID tokens against the IdP. The JWKS are cached by
+// go-oidc and reloaded automatically on an unknown key ID.
 type Verifier struct {
 	issuer   string
 	verifier *oidc.IDTokenVerifier
 }
 
-// NewVerifier lädt die OIDC-Discovery des Issuers und baut den Verifier.
+// NewVerifier loads the issuer's OIDC discovery document and builds the
+// verifier.
 func NewVerifier(ctx context.Context, cfg VerifierConfig) (*Verifier, error) {
 	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
 	if err != nil {
-		return nil, fmt.Errorf("auth: oidc-discovery für %s: %w", cfg.IssuerURL, err)
+		return nil, fmt.Errorf("auth: oidc discovery for %s: %w", cfg.IssuerURL, err)
 	}
 	return &Verifier{
 		issuer:   cfg.IssuerURL,
@@ -80,11 +80,11 @@ func NewVerifier(ctx context.Context, cfg VerifierConfig) (*Verifier, error) {
 	}, nil
 }
 
-// Issuer ist die konfigurierte Issuer-URL (Identitäts-Namespace der Benutzer).
+// Issuer is the configured issuer URL (the users' identity namespace).
 func (v *Verifier) Issuer() string { return v.issuer }
 
-// Verify prüft Signatur, Issuer, Audience und Ablauf des rohen ID-Tokens und
-// extrahiert die Claims. Validierungsfehler kommen als ErrInvalidToken zurück.
+// Verify checks signature, issuer, audience, and expiry of the raw ID token
+// and extracts the claims. Validation errors come back as ErrInvalidToken.
 func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error) {
 	token, err := v.verifier.Verify(ctx, rawToken)
 	if err != nil {
@@ -96,7 +96,7 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error)
 		Groups            []string `json:"groups"`
 	}
 	if err := token.Claims(&payload); err != nil {
-		return nil, fmt.Errorf("%w: claims dekodieren: %w", ErrInvalidToken, err)
+		return nil, fmt.Errorf("%w: decoding claims: %w", ErrInvalidToken, err)
 	}
 	return &Claims{
 		Issuer:            token.Issuer,
@@ -107,8 +107,8 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error)
 	}, nil
 }
 
-// normalizeGroups entfernt führende "/" (Keycloak liefert Gruppenpfade) und
-// leere Einträge.
+// normalizeGroups strips leading "/" (Keycloak returns group paths) and
+// empty entries.
 func normalizeGroups(groups []string) []string {
 	out := make([]string, 0, len(groups))
 	for _, g := range groups {

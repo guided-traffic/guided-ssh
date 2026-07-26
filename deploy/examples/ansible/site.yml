@@ -1,16 +1,16 @@
-# Beispiel-Playbook: minimaler Durchstich für zertifikatsbasiertes
-# Provisioning aus GitLab-CI (docs/gitlab-ci.md). Authentifizierung kommt
-# vollständig aus dem ssh-agent des Jobs — kein Key-Material im Repo.
-- name: Zielhosts erreichbar und provisionierbar
+# Example playbook: minimal walkthrough for certificate-based
+# provisioning from GitLab CI (docs/gitlab-ci.md). Authentication comes
+# entirely from the job's ssh-agent — no key material in the repo.
+- name: Target hosts reachable and provisionable
   hosts: webserver
   gather_facts: false
   tasks:
-    - name: Verbindung prüfen
+    - name: Check connectivity
       ansible.builtin.ping:
 
-    - name: Beispiel-Task — Motd setzen
+    - name: Example task — set motd
       become: false
       ansible.builtin.copy:
         dest: /home/{{ ansible_user }}/provisioned-by-ci
-        content: "provisioniert durch pipeline {{ lookup('env', 'CI_PIPELINE_ID') | default('lokal', true) }}\n"
+        content: "provisioned by pipeline {{ lookup('env', 'CI_PIPELINE_ID') | default('local', true) }}\n"
         mode: "0644"

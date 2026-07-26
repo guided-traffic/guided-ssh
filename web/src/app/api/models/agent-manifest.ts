@@ -6,22 +6,22 @@ export interface AgentManifest {
   agents: Array<AgentBinary>;
 
   /**
-   * Fehlende Rollout-Bedingungen. Die *_https-Einträge melden eine gesetzte, aber nicht-https-URL — http passiert das Gate nie.
+   * Missing rollout conditions. The *_https entries report a URL that is set but not https — http never passes the gate.
    */
   missing: Array<'binaries' | 'pin' | 'agent_public_url' | 'public_url' | 'agent_public_url_https' | 'public_url_https'>;
 
   /**
-   * Grobe Kategorie des letzten Pin-Fehlers (leer ⇒ keiner). Kein Volltext — der steht nur im Server-Log.
+   * Coarse category of the last pin error (empty ⇒ none). No full text — that is only in the server log.
    */
   pin_error: '' | 'no_public_url' | 'chain_untrusted' | 'dial_failed' | 'cert_file_unreadable';
 
   /**
-   * Aktive SPKI-Pin-Quelle (leer ⇒ kein Pin)
+   * Active SPKI pin source (empty ⇒ no pin)
    */
   pin_source: string;
 
   /**
-   * false ⇒ Rollout-Endpunkte antworten mit 503
+   * false ⇒ rollout endpoints respond with 503
    */
   rollout_ready: boolean;
   version: string;

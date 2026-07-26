@@ -23,7 +23,7 @@ func TestCIGrantList(t *testing.T) {
 	}
 	for _, want := range []string{"infra/ansible", "main", "env=prod", "deploy", "1h0m0s"} {
 		if !strings.Contains(stdout, want) {
-			t.Errorf("ausgabe ohne %q:\n%s", want, stdout)
+			t.Errorf("output missing %q:\n%s", want, stdout)
 		}
 	}
 }
@@ -45,23 +45,23 @@ func TestCIGrantCreate(t *testing.T) {
 		t.Errorf("body = %v", api.lastBody)
 	}
 	if !strings.Contains(stdout, "ci-neu-1") {
-		t.Errorf("ausgabe ohne id: %s", stdout)
+		t.Errorf("output missing id: %s", stdout)
 	}
 }
 
-func TestCIGrantCreatePflichtfelder(t *testing.T) {
+func TestCIGrantCreateRequiredFields(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Run(&stdout, &stderr, []string{"ci-grant", "create", "--project", "x"}); code != 2 {
-		t.Errorf("ohne principals: code %d, erwartet 2", code)
+		t.Errorf("without principals: code %d, expected 2", code)
 	}
 	if code := Run(&stdout, &stderr, []string{"ci-grant", "create", "--principals", "deploy"}); code != 2 {
-		t.Errorf("ohne project: code %d, erwartet 2", code)
+		t.Errorf("without project: code %d, expected 2", code)
 	}
 	if code := Run(&stdout, &stderr, []string{"ci-grant"}); code != 2 {
-		t.Errorf("ohne subkommando: code %d, erwartet 2", code)
+		t.Errorf("without subcommand: code %d, expected 2", code)
 	}
-	if code := Run(&stdout, &stderr, []string{"ci-grant", "quatsch"}); code != 2 {
-		t.Errorf("unbekanntes subkommando: code %d, erwartet 2", code)
+	if code := Run(&stdout, &stderr, []string{"ci-grant", "bogus"}); code != 2 {
+		t.Errorf("unknown subcommand: code %d, expected 2", code)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestCIGrantUpdate(t *testing.T) {
 	if api.method != http.MethodPut || api.lastPath != "/v1/admin/ci-grants/ci-1" {
 		t.Errorf("request: %s %s", api.method, api.lastPath)
 	}
-	// Nicht angegebene Felder bleiben erhalten, principals/protected sind neu.
+	// Fields not specified are preserved; principals/protected are new.
 	principals, _ := api.lastBody["principals"].([]any)
 	if len(principals) != 2 || api.lastBody["protected_only"] != false ||
 		api.lastBody["ref_pattern"] != "main" || api.lastBody["max_validity_seconds"] != float64(3600) {
@@ -87,7 +87,7 @@ func TestCIGrantUpdate(t *testing.T) {
 
 	var stdout, errOut bytes.Buffer
 	if code := Run(&stdout, &errOut, []string{"ci-grant", "update"}); code != 2 {
-		t.Errorf("update ohne id: code %d, erwartet 2", code)
+		t.Errorf("update without id: code %d, expected 2", code)
 	}
 }
 
@@ -101,16 +101,16 @@ func TestCIGrantDelete(t *testing.T) {
 		t.Errorf("request: %s %s", api.method, api.lastPath)
 	}
 	if !strings.Contains(stdout, "ci-1") {
-		t.Errorf("ausgabe: %s", stdout)
+		t.Errorf("output: %s", stdout)
 	}
 
 	var out, errOut bytes.Buffer
 	if code := Run(&out, &errOut, []string{"ci-grant", "delete"}); code != 2 {
-		t.Errorf("delete ohne id: code %d, erwartet 2", code)
+		t.Errorf("delete without id: code %d, expected 2", code)
 	}
 }
 
-func TestApplyMitCIGrants(t *testing.T) {
+func TestApplyWithCIGrants(t *testing.T) {
 	yaml := `grants:
   - group: deployers
     principals: [deploy]
@@ -137,29 +137,29 @@ ci_grants:
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, stderr)
 	}
-	// Letzter Request ist der CI-Abgleich.
+	// The last request is the CI sync.
 	if api.lastPath != "/v1/admin/ci-grants/apply" {
-		t.Errorf("pfad: %s", api.lastPath)
+		t.Errorf("path: %s", api.lastPath)
 	}
 	ciGrants, _ := api.lastBody["ci_grants"].([]any)
 	if len(ciGrants) != 2 {
-		t.Fatalf("ci-apply-body: %v", api.lastBody)
+		t.Fatalf("ci-apply body: %v", api.lastBody)
 	}
 	first, _ := ciGrants[0].(map[string]any)
 	if first["project"] != "infra/ansible" || first["ref_pattern"] != "main" ||
 		first["environment_pattern"] != "prod" || first["max_validity_seconds"] != float64(3600) {
-		t.Errorf("erster ci-grant: %v", first)
+		t.Errorf("first ci-grant: %v", first)
 	}
 	second, _ := ciGrants[1].(map[string]any)
 	if second["protected_only"] != false {
-		t.Errorf("zweiter ci-grant (protected_only): %v", second)
+		t.Errorf("second ci-grant (protected_only): %v", second)
 	}
-	if !strings.Contains(stdout, "ci-abgleich fertig: 1 angelegt") {
-		t.Errorf("zusammenfassung: %s", stdout)
+	if !strings.Contains(stdout, "ci-sync complete: 1 created") {
+		t.Errorf("summary: %s", stdout)
 	}
 }
 
-func TestApplyOhneCIAbschnittLaesstCIGrantsUnberuehrt(t *testing.T) {
+func TestApplyWithoutCISectionLeavesCIGrantsUntouched(t *testing.T) {
 	yaml := "grants:\n  - group: deployers\n    principals: [deploy]\n    max_validity: 8h\n"
 	path := filepath.Join(t.TempDir(), "grants.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
@@ -170,11 +170,11 @@ func TestApplyOhneCIAbschnittLaesstCIGrantsUnberuehrt(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, stderr)
 	}
-	// Kein zweiter Request: letzter Pfad bleibt der Grant-Abgleich.
+	// No second request: the last path remains the grant sync.
 	if api.lastPath != "/v1/admin/grants/apply" {
-		t.Errorf("pfad: %s (ci-abgleich darf nicht laufen)", api.lastPath)
+		t.Errorf("path: %s (ci-sync must not run)", api.lastPath)
 	}
-	if strings.Contains(stdout, "ci-abgleich") {
-		t.Errorf("unerwarteter ci-abgleich: %s", stdout)
+	if strings.Contains(stdout, "ci-sync") {
+		t.Errorf("unexpected ci-sync: %s", stdout)
 	}
 }

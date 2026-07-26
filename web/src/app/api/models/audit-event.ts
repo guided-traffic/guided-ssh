@@ -5,14 +5,14 @@ export interface AuditEvent {
   actor: string;
 
   /**
-   * z. B. cert.issued, grant.created/updated/deleted, host.enrolled, user.deactivated, service_account.updated
+   * e.g. cert.issued, grant.created/updated/deleted, host.enrolled, user.deactivated, service_account.updated
    */
   event_type: string;
   id: number;
   occurred_at: string;
 
   /**
-   * Ereignis-Details als JSON
+   * Event details as JSON
    */
   payload: {
 };
