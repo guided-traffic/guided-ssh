@@ -64,13 +64,16 @@ func registerUIRoutes(mux *http.ServeMux, admin *adminContext) {
 
 // hostJSON is the API representation of a host for the UI.
 type hostJSON struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
-	Tags            map[string]string `json:"tags"`
-	EnrolledAt      *time.Time        `json:"enrolled_at,omitempty"`
-	LastSeenAt      *time.Time        `json:"last_seen_at,omitempty"`
-	CertValidBefore *time.Time        `json:"cert_valid_before,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Tags       map[string]string `json:"tags"`
+	EnrolledAt *time.Time        `json:"enrolled_at,omitempty"`
+	LastSeenAt *time.Time        `json:"last_seen_at,omitempty"`
+	// LastSeenAddr is the agent's observed source IP (egress — behind NAT
+	// not necessarily the sshd address; the UI labels it accordingly).
+	LastSeenAddr    *string    `json:"last_seen_addr,omitempty"`
+	CertValidBefore *time.Time `json:"cert_valid_before,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 func (a *adminContext) handleListHosts(w http.ResponseWriter, r *http.Request, _ *auth.Claims, _ string) {
@@ -86,6 +89,7 @@ func (a *adminContext) handleListHosts(w http.ResponseWriter, r *http.Request, _
 		out = append(out, hostJSON{
 			ID: h.ID.String(), Name: h.Name, Tags: h.Tags,
 			EnrolledAt: h.EnrolledAt, LastSeenAt: h.LastSeenAt,
+			LastSeenAddr:    h.LastSeenAddr,
 			CertValidBefore: h.CertValidBefore, CreatedAt: h.CreatedAt,
 		})
 	}

@@ -4,13 +4,15 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTableModule } from '@angular/material/table';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { Api } from '../api/api';
-import { getAgentManifest, listHosts } from '../api/functions';
-import { AgentManifest, Host } from '../api/models';
+import { getAgentManifest, getClientManifest, listHosts } from '../api/functions';
+import { AgentManifest, ClientManifest, Host } from '../api/models';
 import { formatTimestamp, relativeTime } from '../core/format';
 import { SessionService } from '../core/session.service';
 import { HostAddDialog } from './host-add-dialog';
+import { HostConnectDialog } from './host-connect-dialog';
 
 const CERT_WARN_DAYS = 7;
 
@@ -58,7 +60,13 @@ export function pinErrorText(pinError: string): string {
 
 @Component({
   selector: 'app-hosts',
-  imports: [MatTableModule, MatButtonModule, MatIconModule, MatProgressSpinnerModule],
+  imports: [
+    MatTableModule,
+    MatButtonModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule,
+  ],
   template: `
     <div class="page">
       <div class="page-header">
@@ -133,6 +141,23 @@ export function pinErrorText(pinError: string): string {
                 {{ formatTimestamp(h.enrolled_at) }}
               </td>
             </ng-container>
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef class="actions-cell"></th>
+              <td mat-cell *matCellDef="let h" class="actions-cell">
+                <!-- The tooltip sits on the wrapper: a disabled button receives no
+                     pointer events, and the reason is exactly what needs explaining. -->
+                <span [matTooltip]="connectTooltip(h)">
+                  <button
+                    mat-icon-button
+                    [disabled]="!h.enrolled_at"
+                    [attr.aria-label]="'Connect to ' + h.name"
+                    (click)="connect(h)"
+                  >
+                    <mat-icon svgIcon="terminal" />
+                  </button>
+                </span>
+              </td>
+            </ng-container>
             <tr mat-header-row *matHeaderRowDef="columns"></tr>
             <tr mat-row *matRowDef="let row; columns: columns"></tr>
           </table>
@@ -146,6 +171,11 @@ export function pinErrorText(pinError: string): string {
       max-width: 420px;
       text-align: right;
     }
+    .actions-cell {
+      width: 56px;
+      text-align: right;
+      padding-right: 8px;
+    }
   `,
 })
 export class HostsPage implements OnInit {
@@ -153,11 +183,16 @@ export class HostsPage implements OnInit {
   private readonly dialog = inject(MatDialog);
   protected readonly session = inject(SessionService);
 
-  protected readonly columns = ['name', 'tags', 'seen', 'cert', 'enrolled'];
+  protected readonly columns = ['name', 'tags', 'seen', 'cert', 'enrolled', 'actions'];
   protected readonly hosts = signal<Host[]>([]);
   protected readonly loading = signal(false);
   /** Rollout manifest; null while it hasn't been loaded yet. */
   protected readonly manifest = signal<AgentManifest | null>(null);
+  /**
+   * Client manifest for the connect dialog (install one-liner, pin for the DNS
+   * fallback). Loaded for every role — connecting is not an admin action.
+   */
+  protected readonly clientManifest = signal<ClientManifest | null>(null);
 
   protected readonly relativeTime = relativeTime;
   protected readonly formatTimestamp = formatTimestamp;
@@ -166,6 +201,10 @@ export class HostsPage implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    this.api
+      .invoke(getClientManifest)
+      .then((manifest) => this.clientManifest.set(manifest))
+      .catch(() => this.clientManifest.set(null));
     if (this.session.isAdmin()) {
       this.loadManifest();
     }
@@ -199,6 +238,24 @@ export class HostsPage implements OnInit {
       .open(HostAddDialog, { data: manifest, width: '640px' })
       .afterClosed()
       .subscribe(() => this.load());
+  }
+
+  /**
+   * connect opens the per-host dialog. Only for enrolled hosts — an
+   * unenrolled host has no agent and nothing to connect to yet.
+   */
+  connect(host: Host): void {
+    if (!host.enrolled_at) {
+      return;
+    }
+    this.dialog.open(HostConnectDialog, {
+      data: { host, manifest: this.clientManifest() },
+      width: '640px',
+    });
+  }
+
+  connectTooltip(host: Host): string {
+    return host.enrolled_at ? 'Connect' : 'Not enrolled yet — nothing to connect to';
   }
 
   tagList(host: Host): string[] {

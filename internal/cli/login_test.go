@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,94 @@ func TestLoginIssuerUnreachable(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"login", "--config", config}); got != 1 {
 		t.Fatalf("login = %d, expected 1", got)
+	}
+}
+
+// deadConfig points api_url at a closed port: only an override can make the
+// login work.
+func deadConfig(t *testing.T, idp *fakeIDP) string {
+	t.Helper()
+	return writeConfig(t, "api_url: http://127.0.0.1:1\nissuer: "+idp.server.URL+"\nclient_id: gssh-cli\n")
+}
+
+func TestLoginAPIURLOverride(t *testing.T) {
+	startAgent(t)
+	idp := newFakeIDP(t)
+	sign := newFakeSign(t, idp.idToken, time.Hour, false)
+	stubBrowser(t)
+	config := deadConfig(t, idp)
+	before, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if got := Run(&stdout, &stderr, []string{"login", "--config", config, "--api-url", sign.server.URL}); got != 0 {
+		t.Fatalf("login = %d (stderr: %s)", got, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "signed in:") {
+		t.Errorf("stdout: %q", stdout.String())
+	}
+	// The override is ephemeral: the configuration file stays untouched.
+	after, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("config file changed:\n%s\n---\n%s", before, after)
+	}
+}
+
+func TestLoginPinOverride(t *testing.T) {
+	startAgent(t)
+	idp := newFakeIDP(t)
+	sign := newFakeSign(t, idp.idToken, time.Hour, true) // https with a self-signed certificate
+	stubBrowser(t)
+	config := deadConfig(t, idp)
+
+	// Without a pin the untrusted certificate is rejected — the hint is shown.
+	var stdout, stderr bytes.Buffer
+	if got := Run(&stdout, &stderr, []string{"login", "--config", config, "--api-url", sign.server.URL}); got != 1 {
+		t.Fatalf("login without pin = %d, expected 1", got)
+	}
+	if !strings.Contains(stderr.String(), "--pin-sha256") {
+		t.Errorf("hint missing: %q", stderr.String())
+	}
+
+	// With the pin the same connection verifies.
+	stdout.Reset()
+	stderr.Reset()
+	got := Run(&stdout, &stderr, []string{
+		"login", "--config", config,
+		"--api-url", sign.server.URL, "--pin-sha256", spkiPin(t, sign.server),
+	})
+	if got != 0 {
+		t.Fatalf("login with pin = %d (stderr: %s)", got, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "signed in:") {
+		t.Errorf("stdout: %q", stdout.String())
+	}
+}
+
+func TestLoginInvalidPinAbortsBeforeNetwork(t *testing.T) {
+	startAgent(t)
+	idp := newFakeIDP(t)
+	sign := newFakeSign(t, idp.idToken, time.Hour, false)
+	stubBrowser(t)
+
+	var stdout, stderr bytes.Buffer
+	code := Run(&stdout, &stderr, []string{
+		"login", "--config", minimalConfig(t, idp, sign),
+		"--pin-sha256", "not-base64!!",
+	})
+	if code != 1 {
+		t.Fatalf("login = %d, expected 1", code)
+	}
+	if !strings.Contains(stderr.String(), "--pin-sha256") {
+		t.Errorf("stderr: %q", stderr.String())
+	}
+	if idp.tokenCalls.Load() != 0 {
+		t.Errorf("oidc flow started despite an invalid pin: tokenCalls = %d", idp.tokenCalls.Load())
 	}
 }
 

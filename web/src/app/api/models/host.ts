@@ -10,6 +10,11 @@ export interface Host {
   created_at: string;
   enrolled_at?: string | null;
   id: string;
+
+  /**
+   * Agent's observed source IP at the last contact (no port). Egress address — behind NAT not necessarily the address sshd listens on.
+   */
+  last_seen_addr?: string | null;
   last_seen_at?: string | null;
   name: string;
   tags: {

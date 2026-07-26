@@ -24,6 +24,8 @@ tags:
   - name: enrollment
   - name: rollout
     description: One-command host install (agent manifest, binary download, install.sh, token minting)
+  - name: client
+    description: gssh client install (client manifest, binary download, client.sh)
   - name: grants
   - name: ci-grants
   - name: directory
@@ -209,6 +211,59 @@ paths:
             text/x-shellscript:
               schema: { type: string }
         "503": { $ref: "#/components/responses/RolloutUnavailable" }
+
+  /v1/clients:
+    get:
+      tags: [client]
+      summary: Client manifest and client-install readiness (public)
+      description: |
+        Also responds with 200 when the client gate is closed and lists the
+        missing conditions in `missing` (diagnostic source for the UI).
+      security: []
+      operationId: getClientManifest
+      responses:
+        "200":
+          description: Delivered client binaries, gate state, and the offered SPKI pin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientManifest" }
+
+  /v1/clients/{os}/{arch}:
+    get:
+      tags: [client]
+      summary: Download gssh client binary (public, tightly rate-limited)
+      description: |
+        Shares the agent download's rate limiter (`GSSH_AGENT_DOWNLOAD_RPM`,
+        per client IP).
+      security: []
+      operationId: downloadClient
+      parameters:
+        - { name: os, in: path, required: true, schema: { type: string, example: linux } }
+        - { name: arch, in: path, required: true, schema: { type: string, example: amd64 } }
+      responses:
+        "200":
+          description: Binary stream
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ClientUnavailable" }
+
+  /client.sh:
+    get:
+      tags: [client]
+      summary: Templated client install script (public)
+      security: []
+      operationId: getClientScript
+      responses:
+        "200":
+          description: >-
+            POSIX sh script with base URL, OIDC issuer/client ID, per-platform
+            SHA-256, and — only from an operator-controlled source — the SPKI pin
+          content:
+            text/x-shellscript:
+              schema: { type: string }
+        "503": { $ref: "#/components/responses/ClientUnavailable" }
 
   /v1/admin/enroll-tokens:
     post:
@@ -597,6 +652,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/RolloutUnavailable" }
+    ClientUnavailable:
+      description: >-
+        Client install not configured (missing conditions in `missing`). Same
+        wire shape as the rollout 503, own — smaller — set of conditions.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RolloutUnavailable" }
 
   schemas:
     AuthSession:
@@ -714,6 +776,47 @@ components:
         error: { type: string }
         missing: { type: array, items: { type: string } }
 
+    ClientManifest:
+      type: object
+      required: [version, ready, missing, pin, pin_source, clients]
+      properties:
+        version: { type: string }
+        ready:
+          type: boolean
+          description: false ⇒ /v1/clients/{os}/{arch} and /client.sh respond with 503
+        missing:
+          type: array
+          description: >-
+            Missing client-install conditions. public_url_https reports a URL
+            that is set but not https — http never passes the gate. The pin is
+            deliberately not a condition (it is an opt-in, see the security model).
+          items:
+            type: string
+            enum: [binaries, public_url, public_url_https, oidc_issuer, oidc_client_id]
+        pin:
+          type: string
+          description: >-
+            SPKI pin consumed by the client.sh --pin opt-in (and the CLI-only
+            login-via-IP edge case), populated only from an
+            operator-controlled source (static/file). Empty with an
+            auto-derived (dial) pin: it rotates with the certificate and must
+            never become a client's stored trust anchor.
+        pin_source:
+          type: string
+          description: Active SPKI pin source (static|file|dial; empty ⇒ none configured)
+        clients:
+          type: array
+          items: { $ref: "#/components/schemas/ClientBinary" }
+
+    ClientBinary:
+      type: object
+      required: [os, arch, size, sha256]
+      properties:
+        os: { type: string }
+        arch: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string, description: Hex SHA-256 (sha256sum-compatible) }
+
     EnrollTokenRequest:
       type: object
       properties:
@@ -814,6 +917,12 @@ components:
           additionalProperties: { type: string }
         enrolled_at: { type: string, format: date-time, nullable: true }
         last_seen_at: { type: string, format: date-time, nullable: true }
+        last_seen_addr:
+          type: string
+          nullable: true
+          description: >-
+            Agent's observed source IP at the last contact (no port). Egress
+            address — behind NAT not necessarily the address sshd listens on.
         cert_valid_before:
           type: string
           format: date-time

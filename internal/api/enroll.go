@@ -22,7 +22,7 @@ import (
 type HostStore interface {
 	EnrollHost(ctx context.Context, p store.EnrollHostParams) (*store.Host, error)
 	GetHost(ctx context.Context, id uuid.UUID) (*store.Host, error)
-	TouchHostLastSeen(ctx context.Context, id uuid.UUID) error
+	TouchHostLastSeen(ctx context.Context, id uuid.UUID, addr string) error
 	ListAuthorizedPrincipals(ctx context.Context, hostID uuid.UUID, localUser string) ([]string, error)
 }
 

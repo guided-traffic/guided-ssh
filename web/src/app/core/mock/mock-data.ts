@@ -3,6 +3,7 @@ import {
   AuditEvent,
   AuthSession,
   CiGrant,
+  ClientManifest,
   Grant,
   Group,
   Host,
@@ -48,7 +49,8 @@ export const mockUiConfig: UiConfig = {
 /**
  * Hosts: every combination of last-seen pill (ok < 24h, warn ≥ 24h, muted =
  * never) and certificate pill (ok, warn < 7 days, danger = expired, muted =
- * none), plus tag variants (none, few, many).
+ * none), plus tag variants (none, few, many). web-01 carries a
+ * last_seen_addr (connect dialog's IP suggestion); the others do not.
  */
 export const mockHosts: Host[] = [
   {
@@ -58,6 +60,7 @@ export const mockHosts: Host[] = [
     created_at: ago(90 * DAY),
     enrolled_at: ago(90 * DAY),
     last_seen_at: ago(4 * MINUTE),
+    last_seen_addr: "10.20.30.40",
     cert_valid_before: ahead(21 * DAY),
   },
   {
@@ -124,6 +127,24 @@ export const mockAgentManifest: AgentManifest = {
       sha256: "b4a6…" + "f".repeat(58),
       size: 21_876_544,
     },
+  ],
+};
+
+/**
+ * Client install ready — the Client setup page and the connect dialog render
+ * fully. The pin fields mirror a server with an operator-controlled pin; the
+ * UI itself does not consume them (the pin is the `client.sh --pin` opt-in).
+ */
+export const mockClientManifest: ClientManifest = {
+  ready: true,
+  version: "v2.3.0",
+  pin_source: "static",
+  pin: "9nPmyRTjBQvKfBpB9OiE9YEfR9dPbGVoBSSlYqAr4X0=",
+  missing: [],
+  clients: [
+    { os: "darwin", arch: "arm64", sha256: "c5b7…" + "a".repeat(58), size: 8_178_432 },
+    { os: "linux", arch: "amd64", sha256: "d6c8…" + "b".repeat(58), size: 8_599_040 },
+    { os: "linux", arch: "arm64", sha256: "e7d9…" + "c".repeat(58), size: 7_968_256 },
   ],
 };
 

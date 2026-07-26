@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/guided-traffic/guided-ssh/internal/pintls"
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
 
@@ -58,7 +59,12 @@ func usage(w io.Writer) {
 
 commands:
   login [--device] [--validity 8h] [--if-needed] [--config path]
-        sign in via sso; key pair and certificate go only into the ssh-agent
+        [--api-url url] [--pin-sha256 pin]
+        sign in via sso; key pair and certificate go only into the ssh-agent.
+        --api-url/--pin-sha256 override the configuration for this run only
+        (the file is never modified) — the dns fallback: with an ip api url,
+        webpki cannot verify the hostname, so --pin-sha256 is required; the
+        pin then replaces chain and hostname verification
   ci-login [--api-url url] [--token-env GSSH_CI_TOKEN] [--validity 1h] [--pin-sha256 pin]
         gitlab ci: exchange the job token (id_tokens) for a ci certificate and
         load it into the job's ssh-agent; api-url also via GSSH_API_URL
@@ -103,16 +109,37 @@ func runLoginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	device := fs.Bool("device", false, "device flow instead of browser (headless)")
 	validity := fs.Duration("validity", 0, "desired validity (0 = default)")
 	ifNeeded := fs.Bool("if-needed", false, "only sign in if no valid certificate is in the agent")
+	apiURL := fs.String("api-url", "", "override the configured api url for this run (e.g. https://<ip> as a dns fallback)")
+	pin := fs.String("pin-sha256", "", "spki-sha-256 pin of the server certificate; required with an ip api url")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	// Fail fast on a mangled copy-paste: before the config file is touched
+	// and long before the first network call of the OIDC flow.
+	if *pin != "" {
+		if _, err := pintls.DecodePin(*pin); err != nil {
+			fmt.Fprintf(stderr, "gssh: --pin-sha256: %v\n", err)
+			return 1
+		}
 	}
 	cfg, ok := loadConfigCmd(*configPath, stderr)
 	if !ok {
 		return 1
 	}
+	// Ephemeral overrides: only this run's in-memory copy, the file stays as
+	// it is (a one-off flag must never silently repoint an installed client).
+	if *apiURL != "" {
+		cfg.APIURL = *apiURL
+	}
+	if *pin != "" {
+		cfg.PinSHA256 = *pin
+	}
 	opts := loginOptions{device: *device, validity: *validity, ifNeeded: *ifNeeded}
 	if err := login(ctx, cfg, opts, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "gssh: login failed: %v\n", err)
+		if *apiURL != "" && *pin == "" {
+			fmt.Fprintln(stderr, "hint: an --api-url without a matching dns name needs --pin-sha256 <pin> (webpki cannot verify an ip)")
+		}
 		return 1
 	}
 	return 0

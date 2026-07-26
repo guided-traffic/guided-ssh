@@ -12,6 +12,7 @@ import (
 
 	"github.com/guided-traffic/guided-ssh/internal/agentdist"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
+	"github.com/guided-traffic/guided-ssh/internal/bindist"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/store"
@@ -69,6 +70,9 @@ type Deps struct {
 	// Agents provides the embedded gssh-agentd binaries of the
 	// one-command host install; nil or empty ⇒ rollout gate closed.
 	Agents AgentSource
+	// Clients provides the embedded gssh client binaries of the
+	// frontend-driven client install; nil or empty ⇒ client gate closed.
+	Clients ClientSource
 	// Pins determines the SPKI pin of the public TLS endpoint; nil or
 	// "no pin determinable" ⇒ rollout gate closed (fail-closed, rule 3).
 	Pins *PinProvider
@@ -87,6 +91,18 @@ type AgentSource interface {
 	// Open streams the binary for os/arch; if none is embedded, the error
 	// is agentdist.ErrNotFound.
 	Open(osName, arch string) (io.ReadCloser, agentdist.Info, error)
+}
+
+// ClientSource provides metadata and content of the embedded gssh client
+// binaries (*bindist.Source satisfies it; tests use clientdist.NewFromFS).
+// Deliberately its own interface next to AgentSource: the two families come
+// from separate embeds and separate gates, and mixing them up would serve
+// the wrong binary under the right name.
+type ClientSource interface {
+	List() []bindist.Info
+	// Open streams the binary for os/arch; if none is embedded, the error
+	// is bindist.ErrNotFound.
+	Open(osName, arch string) (io.ReadCloser, bindist.Info, error)
 }
 
 // UIConfig is the web UI's public bootstrap configuration.
@@ -110,6 +126,9 @@ type UIConfig struct {
 //	GET  /v1/agents                – manifest of agent binaries + rollout status
 //	GET  /v1/agents/{os}/{arch}    – agent binary (one-command host install)
 //	GET  /install.sh               – templated install script for hosts
+//	GET  /v1/clients               – manifest of gssh client binaries + client status
+//	GET  /v1/clients/{os}/{arch}   – gssh client binary (frontend client install)
+//	GET  /client.sh                – templated install script for the client
 //	/v1/admin/grants…              – grant management (CRUD + declarative apply),
 //	                                 members of the admin group only
 //	/v1/admin/ci-grants…           – CI grant management (analogous)
@@ -172,6 +191,7 @@ func New(deps Deps) http.Handler {
 	}
 
 	registerRolloutRoutes(mux, deps)
+	registerClientRoutes(mux, deps)
 	registerUIAuthRoutes(mux, deps)
 	registerAdminRoutes(mux, deps)
 

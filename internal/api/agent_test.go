@@ -96,6 +96,11 @@ func TestAgentRenew(t *testing.T) {
 	if resp.ValidBefore.Before(time.Now().Add(29 * 24 * time.Hour)) {
 		t.Errorf("validity too short: %s", resp.ValidBefore)
 	}
+	// The heartbeat records the agent's source IP, port stripped
+	// (httptest.NewRequest sets RemoteAddr 192.0.2.1:1234).
+	if hosts.lastSeenAddr != "192.0.2.1" {
+		t.Errorf("last_seen_addr = %q, expected 192.0.2.1", hosts.lastSeenAddr)
+	}
 }
 
 func TestAgentRenewErrorCases(t *testing.T) {

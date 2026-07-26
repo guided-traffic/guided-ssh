@@ -37,8 +37,12 @@ type Host struct {
 	PublicKey  *string    `db:"public_key"`
 	EnrolledAt *time.Time `db:"enrolled_at"`
 	LastSeenAt *time.Time `db:"last_seen_at"`
-	CreatedAt  time.Time  `db:"created_at"`
-	UpdatedAt  time.Time  `db:"updated_at"`
+	// LastSeenAddr is the agent's observed source IP at the last mTLS
+	// contact (no port). Egress address — behind NAT not necessarily the
+	// address sshd listens on; the UI says so wherever it offers it.
+	LastSeenAddr *string   `db:"last_seen_addr"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
 }
 
 // AccessGrant links an IdP group, via a tag selector, to target principals,

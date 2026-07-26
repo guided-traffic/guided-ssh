@@ -33,6 +33,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/auditstream"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
+	"github.com/guided-traffic/guided-ssh/internal/clientdist"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
 	"github.com/guided-traffic/guided-ssh/internal/store"
@@ -529,7 +530,10 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 			DevUser: devUser,
 			// Host rollout (one-command install): binaries from the image, the
 			// pin, and external URLs. If anything is missing, the gate stays closed (503).
-			Agents:         agentdist.New(),
+			Agents: agentdist.New(),
+			// Client install: the version-matched gssh binaries from the same
+			// image; without them the client gate stays closed (503).
+			Clients:        clientdist.New(),
 			Pins:           pins,
 			AgentPublicURL: strings.TrimSuffix(os.Getenv(envAgentPublicURL), "/"),
 			PublicBaseURL:  publicBaseURL(),

@@ -122,9 +122,17 @@ helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set config.groups.admin=gssh-admins
 ```
 
-**Then, either way** — configure the CLI
-(`~/.config/guided-ssh/config.yaml`), log in, create a first access rule,
-enroll a host, ssh:
+**Then, either way** — set up the client. On a real (https) deployment that
+is a single line — it installs `gssh` into `~/.local/bin` and writes a
+ready-to-use configuration ([client install](#client-install)):
+
+```sh
+curl -fsSL https://gssh.example.com/client.sh | sh
+```
+
+The plain-HTTP quickstart above stays below that route's https gate — here,
+write `~/.config/guided-ssh/config.yaml` by hand instead. Then log in,
+create a first access rule, enroll a host, ssh:
 
 ```yaml
 api_url: http://localhost:8080
@@ -215,6 +223,90 @@ tokens), the accepted residual risks, and why script and deb/rpm installs
 must not be mixed on one host — **[docs/host-rollout.md](docs/host-rollout.md)**.
 Pin sources and rate limits:
 [chart README](deploy/helm/guided-ssh/README.md#host-rollout-one-command-install).
+
+## Client install
+
+The server serves the `gssh` client too, version-matched to itself: the web
+UI's **Client setup** page (and the per-host **Connect** dialog on the Hosts
+page) hand out a single line that installs the client and writes a
+ready-to-use configuration — zero to an SSH connection in three steps (fewer
+is impossible: `gssh login` needs an interactive browser):
+
+```sh
+curl -fsSL https://gssh.example.com/client.sh | sh   # binary + ready config
+gssh login                                           # SSO in the browser
+gssh ssh <host>
+```
+
+No sudo, no token, no secrets: the script refuses to run as root, installs
+into `~/.local/bin`, and writes `~/.config/guided-ssh/config.yaml` (mode
+0600) only if none exists — an existing configuration is never overwritten,
+the binary is still updated. Possessing the binary grants nothing; access is
+only ever granted at `gssh login` time (OIDC + grants). Direct binary
+downloads (macOS included) and a manual-configuration snippet live on the
+same UI page.
+
+Three public routes back this (all served with `Cache-Control: no-store`):
+
+| Route | Serves |
+|---|---|
+| `GET /client.sh` | templated install script — server URL, OIDC issuer, client ID, and per-platform SHA-256 hashes baked in |
+| `GET /v1/clients` | manifest: version, readiness (`missing` conditions), `pin`/`pin_source`, platforms with size and SHA-256 |
+| `GET /v1/clients/{os}/{arch}` | client binary (`linux/amd64`, `linux/arm64`, `darwin/arm64`) |
+
+The feature fails closed: script and binary download answer 503 naming the
+missing conditions until the public base URL (`GSSH_PUBLIC_URL` /
+`GSSH_UI_BASE_URL`) is https and the OIDC issuer and client ID are set;
+released images always embed the client binaries. Binary downloads share the
+host install's rate limit — `GSSH_AGENT_DOWNLOAD_RPM` throttles agent *and*
+client downloads from one per-IP bucket.
+
+**Security.** This is again `curl | sh` from the same origin that serves the
+hashes — the shared discussion in
+[docs/host-rollout.md](docs/host-rollout.md) applies, with a strictly
+smaller blast radius: no sudo, no token, no enrollment; the script writes
+only to the invoking user's home. The generated configuration trusts WebPKI
+— the same trust model as the browser SSO flow the login depends on — and
+deliberately contains **no** TLS pin: a pinned default would break every
+installed client on the next server key rotation. Hardened or private-CA
+setups opt in with `… | sh -s -- --pin`, which requires an
+operator-controlled pin source (`GSSH_PUBLIC_PIN` or
+`GSSH_PUBLIC_PIN_CERT_FILE`).
+
+**DNS fallback (connect via IP).** For a target host without a (working)
+DNS entry, the Connect dialog renders
+
+```sh
+gssh ssh -o HostKeyAlias=<host-name> <ip>
+```
+
+`HostKeyAlias` makes ssh verify the host certificate against the enrolled
+name (its principals are the full and short hostname, not the IP) while
+connecting to the address — verification stays fully intact, nothing is
+skipped. Without the alias, an IP connect correctly fails the principal
+check. The dialog offers the agent's source address from its last
+heartbeat (`last_seen_addr`) as a click-to-fill suggestion — labeled as
+the egress address, which behind NAT may differ from where sshd listens;
+the IP is never silently prefilled, the user always confirms it.
+
+**Login via IP (edge case).** Should the *server's* DNS name be unresolvable
+too, `gssh login` accepts ephemeral overrides — the config file is untouched:
+
+```sh
+gssh login --api-url https://<server-ip> --pin-sha256 <pin>
+```
+
+The pin replaces chain *and* hostname verification — a via-IP login is fully
+verified TLS; there is no insecure-skip code path. It requires an
+operator-controlled pin source (`GSSH_PUBLIC_PIN` or
+`GSSH_PUBLIC_PIN_CERT_FILE`); auto-derived (`dial`) pins rotate with the
+certificate and are never handed to clients. A file pin is only as stable as
+the deployment's key-rotation policy: a renewal that rotates the private key
+changes the SPKI and thus the pin. The login puts a certificate into the
+ssh-agent and `gssh ssh` needs no further API contact until it expires;
+persistently IP-based setups edit `config.yaml` (`api_url` plus
+`pin_sha256`) deliberately. The browser→IdP leg keeps its own DNS
+dependency.
 
 ## GitLab CI
 

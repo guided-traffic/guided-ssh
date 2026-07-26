@@ -32,6 +32,8 @@ type fakeHostStore struct {
 	principals map[string][]string // localUser → principals
 
 	principalsErr error
+	// lastSeenAddr records the addr of the last TouchHostLastSeen call.
+	lastSeenAddr string
 }
 
 func newFakeHostStore() *fakeHostStore {
@@ -73,10 +75,11 @@ func (f *fakeHostStore) GetHost(_ context.Context, id uuid.UUID) (*store.Host, e
 	return host, nil
 }
 
-func (f *fakeHostStore) TouchHostLastSeen(_ context.Context, id uuid.UUID) error {
+func (f *fakeHostStore) TouchHostLastSeen(_ context.Context, id uuid.UUID, addr string) error {
 	if _, ok := f.hosts[id]; !ok {
 		return store.ErrNotFound
 	}
+	f.lastSeenAddr = addr
 	return nil
 }
 

@@ -22,6 +22,7 @@ import {
   mockAgentManifest,
   mockAuditEvents,
   mockCiGrants,
+  mockClientManifest,
   mockGrants,
   mockGroups,
   mockHosts,
@@ -92,6 +93,9 @@ function route(
   }
   if (method === "GET" && path === "/v1/agents") {
     return respond(req, 200, mockAgentManifest);
+  }
+  if (method === "GET" && path === "/v1/clients") {
+    return respond(req, 200, mockClientManifest);
   }
   if (method === "POST" && path === "/v1/admin/enroll-tokens") {
     return respond(

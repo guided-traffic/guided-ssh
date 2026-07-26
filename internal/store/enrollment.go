@@ -163,10 +163,15 @@ func (s *Store) EnrollHost(ctx context.Context, p EnrollHostParams) (*Host, erro
 	return host, nil
 }
 
-// TouchHostLastSeen stamps last_seen_at (agent contact).
-func (s *Store) TouchHostLastSeen(ctx context.Context, id uuid.UUID) error {
+// TouchHostLastSeen stamps last_seen_at and records the agent's observed
+// source address (agent contact). An empty addr keeps the previous value —
+// a parse hiccup must not erase a known-good address.
+func (s *Store) TouchHostLastSeen(ctx context.Context, id uuid.UUID, addr string) error {
 	return s.execAffectingOne(ctx,
-		`UPDATE hosts SET last_seen_at = now() WHERE id = $1`, id)
+		`UPDATE hosts
+		 SET last_seen_at = now(),
+		     last_seen_addr = COALESCE(NULLIF($2, ''), last_seen_addr)
+		 WHERE id = $1`, id, addr)
 }
 
 // ListAuthorizedPrincipals returns, for a host and a local user, the

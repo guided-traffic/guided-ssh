@@ -31,7 +31,24 @@ CORS, no separate deployment (ADR-003, ADR-020).
 
 ## Views
 
-- **Hosts**: status (last seen), tags, host certificate expiry.
+- **Hosts**: status (last seen), tags, host certificate expiry. Each enrolled
+  host has a per-row **Connect** dialog: the one-time `client.sh` install
+  line (de-emphasized, linking to Client setup), the `gssh ssh <name>` copy
+  line, and an expandable **DNS fallback** for hosts without a (working) DNS
+  entry that renders `gssh ssh -o HostKeyAlias=<name> <ip>` from a
+  user-entered IP — the alias keeps the host-certificate check against the
+  enrolled name, so verification stays intact (see
+  [README — client install](../README.md#client-install)). The agent's
+  last observed source address is offered as a labeled click-to-fill
+  suggestion (egress ≠ sshd address behind NAT); it is never silently
+  prefilled.
+- **Client setup**: install page for the `gssh` client — the three-step flow
+  with the `curl … /client.sh | sh` one-liner, a two-step
+  download-inspect-run alternative, direct binary downloads per platform
+  (size, SHA-256 with copy button), and the manual `config.yaml` snippet.
+  If the server-side client gate is closed (`GET /v1/clients` reports
+  `missing` conditions), the page shows the reasons in plain language
+  instead of the instructions.
 - **Access rules**: grants including create/edit/delete (admin); mutations
   generate server-side audit events with an actor.
 - **CI & service accounts**: CI grants (CRUD, admin) and service accounts

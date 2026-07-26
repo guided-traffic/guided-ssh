@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -281,10 +282,21 @@ func agentHost(w http.ResponseWriter, r *http.Request, deps AgentDeps) (*store.H
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return nil, false
 	}
-	if err := deps.Hosts.TouchHostLastSeen(r.Context(), host.ID); err != nil {
+	if err := deps.Hosts.TouchHostLastSeen(r.Context(), host.ID, remoteIP(r)); err != nil {
 		deps.Logger.Warn("agent: updating last_seen failed", "host", host.Name, "error", err)
 	} else {
 		metrics.AgentHeartbeats.Inc()
 	}
 	return host, true
+}
+
+// remoteIP is the agent's source address without the port. mTLS means a
+// direct TCP connection (no L7 proxy can sit in between), so RemoteAddr is
+// genuinely the agent's egress address — no forwarded headers to consider.
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
