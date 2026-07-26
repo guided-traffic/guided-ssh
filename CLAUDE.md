@@ -15,7 +15,7 @@ on request. Approach:
   larger changes.
 - `graphify-out/` is a working artifact (don't commit it unless told otherwise).
 
-DON'T UPDATE GRAPHIFY FOR NOW, TAKES TOO LONG.
+ONLY UPDATE GRAPHIFY IF TOLD SO.
 
 ## Project context
 
