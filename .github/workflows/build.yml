@@ -165,10 +165,13 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      # runner.temp instead of /tmp: /tmp persists across runs on self-hosted
+      # runners, so old chart packages would accumulate and get re-attached.
       - name: Cache chart package
         run: |
-          mkdir -p /tmp/helm-charts
-          cp -r deploy/helm/repo/* /tmp/helm-charts/
+          rm -rf "$RUNNER_TEMP/helm-charts"
+          mkdir -p "$RUNNER_TEMP/helm-charts"
+          cp deploy/helm/repo/*.tgz "$RUNNER_TEMP/helm-charts/"
 
       - name: Check out gh-pages branch
         uses: actions/checkout@v7
@@ -180,7 +183,7 @@ jobs:
       - name: Publish to GitHub Pages
         run: |
           # Copy new charts into the root directory
-          cp /tmp/helm-charts/*.tgz .
+          cp "$RUNNER_TEMP"/helm-charts/*.tgz .
 
           # Merge index.yaml with the existing index, if present
           if [ -f index.yaml ]; then
@@ -197,11 +200,13 @@ jobs:
           git commit -m "Release Helm chart for $GITHUB_REF_NAME"
           git push --force origin gh-pages
 
+      # Only the freshly packaged chart — a bare *.tgz glob here would match
+      # every historical chart in the gh-pages worktree and attach them all.
+      # index.yaml is not attached: it is the mutable repo index on gh-pages,
+      # a frozen copy on the release would be stale and misleading.
       - name: Attach chart to the release
         uses: softprops/action-gh-release@v3
         with:
-          files: |
-            *.tgz
-            index.yaml
+          files: ${{ runner.temp }}/helm-charts/*.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

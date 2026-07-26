@@ -234,6 +234,16 @@
       "allowedVersions": "<6.1"
     },
     {
+      "description": "conventional-changelog-conventionalcommits v10 is incompatible with @semantic-release/release-notes-generator v14: releases get a heading but no commit sections (empty release notes). Cap at v9 until the semantic-release plugins support the v10 preset API.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "conventional-changelog-conventionalcommits"
+      ],
+      "allowedVersions": "<10"
+    },
+    {
       "description": "Use 'fix' instead of 'chore' for dependency updates",
       "semanticCommitType": "fix",
       "matchUpdateTypes": [
