@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +32,37 @@ var ErrTokenHostMismatch = errors.New("store: enrollment-token ist an anderen ho
 
 // EventHostEnrolled ist das Audit-Event eines erfolgreichen Enrollments.
 const EventHostEnrolled = "host.enrolled"
+
+// EventEnrollTokenCreated ist das Audit-Event eines gemünzten
+// Enrollment-Tokens. Der Payload enthält nie den Klartext und nie den Hash.
+const EventEnrollTokenCreated = "host.enroll_token.created" //#nosec G101 -- Event-Name, kein Credential
+
+// enrollTokenPrefix kennzeichnet Enrollment-Tokens im Klartext (erleichtert
+// Secret-Scanner und Fehldiagnosen bei verwechselten Tokens).
+const enrollTokenPrefix = "gssh-et-" //#nosec G101 -- Prefix, kein Credential
+
+// NewEnrollmentToken erzeugt den Klartext eines Enrollment-Tokens und den
+// zugehörigen Record (nur Hash). Netzfrei — CLI und Admin-API minten damit
+// garantiert identisch. Der Aufrufer persistiert den Record via
+// CreateEnrollmentToken und zeigt den Klartext genau einmal an; gespeichert
+// wird er nirgends.
+func NewEnrollmentToken(hostname string, tags map[string]string, ttl time.Duration) (string, *EnrollmentToken, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", nil, fmt.Errorf("store: enrollment-token erzeugen: %w", err)
+	}
+	plaintext := enrollTokenPrefix + base64.RawURLEncoding.EncodeToString(buf)
+	hash := sha256.Sum256([]byte(plaintext))
+	rec := &EnrollmentToken{
+		TokenHash: hash[:],
+		Tags:      tags,
+		ExpiresAt: time.Now().Add(ttl),
+	}
+	if hostname != "" {
+		rec.HostName = &hostname
+	}
+	return plaintext, rec, nil
+}
 
 // CreateEnrollmentToken legt ein Enrollment-Token an (Hash, nie Klartext).
 func (s *Store) CreateEnrollmentToken(ctx context.Context, t *EnrollmentToken) error {

@@ -7,7 +7,12 @@ echo "entrypoint ready"
 while [ ! -f /var/lib/guided-ssh/config.yaml ]; do sleep 0.2; done
 echo "enrollment erkannt — starte agentd"
 
-/usr/local/bin/gssh-agentd run &
+# Der Test kopiert das Binary nach /usr/local/bin; das install.sh des
+# One-Command-Installs legt es nach /usr/bin.
+AGENTD=/usr/local/bin/gssh-agentd
+[ -x "$AGENTD" ] || AGENTD=/usr/bin/gssh-agentd
+
+"$AGENTD" run &
 
 while [ ! -S /var/lib/guided-ssh/agentd.sock ]; do sleep 0.2; done
 echo "agentd bereit — starte sshd"

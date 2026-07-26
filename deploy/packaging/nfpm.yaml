@@ -21,7 +21,8 @@ contents:
     dst: /usr/bin/gssh-agentd
     file_info:
       mode: 0755
-  - src: deploy/packaging/gssh-agentd.service
+  # Einzige Quelle der Unit: internal/agentdist (von dort auch go:embed).
+  - src: internal/agentdist/gssh-agentd.service
     dst: /lib/systemd/system/gssh-agentd.service
     file_info:
       mode: 0644

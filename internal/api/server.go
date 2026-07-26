@@ -4,11 +4,13 @@
 package api
 
 import (
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/guided-traffic/guided-ssh/internal/agentdist"
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 	"github.com/guided-traffic/guided-ssh/internal/ca"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
@@ -35,6 +37,11 @@ type Deps struct {
 	// RateLimit drosselt die unauthentifizierten Endpunkte (Sign, Enroll)
 	// pro Client-IP (Phase 10); nil ⇒ kein Rate-Limiting (Tests).
 	RateLimit *RateLimiter
+	// DownloadRateLimit drosselt allein den Binary-Download
+	// (GET /v1/agents/{os}/{arch}). Eigene, engere Instanz: das Binary ist
+	// 15–40 MB groß, der reguläre 60/min-Limiter wäre als Flood-Schutz zu
+	// locker. nil ⇒ kein Rate-Limiting (Tests).
+	DownloadRateLimit *RateLimiter
 	// HostCertValidity ist die Laufzeit ausgestellter Host-Zertifikate;
 	// 0 ⇒ Default (30 Tage). Das Policy-Maximum greift immer.
 	HostCertValidity time.Duration
@@ -54,6 +61,27 @@ type Deps struct {
 	// UIAuth aktiviert den server-seitigen OIDC-Login der Web-UI
 	// (/v1/auth/…, BFF); nil ⇒ Endpunkte antworten mit 503.
 	UIAuth *UIAuthConfig
+	// Agents liefert die eingebetteten gssh-agentd-Binaries des
+	// One-Command-Host-Installs; nil oder leer ⇒ Rollout-Gate zu.
+	Agents AgentSource
+	// Pins ermittelt den SPKI-Pin des öffentlichen TLS-Endpunkts; nil oder
+	// „kein Pin ermittelbar" ⇒ Rollout-Gate zu (fail-closed, Regel 3).
+	Pins *PinProvider
+	// AgentPublicURL ist die externe mTLS-Agent-URL (GSSH_AGENT_PUBLIC_URL),
+	// die enrollte Hosts in ihre config.yaml schreiben; leer ⇒ Gate zu.
+	AgentPublicURL string
+	// PublicBaseURL ist die externe Basis-URL des Public-Listeners
+	// (GSSH_PUBLIC_URL, Fallback GSSH_UI_BASE_URL); leer ⇒ Gate zu.
+	PublicBaseURL string
+}
+
+// AgentSource liefert Metadaten und Inhalt der eingebetteten Agent-Binaries
+// (*agentdist.Source erfüllt es; Tests nutzen agentdist.NewFromFS).
+type AgentSource interface {
+	List() []agentdist.Info
+	// Open streamt das Binary für os/arch; ist keines eingebettet, ist der
+	// Fehler agentdist.ErrNotFound.
+	Open(osName, arch string) (io.ReadCloser, agentdist.Info, error)
 }
 
 // UIConfig ist die öffentliche Bootstrap-Konfiguration der Web-UI.
@@ -74,6 +102,9 @@ type UIConfig struct {
 //	POST /v1/sign/user             – ID-Token gegen SSH-Benutzerzertifikat tauschen
 //	POST /v1/sign/ci               – GitLab-Job-Token gegen CI-Zertifikat tauschen
 //	POST /v1/enroll                – Host-Enrollment gegen einmaliges Token
+//	GET  /v1/agents                – Manifest der Agent-Binaries + Rollout-Status
+//	GET  /v1/agents/{os}/{arch}    – Agent-Binary (One-Command-Host-Install)
+//	GET  /install.sh               – getemplatetes Install-Script für Hosts
 //	/v1/admin/grants…              – Grant-Verwaltung (CRUD + deklaratives Apply),
 //	                                 nur für Mitglieder der Admin-Gruppe
 //	/v1/admin/ci-grants…           – CI-Grant-Verwaltung (analog)
@@ -135,6 +166,7 @@ func New(deps Deps) http.Handler {
 		})
 	}
 
+	registerRolloutRoutes(mux, deps)
 	registerUIAuthRoutes(mux, deps)
 	registerAdminRoutes(mux, deps)
 

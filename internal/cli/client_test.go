@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
 // spkiPin liefert den Base64-SPKI-SHA-256 des httptest-TLS-Zertifikats.
 func spkiPin(t *testing.T, server *httptest.Server) string {
 	t.Helper()
-	sum := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
-	return base64.StdEncoding.EncodeToString(sum[:])
+	return pintls.FromCertificate(server.Certificate())
 }
 
 func marshalPub(pub ssh.PublicKey) string {

@@ -323,6 +323,94 @@ application — **no** HTTP ingress, instead:
 `agent.tlsNames` must contain the DNS name agents use to reach the server
 (default: cluster-internal service name).
 
+## Host rollout (one-command install)
+
+`hostRollout.enabled=true` turns on the "Add host" button in the web UI: the
+server mints a short-lived enrollment token and serves a templated
+`install.sh` that downloads the matching `gssh-agentd` binary (embedded in the
+server image), verifies its SHA-256 and enrolls the host — pinned to the
+server's public TLS key.
+
+The feature is strictly optional. With `enabled: false` nothing is rendered
+and nothing is required. With `enabled: true` the chart **fails to render**
+when a mandatory value is missing, so misconfiguration surfaces at
+`helm install/upgrade/lint` time instead of on the fleet. The server-side gate
+stays authoritative (it also covers non-Helm deployments and drift): without
+binaries, pin, agent URL and public URL the rollout endpoints answer `503` and
+name the missing conditions.
+
+```bash
+helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
+  --set hostRollout.enabled=true \
+  --set hostRollout.agentPublicUrl=https://gssh-agent.example.com:8443 \
+  --set hostRollout.publicUrl=https://gssh.example.com
+```
+
+`agentPublicUrl` is never derived — a wrong agent URL would land unnoticed in
+the `config.yaml` of every enrolled host. `publicUrl` may be omitted if
+`config.oidc.uiBaseURL` is set.
+
+### Which pin source (`hostRollout.pin.source`)
+
+SPKI pinning is mandatory, not opt-in. All three sources are fail-closed: no
+pin ⇒ no rollout.
+
+| Source | When | Rotation |
+|---|---|---|
+| `dial` (default) | The server can reach its own public URL from inside the cluster | Automatic (background + lazy refresh, `pin.refreshInterval`) |
+| `file` | Hairpin/split-horizon DNS, or the certificate is managed by cert-manager anyway | Automatic — the file is read uncached on every pin lookup |
+| `static` | Last resort, e.g. a CDN or an external terminator whose certificate the cluster never sees | Manual (operator sets the new pin) |
+
+**`dial`** — the server dials `publicUrl` and reads the leaf certificate, i.e.
+exactly what a host sees during enrollment. Verified against the system roots
+(a private CA needs `SSL_CERT_FILE`/`SSL_CERT_DIR` via `config.extraEnv`).
+Requires hairpin access: if the cluster cannot resolve or reach its own
+external URL from a pod, use `file` or `static`.
+
+**`file`** — mount the ingress TLS secret:
+
+```yaml
+hostRollout:
+  enabled: true
+  agentPublicUrl: https://gssh-agent.example.com:8443
+  publicUrl: https://gssh.example.com
+  pin:
+    source: file
+    certSecretName: gssh-example-com-tls
+```
+
+The chart projects **only `tls.crt`** (the server does not need the key) and
+mounts it **without `subPath`** at `/etc/gssh/public-tls/tls.crt` — the kubelet
+only updates secret mounts that have no `subPath`, so a renewed certificate is
+picked up automatically. The secret must live in the server namespace; a
+wildcard certificate from another namespace needs reflector/kubed or its own
+`Certificate` resource.
+
+**`static`** — compute the pin from the public endpoint:
+
+```bash
+openssl s_client -connect gssh.example.com:443 -servername gssh.example.com < /dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary \
+  | base64
+```
+
+```bash
+--set hostRollout.pin.source=static --set hostRollout.pin.static=<base64-pin>
+```
+
+Rotating the certificate means rotating this value — a stale static pin breaks
+every new enrollment (the TLS handshake fails **before** the token is spent, so
+no token is burned).
+
+### Download rate limit
+
+`hostRollout.downloadRpm` (default 10) limits binary downloads per client IP
+and minute; `0` disables the limiter. The manifest and the binary are public —
+the enrollment token gates the enrollment, not the download. `X-Forwarded-For`
+handling is inherited from `config.rateLimit.trustProxy`.
+
 ## Metrics
 
 `/metrics` listens on its own port (9090) and is not exposed through the
@@ -353,6 +441,13 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `config.keycloak.*` | `""` | Group sync via Keycloak admin API |
 | `config.rateLimit.trustProxy` | `true` | Client IP from `X-Forwarded-For` (behind ingress) |
 | `agent.enabled` / `agent.tlsNames` | `true` / service DNS | Agent API (mTLS) |
+| `hostRollout.enabled` | `false` | One-command host install; `true` requires the values below |
+| `hostRollout.agentPublicUrl` | `""` (required with `enabled`) | External mTLS agent URL written into every enrolled host |
+| `hostRollout.publicUrl` | `""` | External public URL; empty ⇒ `config.oidc.uiBaseURL` (one of them is required) |
+| `hostRollout.pin.source` | `dial` | `dial` / `file` / `static` — see [Which pin source](#which-pin-source-hostrolloutpinsource) |
+| `hostRollout.pin.static` / `certSecretName` | `""` | Required for `source=static` / `source=file` |
+| `hostRollout.pin.refreshInterval` | `5m` | Refresh interval of the pin self-dial (`source=dial`) |
+| `hostRollout.downloadRpm` | `10` | Binary downloads per client IP and minute (`0` = off) |
 | `metrics.serviceMonitor.enabled` | `false` | ServiceMonitor for the Prometheus operator |
 | `ingress.enabled` | `false` | Ingress for API/UI |
 | `networkPolicy.enabled` | `false` | NetworkPolicy (ports http/agent/metrics) |

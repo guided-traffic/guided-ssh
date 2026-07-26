@@ -63,6 +63,10 @@ type fakeUIStore struct {
 	events     []store.AuditEvent
 	lastFilter store.AuditFilter
 	saActor    string
+	// tokens sind die gemünzten Enrollment-Token-Records (Phase C);
+	// tokenErr erzwingt einen Store-Fehler.
+	tokens   []store.EnrollmentToken
+	tokenErr error
 }
 
 func (f *fakeUIStore) ListHostsDetailed(context.Context) ([]store.HostDetailed, error) {
@@ -110,6 +114,23 @@ func (f *fakeUIStore) CountAuditEvents(_ context.Context, _ store.AuditFilter) (
 	return int64(len(f.events)), nil
 }
 
+func (f *fakeUIStore) CreateEnrollmentToken(_ context.Context, t *store.EnrollmentToken) error {
+	if f.tokenErr != nil {
+		return f.tokenErr
+	}
+	if t.Tags == nil {
+		t.Tags = map[string]string{}
+	}
+	t.ID = uuid.New()
+	f.tokens = append(f.tokens, *t)
+	return nil
+}
+
+func (f *fakeUIStore) AppendAuditEvent(_ context.Context, e *store.AuditEvent) error {
+	f.events = append(f.events, *e)
+	return nil
+}
+
 // uiTestEnv bündelt Server, Store und die Tokens der drei Rollen.
 type uiTestEnv struct {
 	srv           *httptest.Server
@@ -122,6 +143,13 @@ type uiTestEnv struct {
 
 // newUIServer baut den Testserver mit allen drei Rollen-Gruppen und UIStore.
 func newUIServer(t *testing.T) *uiTestEnv {
+	t.Helper()
+	return newUIServerWithDeps(t, nil)
+}
+
+// newUIServerWithDeps erlaubt zusätzlich, die Deps vor dem Start anzupassen
+// (z. B. die Rollout-Bedingungen des Token-Mintings).
+func newUIServerWithDeps(t *testing.T, mutate func(*api.Deps)) *uiTestEnv {
 	t.Helper()
 	fs := newFakeAuthStore()
 	masterKey := make([]byte, ca.MasterKeySize)
@@ -141,12 +169,16 @@ func newUIServer(t *testing.T) *uiTestEnv {
 		"norole-token":   claimsWithGroups("nobody", "dev"),
 	}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(api.New(api.Deps{
+	deps := api.Deps{
 		CA: certAuthority, Store: fs, Grants: fs, Admin: newFakeAdminStore(fs), UI: ui,
 		Verifier: verifier, Logger: logger,
 		AdminGroup: adminGroupName, AuditorGroup: auditorGroupName, ReadOnlyGroup: readonlyGroupName,
 		UIConfig: api.UIConfig{OIDCIssuer: "https://idp.example.com/realms/gssh", OIDCClientID: "gssh-ui"},
-	}))
+	}
+	if mutate != nil {
+		mutate(&deps)
+	}
+	srv := httptest.NewServer(api.New(deps))
 	t.Cleanup(srv.Close)
 	return &uiTestEnv{
 		srv: srv, ui: ui,

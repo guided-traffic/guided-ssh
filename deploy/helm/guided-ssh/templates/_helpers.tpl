@@ -88,6 +88,54 @@ Selbstverwaltung beim Start ab. */}}
 {{- end }}
 {{- end }}
 
+{{/* Mount-Pfad des öffentlichen TLS-Zertifikats bei hostRollout.pin.source=file.
+Aus dem Secret wird ausschließlich tls.crt projiziert (der Server braucht den
+Key nicht) und bewusst ohne subPath gemountet — nur dann zieht das Kubelet eine
+Secret-Rotation im laufenden Pod nach. */}}
+{{- define "guided-ssh.publicPinDir" -}}/etc/gssh/public-tls{{- end }}
+{{- define "guided-ssh.publicPinFile" -}}{{ include "guided-ssh.publicPinDir" . }}/tls.crt{{- end }}
+
+{{/* Host-Rollout-Envs (nur bei hostRollout.enabled). Die Pflicht-Werte werden
+hier geprüft: Misconfig scheitert beim Rendern, nicht erst auf der Flotte. Das
+Server-Gate bleibt autoritativ (es deckt Nicht-Helm-Deployments und Drift ab) —
+dieser Block steuert nur, welche Envs gesetzt werden. */}}
+{{- define "guided-ssh.hostRolloutEnv" -}}
+{{- $rollout := .Values.hostRollout -}}
+{{- $source := default "dial" $rollout.pin.source -}}
+{{- if not (has $source (list "dial" "file" "static")) -}}
+{{- fail (printf "hostRollout.pin.source muss \"dial\", \"file\" oder \"static\" sein (ist: %q)" $source) -}}
+{{- end -}}
+{{/* http lehnt auch das Server-Gate ab (public_url_https/agent_public_url_https) —
+hier scheitert es schon beim Rendern statt erst auf der Flotte. */}}
+{{- if and $rollout.agentPublicUrl (not (hasPrefix "https://" $rollout.agentPublicUrl)) -}}
+{{- fail (printf "hostRollout.agentPublicUrl muss ein https-URL sein (ist: %q)" $rollout.agentPublicUrl) -}}
+{{- end -}}
+{{- $publicURL := default .Values.config.oidc.uiBaseURL $rollout.publicUrl -}}
+{{- if and $publicURL (not (hasPrefix "https://" $publicURL)) -}}
+{{- fail (printf "hostRollout braucht eine https-Public-URL — hostRollout.publicUrl bzw. config.oidc.uiBaseURL ist %q" $publicURL) -}}
+{{- end -}}
+- name: GSSH_AGENT_PUBLIC_URL
+  value: {{ required "hostRollout.enabled=true erfordert hostRollout.agentPublicUrl (externe mTLS-Agent-URL der Agenten, z. B. https://gssh-agent.example.com:8443 — wird bewusst nie abgeleitet)" $rollout.agentPublicUrl | quote }}
+{{- if $rollout.publicUrl }}
+- name: GSSH_PUBLIC_URL
+  value: {{ $rollout.publicUrl | quote }}
+{{- else if not .Values.config.oidc.uiBaseURL }}
+{{- fail "hostRollout.enabled=true erfordert hostRollout.publicUrl oder config.oidc.uiBaseURL (externe Public-URL für install_command und Pin-Dial)" -}}
+{{- end }}
+{{- if eq $source "static" }}
+- name: GSSH_PUBLIC_PIN
+  value: {{ required "hostRollout.pin.source=static erfordert hostRollout.pin.static (Base64-SPKI-Pin, openssl-Snippet im README)" $rollout.pin.static | quote }}
+{{- else if eq $source "file" }}
+{{- $_ := required "hostRollout.pin.source=file erfordert hostRollout.pin.certSecretName (TLS-Secret des Ingress im Server-Namespace)" $rollout.pin.certSecretName }}
+- name: GSSH_PUBLIC_PIN_CERT_FILE
+  value: {{ include "guided-ssh.publicPinFile" . | quote }}
+{{- else }}
+{{- include "guided-ssh.env" (dict "name" "GSSH_PUBLIC_PIN_REFRESH" "value" $rollout.pin.refreshInterval) }}
+{{- end }}
+- name: GSSH_AGENT_DOWNLOAD_RPM
+  value: {{ $rollout.downloadRpm | toString | quote }}
+{{- end }}
+
 {{/* Feste Dev-Credentials der internen Test-Datenbank (Sidecar, nur 127.0.0.1
 im Pod erreichbar — bewusst kein Secret). */}}
 {{- define "guided-ssh.internalDBUser" -}}gssh{{- end }}

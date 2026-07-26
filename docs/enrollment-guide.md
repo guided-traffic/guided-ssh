@@ -155,7 +155,7 @@ die `known_hosts` aufnehmen.
 
 ## 6. Betrieb des Agenten
 
-Systemd-Unit (`deploy/packaging/gssh-agentd.service`): `gssh-agentd run`,
+Systemd-Unit (`internal/agentdist/gssh-agentd.service`): `gssh-agentd run`,
 `Restart=on-failure`, `ProtectSystem=full` mit `ReadWritePaths=/var/lib/guided-ssh /etc/ssh`,
 `NoNewPrivileges`.
 

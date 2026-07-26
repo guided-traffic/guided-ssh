@@ -53,6 +53,11 @@ Konfiguration über Umgebungsvariablen:
 | `GSSH_CA_MTLS_KEY_FILE` / `GSSH_CA_MTLS_CERT_FILE` | PKCS#8-PEM und X.509-CA-Zertifikat der Agent-mTLS-CA (nur `self-managed`) |
 | `GSSH_AGENT_TLS_NAMES` | SANs des mTLS-Server-Zertifikats der Agent-API (Komma-getrennt; Default `localhost,127.0.0.1`) |
 | `GSSH_ADMIN_GROUP` | IdP-Gruppe, deren Mitglieder die Admin-API (`/v1/admin/…`) nutzen dürfen; leer ⇒ Admin-API deaktiviert |
+| `GSSH_AGENT_PUBLIC_URL` | Externe mTLS-Agent-URL für enrollte Hosts (Host-Rollout, wird nie abgeleitet) |
+| `GSSH_PUBLIC_URL` | Externe Public-Basis-URL (Host-Rollout: `install_command` und Pin-Dial); leer ⇒ `GSSH_UI_BASE_URL` |
+| `GSSH_PUBLIC_PIN` / `GSSH_PUBLIC_PIN_CERT_FILE` | Pin-Quellen des Host-Rollouts: Base64-SPKI-Pin bzw. PEM-Zertifikat; ohne beides dialt der Server seine Public-URL selbst an |
+| `GSSH_PUBLIC_PIN_REFRESH` | Refresh-Intervall des Pin-Selbst-Dials (Go-Duration, Default 5m) |
+| `GSSH_AGENT_DOWNLOAD_RPM` | Binary-Downloads pro Client-IP und Minute (Default 10, `0` = aus) |
 
 Endpunkte (Phase 2 — Sign-Endpoints folgen ab Phase 3):
 
@@ -159,6 +164,45 @@ State liegt unter `/var/lib/guided-ssh/` (mTLS-Client-Zertifikat,
 Konfiguration, Principals-Cache). Pakete (deb/rpm via nfpm) und
 Install-Skript: [deploy/packaging/](deploy/packaging/), Build mit
 `make cross packages`.
+
+## Host-Rollout (`internal/agentdist`)
+
+Der Server liefert den Agenten selbst aus (One-Command-Install, Nutzersicht:
+[README](README.md#one-command-host-install)). `internal/agentdist` ist die
+Quelle dafür:
+
+- `bin/` enthält die Agent-Binaries `gssh-agentd-<os>-<arch>`, per `go:embed
+  all:bin` ins Server-Binary eingebettet. Im Repo ist das Verzeichnis leer
+  (`.gitkeep`, gitignored) — gefüllt wird es allein im Docker-Build (Stage
+  `agentbuild`, gleiche `-ldflags` wie der Server ⇒ harter Version-Lockstep).
+- `gssh-agentd.service` ist die einzige Unit-Quelle im Repo; deb/rpm
+  (`nfpm.yaml`) und das getemplatete `install.sh` zeigen beide hierher.
+- `Source` (`New` / `NewFromFS`) liefert Liste, Größe und Hex-SHA-256 je
+  Binary; `NewFromFS` existiert für Tests und E2E, in denen das Embed leer ist.
+
+**Dev-Build-Degradation:** ein `go build`/`make build` außerhalb des
+Docker-Builds enthält keine Binaries. Das Rollout-Gate meldet dann `binaries`
+als fehlende Bedingung: Manifest (`GET /v1/agents`) antwortet weiter mit 200
+und zeigt den Grund, Download, `GET /install.sh` und der Token-Mint antworten
+mit `503`, der UI-Button bleibt deaktiviert. Lokal einbetten:
+
+```sh
+make cross                                   # baut u. a. bin/gssh-agentd-linux-amd64
+cp bin/gssh-agentd-linux-amd64 internal/agentdist/bin/
+make build                                   # Server mit eingebettetem Agenten
+```
+
+E2E-Smoke der ganzen Kette (Token → `install.sh` → Download → Hash-Check →
+Enroll → laufender Agent) im sshd-Fixture-Container:
+
+```sh
+go test -tags integration ./internal/agentd/ -run InstallScript
+```
+
+Der Test baut den Agenten selbst, hängt ihn per `agentdist.NewFromFS` ein und
+nutzt eine statische Pin-Quelle aus dem Test-TLS-Zertifikat. Der
+`systemctl`-Zweig läuft dort nicht (`--no-systemd`) — bewusste, dokumentierte
+CI-Lücke (siehe README).
 
 ## Entwicklung
 
