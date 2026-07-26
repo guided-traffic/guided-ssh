@@ -20,39 +20,32 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
+  background: var(--background);
 }
 
-// The login card renders like a dialog surface (solid surface-3, hairline-strong
-// border, 12px radius, dual-layer shadow, one gradient seam echoing the wordmark)
-// — quiet and confident, the single gradient moment on the whole screen.
+// Katalyst auth card: white, generous padding, soft elevated shadow.
 .login-card {
-  position: relative;
   max-width: 420px;
   width: 100%;
   padding: 44px 40px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   text-align: center;
   align-items: center;
-  background: var(--surface-3);
-  border: 1px solid var(--hairline-strong);
-  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 2px 8px rgba(0, 0, 0, 0.55),
-    0 24px 60px rgba(0, 0, 0, 0.55);
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 12px 32px -8px rgba(16, 24, 40, 0.12);
+}
 
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    border-radius: 12px 12px 0 0;
-    background: var(--seam);
-  }
+.login-title {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .login-claim {
@@ -67,6 +60,7 @@
 
 .login-button {
   min-width: 220px;
+  margin-top: 8px;
 }
 
 // -------------------------------------------------------------------- Brand
@@ -79,9 +73,7 @@
 
 .brand-logo {
   display: block;
-  height: 22px;
-  // A tight, precise brand-mark glow — not a soft halo.
-  filter: drop-shadow(0 0 4px rgba(76, 141, 255, 0.22));
+  height: 26px;
 }
 
 .login-card .brand-logo {
@@ -92,24 +84,33 @@
 
 .shell {
   display: grid;
-  grid-template-columns: 236px 1fr;
-  gap: 16px;
+  grid-template-columns: 256px 1fr;
   height: 100%;
-  padding: 16px;
-  box-sizing: border-box;
 }
 
 .sidenav {
   display: flex;
   flex-direction: column;
-  padding: 20px 12px 12px;
+  padding: 20px 12px 16px;
+  background: var(--sidebar-surface);
+  border-right: 1px solid var(--sidebar-border);
   position: sticky;
-  top: 16px;
-  height: calc(100vh - 32px);
+  top: 0;
+  height: 100vh;
   box-sizing: border-box;
+  overflow-y: auto;
 
   .brand {
-    padding: 0 10px 18px;
+    padding: 0 10px 22px;
+  }
+
+  .nav-section {
+    padding: 14px 10px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--sidebar-muted);
   }
 
   nav {
@@ -123,48 +124,128 @@
       gap: 12px;
       padding: 9px 12px;
       border-radius: 8px;
-      border-left: 2px solid transparent;
-      color: var(--text-dim);
+      color: var(--sidebar-foreground);
       font-size: 13.5px;
       font-weight: 500;
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      transition: background 0.15s ease, color 0.15s ease;
 
       mat-icon {
         width: 18px;
         height: 18px;
         font-size: 18px;
+        color: var(--sidebar-muted);
       }
 
       &:hover {
-        background: var(--surface-2);
-        color: var(--text);
+        background: var(--sidebar-hover);
+        text-decoration: none;
       }
 
-      // The single most Linear/Vercel-coded detail: a crisp 2px accent rule
-      // flush to the panel's left edge, plus a flat accent-tint fill.
+      // Katalyst active state: filled neutral chip, darker text and icon.
       &.active {
-        background: var(--accent-soft);
-        border-left-color: var(--accent);
-        color: var(--accent-text);
+        background: var(--sidebar-active);
+        color: var(--text);
+        font-weight: 600;
 
-        mat-icon { color: var(--accent); }
+        mat-icon { color: var(--text); }
       }
     }
   }
 }
 
+// Katalyst-style segmented Light/Dark/System control pinned to the sidebar foot.
 .sidenav-footer {
   margin-top: auto;
+  padding: 16px 4px 0;
+}
+
+.theme-switch {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--sidebar-border);
+  background: var(--card);
+
+  button {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 0;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--sidebar-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    mat-icon {
+      width: 14px;
+      height: 14px;
+      font-size: 14px;
+    }
+
+    &:hover {
+      color: var(--text);
+    }
+
+    &.on {
+      background: var(--sidebar-active);
+      color: var(--text);
+      font-weight: 600;
+    }
+  }
+}
+
+// ------------------------------------------------------------------- Topbar
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+}
+
+.topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px 10px 4px;
-  border-top: 1px solid var(--hairline-strong);
+  gap: 12px;
+  padding: 0 20px;
+  height: 60px;
+  flex-shrink: 0;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--topbar-border);
 
   .user {
     display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .user-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    color: var(--primary-hover);
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .user-meta {
+    display: flex;
     flex-direction: column;
+    line-height: 1.2;
     min-width: 0;
   }
 
@@ -179,15 +260,15 @@
 
   .user-role {
     font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
+    color: var(--text-dim);
   }
 }
 
 .content {
   min-width: 0;
+  flex: 1;
   overflow-y: auto;
+  background: var(--background);
 }
 
 @media (max-width: 900px) {
@@ -197,6 +278,12 @@
 
   .sidenav {
     position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--sidebar-border);
+  }
+
+  .main {
     height: auto;
   }
 }

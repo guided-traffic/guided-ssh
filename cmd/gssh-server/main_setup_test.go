@@ -443,3 +443,40 @@ func TestServeInvalidHostCertValidity(t *testing.T) {
 		t.Fatal("serve without db configuration must fail")
 	}
 }
+
+func TestSetupDevUIAuth(t *testing.T) {
+	// Unset: disabled, admin group passes through unchanged.
+	t.Setenv(envDevUIAuth, "")
+	user, group, err := setupDevUIAuth(discardLogger(), "ops")
+	if err != nil || user != nil || group != "ops" {
+		t.Fatalf("unset: user=%v group=%q err=%v (expected nil/ops/nil)", user, group, err)
+	}
+
+	// Any value other than "insecure" is a configuration error (fail-fast).
+	for _, invalid := range []string{"true", "1", "yes", "INSECURE"} {
+		t.Setenv(envDevUIAuth, invalid)
+		if _, _, err := setupDevUIAuth(discardLogger(), ""); err == nil {
+			t.Errorf("value %q must be rejected", invalid)
+		}
+	}
+
+	// "insecure" without an admin group defaults the group so the admin
+	// API gate opens; the dev user is a member.
+	t.Setenv(envDevUIAuth, "insecure")
+	user, group, err = setupDevUIAuth(discardLogger(), "")
+	if err != nil {
+		t.Fatalf("insecure: %v", err)
+	}
+	if group == "" || user == nil || !slices.Contains(user.Groups, group) {
+		t.Fatalf("insecure: user=%+v group=%q (expected dev user in defaulted group)", user, group)
+	}
+	if user.Username() != "dev" {
+		t.Errorf("username %q (expected dev)", user.Username())
+	}
+
+	// A configured admin group is kept.
+	user, group, err = setupDevUIAuth(discardLogger(), "ops")
+	if err != nil || group != "ops" || !slices.Contains(user.Groups, "ops") {
+		t.Fatalf("insecure with group: user=%+v group=%q err=%v", user, group, err)
+	}
+}

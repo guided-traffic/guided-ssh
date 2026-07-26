@@ -258,9 +258,15 @@ func TestUIAuthRedirectSanitized(t *testing.T) {
 	tokens := newFakeTokenEndpoint(t)
 	srv := newUIAuthServer(t, newFakeAuthStore(), tokens, adminClaims())
 
-	// Absolute and protocol-relative targets are normalized to "/" (no open
-	// redirect via the login endpoint).
-	for _, target := range []string{"https://evil.example", "//evil.example/path"} {
+	// Absolute, protocol-relative and backslash-folded targets are normalized
+	// to "/" (no open redirect via the login endpoint). Browsers read
+	// "/\evil.example" as "//evil.example".
+	for _, target := range []string{
+		"https://evil.example",
+		"//evil.example/path",
+		`/\evil.example/path`,
+		`/\/evil.example`,
+	} {
 		authorizeURL, stateCookie := startLogin(t, srv, target)
 		resp := finishLogin(t, srv, authorizeURL.Query().Get("state"), stateCookie)
 		if got := resp.Header.Get("Location"); got != "/" {

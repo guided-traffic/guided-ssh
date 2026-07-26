@@ -5,20 +5,22 @@
   </div>
 } @else if (session.error()) {
   <div class="login-stage">
-    <div class="login-card glass-panel">
+    <div class="login-card">
       <div class="brand">
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
+      <h1 class="login-title">Something went wrong</h1>
       <p class="login-claim error-text">{{ session.error() }}</p>
       <button mat-stroked-button (click)="reload()">Try again</button>
     </div>
   </div>
 } @else if (!session.authenticated()) {
   <div class="login-stage">
-    <div class="login-card glass-panel">
+    <div class="login-card">
       <div class="brand">
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
+      <h1 class="login-title">Welcome back</h1>
       <p class="login-claim">
         Certificate-based SSH access — hosts, access rules, and audit in one place.
       </p>
@@ -29,7 +31,7 @@
   </div>
 } @else if (!session.hasAnyRole()) {
   <div class="login-stage">
-    <div class="login-card glass-panel">
+    <div class="login-card">
       <div class="brand">
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
@@ -42,10 +44,11 @@
   </div>
 } @else {
   <div class="shell">
-    <aside class="sidenav glass-panel">
+    <aside class="sidenav">
       <div class="brand">
         <img class="brand-logo" src="logo.svg" alt="gssh_">
       </div>
+      <div class="nav-section">Manage</div>
       <nav>
         <a routerLink="/hosts" routerLinkActive="active">
           <mat-icon svgIcon="hosts" />Hosts
@@ -59,26 +62,63 @@
         <a routerLink="/users" routerLinkActive="active">
           <mat-icon svgIcon="users" />Users &amp; Groups
         </a>
-        @if (session.isAuditor()) {
+      </nav>
+      @if (session.isAuditor()) {
+        <div class="nav-section">Insight</div>
+        <nav>
           <a routerLink="/audit" routerLinkActive="active">
             <mat-icon svgIcon="audit" />Audit
           </a>
-        }
-      </nav>
+        </nav>
+      }
       <div class="sidenav-footer">
+        <div class="theme-switch" role="radiogroup" aria-label="Color theme">
+          <button
+            type="button"
+            [class.on]="theme.mode() === 'light'"
+            (click)="theme.set('light')"
+            title="Light theme"
+          >
+            <mat-icon svgIcon="light" />Light
+          </button>
+          <button
+            type="button"
+            [class.on]="theme.mode() === 'dark'"
+            (click)="theme.set('dark')"
+            title="Dark theme"
+          >
+            <mat-icon svgIcon="dark" />Dark
+          </button>
+          <button
+            type="button"
+            [class.on]="theme.mode() === 'system'"
+            (click)="theme.set('system')"
+            title="Follow system theme"
+          >
+            <mat-icon svgIcon="system" />System
+          </button>
+        </div>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <div class="spacer"></div>
         <div class="user">
-          <span class="user-name">{{ session.username() }}</span>
-          <span class="user-role dim">
-            @if (session.isAdmin()) { Admin } @else if (session.isAuditor()) { Auditor } @else { Read-only }
+          <span class="user-avatar">{{ session.username().charAt(0).toUpperCase() }}</span>
+          <span class="user-meta">
+            <span class="user-name">{{ session.username() }}</span>
+            <span class="user-role">
+              @if (session.isAdmin()) { Admin } @else if (session.isAuditor()) { Auditor } @else { Read-only }
+            </span>
           </span>
         </div>
         <button mat-icon-button aria-label="Sign out" title="Sign out" (click)="session.logout()">
           <mat-icon svgIcon="logout" />
         </button>
-      </div>
-    </aside>
-    <main class="content">
-      <router-outlet />
-    </main>
+      </header>
+      <main class="content">
+        <router-outlet />
+      </main>
+    </div>
   </div>
 }
