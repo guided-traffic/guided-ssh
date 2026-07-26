@@ -150,7 +150,9 @@ func (e *env) dockerBuild(tag, dir string, extraArgs []string) {
 	e.t.Helper()
 	args := append([]string{"build", "-t", tag}, extraArgs...)
 	args = append(args, dir)
-	if out, err := run("", "", "docker", args...); err != nil {
+	// DOCKER_BUILDKIT=1: der Legacy-Builder kennt $BUILDPLATFORM nicht und
+	// scheitert am produktiven Dockerfile (FROM --platform=$BUILDPLATFORM).
+	if out, err := runWithEnv([]string{"DOCKER_BUILDKIT=1"}, "docker", args...); err != nil {
 		e.t.Fatalf("docker build %s: %v\n%s", tag, err, out)
 	}
 }
