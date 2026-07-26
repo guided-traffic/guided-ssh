@@ -1,77 +1,72 @@
-// guided-ssh Web UI — "Obsidian Ledger": a quiet, premium enterprise-dark theme
-// in the Linear/Vercel/Stripe register. Solid, layered obsidian surfaces instead
-// of glass/blur; 1px hairline edges; one disciplined azure accent used only where
-// it means something; tinted status badges; and Inter's typographic hierarchy
-// doing the heavy lifting instead of color. Angular Material M3 supplies the
-// component tokens; the $m3-overrides map below retargets Material's own internal
-// surface/primary/tertiary system variables so no default M3 blue-grey can leak
-// through under the obsidian palette.
+// guided-ssh Web UI — "Katalyst" register: a clean, light admin-console theme
+// (white cards on a cool near-white canvas, one teal-cyan primary, soft tinted
+// status badges, large confident page titles). Angular Material M3 supplies the
+// component tokens; the $m3-overrides map retargets Material's internal
+// surface/primary system variables so no default M3 blue-grey leaks through.
 @use '@angular/material' as mat;
 @use 'sass:map';
 
 // System-level color overrides fed directly into `mat.theme()` — the robust way
-// to retarget Material's internal surface/outline/primary tokens (used by Select,
-// Menu, Datepicker, Checkbox, SlideToggle, Tabs, Tooltip, Snackbar …); CSS custom
-// properties layered on top alone would miss less-visible subcomponents.
+// to retarget Material's internal surface/outline/primary tokens (Select, Menu,
+// Datepicker, Checkbox, SlideToggle, Tabs, Tooltip, Snackbar …).
 $m3-overrides: (
-  background: #08090b,
-  on-background: #edeff3,
-  surface: #14161c,
-  surface-dim: #0b0c10,
-  surface-bright: #20232b,
-  surface-container-lowest: #0a0b0e,
-  surface-container-low: #101318,
-  surface-container: #14161c,
-  surface-container-high: #191c22,
-  surface-container-highest: #1e2129,
-  surface-variant: #191c22,
-  on-surface: #edeff3,
-  on-surface-variant: #9ba1ac,
-  outline: #3b3f48,
-  outline-variant: #23262d,
-  inverse-surface: #edeff3,
-  inverse-on-surface: #14161a,
+  background: #f8f9fb,
+  on-background: #0a0a0a,
+  surface: #ffffff,
+  surface-dim: #f3f4f6,
+  surface-bright: #ffffff,
+  surface-container-lowest: #ffffff,
+  surface-container-low: #fafafa,
+  surface-container: #ffffff,
+  surface-container-high: #ffffff,
+  surface-container-highest: #f5f6f8,
+  surface-variant: #f3f4f6,
+  on-surface: #0a0a0a,
+  on-surface-variant: #737373,
+  outline: #d4d4d8,
+  outline-variant: #e5e7eb,
+  inverse-surface: #1f2937,
+  inverse-on-surface: #f8f9fb,
   scrim: #000000,
   shadow: #000000,
-  // Brand-exact primary so Material internals (checkbox tick, slide-toggle track,
-  // tab indicator, focus/selection states) match --accent precisely.
-  primary: #4c8dff,
-  on-primary: #04101c,
-  primary-container: #16314f,
-  on-primary-container: #cfe0ff,
-  primary-fixed: #cfe0ff,
-  primary-fixed-dim: #4c8dff,
-  on-primary-fixed: #04101c,
-  on-primary-fixed-variant: #16314f,
-  inverse-primary: #1c5fc4,
-  tertiary: #2fd4c6,
-  on-tertiary: #05231f,
-  tertiary-container: #123a36,
-  on-tertiary-container: #b7f2ea,
-  tertiary-fixed: #b7f2ea,
-  tertiary-fixed-dim: #2fd4c6,
-  on-tertiary-fixed: #05231f,
-  on-tertiary-fixed-variant: #123a36,
-  error: #f0453d,
-  on-error: #2a0605,
-  error-container: #4a1210,
-  on-error-container: #ffd9d6,
+  // Teal-cyan primary matching the Katalyst reference so Material internals
+  // (checkbox tick, slide-toggle track, tab indicator, focus states) align.
+  primary: #0891b2,
+  on-primary: #ffffff,
+  primary-container: #cff5fc,
+  on-primary-container: #063c4a,
+  primary-fixed: #cff5fc,
+  primary-fixed-dim: #0891b2,
+  on-primary-fixed: #063c4a,
+  on-primary-fixed-variant: #0e7490,
+  inverse-primary: #67d6ef,
+  tertiary: #6366f1,
+  on-tertiary: #ffffff,
+  tertiary-container: #e0e1fd,
+  on-tertiary-container: #26278f,
+  tertiary-fixed: #e0e1fd,
+  tertiary-fixed-dim: #6366f1,
+  on-tertiary-fixed: #26278f,
+  on-tertiary-fixed-variant: #4243c9,
+  error: #ef4444,
+  on-error: #ffffff,
+  error-container: #fee2e2,
+  on-error-container: #7f1d1d,
 );
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
   @include mat.theme(
     (
       color: (
-        primary: mat.$azure-palette,
-        tertiary: mat.$cyan-palette,
+        primary: mat.$cyan-palette,
+        tertiary: mat.$violet-palette,
       ),
       typography: (
         plain-family: ('Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
         brand-family: ('Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif),
-        // Inter reads "shouty" at 700+; cap emphasis at 600 for body/headings.
-        bold-weight: 600,
+        bold-weight: 700,
         medium-weight: 500,
         regular-weight: 400,
       ),
@@ -80,62 +75,156 @@ $m3-overrides: (
     $m3-overrides
   );
 
-  // Tightened M3 shape tokens (names confirmed against the compiled component
-  // CSS — this Material version exposes `--mat-*`, not `--mdc-*`, shape custom
-  // properties). Obsidian geometry: 8px controls, 10px calendar, 12px dialog.
+  // Katalyst geometry: 10px cards/controls, pill-round icon buttons, 14px dialogs.
   --mat-button-filled-container-shape: 8px;
   --mat-button-outlined-container-shape: 8px;
   --mat-button-protected-container-shape: 8px;
   --mat-button-text-container-shape: 8px;
   --mat-button-tonal-container-shape: 8px;
-  --mat-icon-button-container-shape: 999px; // the one place round geometry survives
-  --mat-dialog-container-shape: 12px;
-  --mat-snack-bar-container-shape: 8px;
-  --mat-datepicker-calendar-container-shape: 10px;
+  --mat-icon-button-container-shape: 999px;
+  --mat-dialog-container-shape: 14px;
+  --mat-snack-bar-container-shape: 10px;
+  --mat-datepicker-calendar-container-shape: 12px;
   --mat-tooltip-container-shape: 6px;
   --mat-form-field-filled-container-shape: 8px;
   --mat-form-field-outlined-container-shape: 8px;
 
   // ---------------------------------------------------------- Design tokens
 
-  // Obsidian elevation scale — solid, opaque, layered (never translucent-blurred).
-  --surface-0: #08090b; // canvas
-  --surface-1: #101318; // panels, .glass-panel, sidenav, table container
-  --surface-3: #14161c; // true overlays: dialog, menu, select, datepicker
-  --surface-2: #161a20; // hover fill (row/menu-item) — the lightest step, so hover pops
+  --radius: 10px;
 
-  // Hairline edges — 1px translucent, engineered rather than glassy.
-  --hairline: rgba(255, 255, 255, 0.08);
-  --hairline-strong: rgba(255, 255, 255, 0.14);
-  // 1px inset top-edge sheen: fakes elevation on flat opaque surfaces.
-  --glass-highlight: rgba(255, 255, 255, 0.05);
+  --background: #f8f9fb;   // cool near-white canvas
+  --card: #ffffff;         // panels, tables, dialogs
+  --card-hover: #f8fafc;   // row hover
+  --muted: #f3f4f6;        // recessed fills (table header, inputs)
 
-  // One disciplined brand accent, descended from the gssh_ wordmark gradient.
-  // Two-tier: *-fill drives borders/icons/focus/fills; *-text is a lighter tint
-  // reserved for small accent-colored text so 12-13px labels/links keep >=4.5:1.
-  --accent: #4c8dff;
-  --accent-text: #8fb4ff;
-  // Cyan is demoted to a signature brand flourish only (login/dialog seam, logo).
-  --accent-alt: #2fd4c6;
-  --accent-alt-text: #8fb4ff;
-  --accent-soft: rgba(76, 141, 255, 0.12);
-  --seam: linear-gradient(90deg, var(--accent), var(--accent-alt));
-  --seam-vertical: linear-gradient(180deg, var(--accent), var(--accent-alt));
+  --border: #e5e7eb;       // 1px card & divider lines
+  --border-strong: #d4d4d8;
 
-  // Semantic — deepened/saturated so status reads confident, not friendly-soft.
-  --ok: #34d399;
-  --warn: #f0b429;
-  --danger: #f0453d;
-  --info: var(--accent-text);
+  --primary: #0891b2;      // teal-cyan — the one brand accent
+  --primary-hover: #0e7490;
+  --primary-soft: rgba(8, 145, 178, 0.1);
+  --ring: rgba(8, 145, 178, 0.35);
 
-  --text: #edeff3;
-  --text-dim: rgba(237, 239, 243, 0.58);
+  // Semantic
+  --ok: #16a34a;
+  --ok-soft: #dcfce7;
+  --warn: #d97706;
+  --warn-soft: #fef3c7;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --info: #2563eb;
+  --info-soft: #dbeafe;
 
-  // Legacy aliases kept so any un-migrated selector still resolves sensibly.
-  --glass-bg: var(--surface-1);
-  --glass-bg-strong: var(--surface-3);
-  --glass-border: var(--hairline);
-  --glass-radius: 10px;
+  --text: #0a0a0a;
+  --text-dim: #6b7280;
+  --chip-text: #374151; // monospace chips & code blocks
+
+  // Sidebar (Katalyst light sidebar family)
+  --sidebar-surface: #fafafa;
+  --sidebar-hover: #f0f1f3;
+  --sidebar-active: #e8eaed;
+  --sidebar-foreground: #1f2937;
+  --sidebar-muted: #6b7280;
+  --sidebar-border: #e5e7eb;
+
+  // Topbar
+  --topbar-bg: #fcfcfd;
+  --topbar-border: #e5e7eb;
+
+  // Legacy aliases so un-migrated selectors still resolve sensibly.
+  --surface-0: var(--background);
+  --surface-1: var(--card);
+  --surface-2: var(--card-hover);
+  --surface-3: var(--card);
+  --hairline: var(--border);
+  --hairline-strong: var(--border-strong);
+  --accent: var(--primary);
+  --accent-text: var(--primary);
+  --accent-soft: var(--primary-soft);
+  --glass-bg: var(--card);
+  --glass-bg-strong: var(--card);
+  --glass-border: var(--border);
+  --glass-radius: var(--radius);
+}
+
+// ------------------------------------------------------------------ Dark mode
+// Activated by ThemeService toggling `dark` on <html>. Token values follow the
+// Katalyst reference's `.dark` block. `mat.theme-overrides` re-targets the same
+// Material system tokens so all components follow the switch.
+
+$m3-dark-overrides: (
+  background: #121316,
+  on-background: #fafafa,
+  surface: #1a1b1f,
+  surface-dim: #121316,
+  surface-bright: #26282f,
+  surface-container-lowest: #121316,
+  surface-container-low: #17181c,
+  surface-container: #1a1b1f,
+  surface-container-high: #202127,
+  surface-container-highest: #26282f,
+  surface-variant: #26282f,
+  on-surface: #fafafa,
+  on-surface-variant: #a1a1aa,
+  outline: #3f4046,
+  outline-variant: #2b2c31,
+  inverse-surface: #fafafa,
+  inverse-on-surface: #1a1b1f,
+  primary: #0ea3c4,
+  on-primary: #ffffff,
+  primary-container: #0e4956,
+  on-primary-container: #cff5fc,
+  tertiary: #818cf8,
+  on-tertiary: #1e1b4b,
+  tertiary-container: #3730a3,
+  on-tertiary-container: #e0e1fd,
+  error: #f87171,
+  on-error: #450a0a,
+  error-container: #7f1d1d,
+  on-error-container: #fecaca,
+);
+
+html.dark {
+  color-scheme: dark;
+
+  @include mat.theme-overrides($m3-dark-overrides);
+
+  --background: #121316;
+  --card: #1a1b1f;
+  --card-hover: #202127;
+  --muted: #26282f;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --primary: #0ea3c4;
+  --primary-hover: #38bdd8;
+  --primary-soft: rgba(14, 163, 196, 0.16);
+  --ring: rgba(14, 163, 196, 0.4);
+
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.14);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.15);
+
+  --text: #fafafa;
+  --text-dim: #9ca3af;
+  --chip-text: #cbd5e1;
+
+  --sidebar-surface: #17181c;
+  --sidebar-hover: #22242a;
+  --sidebar-active: #2c2e35;
+  --sidebar-foreground: #e0e0e3;
+  --sidebar-muted: #9ca3af;
+  --sidebar-border: rgba(255, 255, 255, 0.09);
+
+  --topbar-bg: #17181c;
+  --topbar-border: rgba(255, 255, 255, 0.09);
 }
 
 html, body {
@@ -148,30 +237,24 @@ body {
   font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  // Flat obsidian stage: a near-invisible top vignette for depth only (reads
-  // almost-flat when squinting) over a subtle top-to-bottom tonal shift. No
-  // colored blooms, no grid — depth comes from layered surfaces, not the canvas.
-  background-color: #08090b;
-  background-image:
-    radial-gradient(1200px 480px at 50% -12%, rgba(255, 255, 255, 0.035), transparent 60%),
-    linear-gradient(180deg, #0b0c10 0%, #08090b 100%);
-  background-attachment: fixed;
+  background-color: var(--background);
+  -webkit-font-smoothing: antialiased;
 }
 
 // ---------------------------------------------------------------- Typography
 
 h1, h2, h3 {
-  font-weight: 600;
-  letter-spacing: -0.1px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
 }
 
-// Structural micro-label voice: table headers, sidenav section labels — the one
-// deliberate uppercase move, reserved for short structural labels only.
+// Structural micro-label voice: table headers, sidenav section labels.
 @mixin micro-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.7px;
   color: var(--text-dim);
 }
 
@@ -179,66 +262,66 @@ h1, h2, h3 {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
-  color: rgba(237, 239, 243, 0.82);
+  color: var(--text);
 }
 
 .dim { color: var(--text-dim); }
 
 a {
-  color: var(--accent-text);
+  color: var(--primary);
   text-decoration: none;
 
   &:hover { text-decoration: underline; }
 }
 
-// Precision focus ring: crisp accent outline plus a soft halo — visible,
-// accessible, rewarding keyboard-driven operation.
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  box-shadow: 0 0 0 4px var(--primary-soft);
 }
 
-// ---------------------------------------------------------------- Faceplates
+// ---------------------------------------------------------------- Cards
 
-// .glass-panel keeps its name (style hook) but drops blur: a solid, opaque,
-// hairline-bordered obsidian surface with a tight dual-layer shadow that reads
-// as engineered depth rather than floating fog.
+// .glass-panel keeps its name (style hook used by every page): now a white
+// card — 1px border, soft ambient shadow, 10px radius.
 .glass-panel {
   position: relative;
-  background: var(--surface-1);
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 1px 2px rgba(0, 0, 0, 0.6),
-    0 8px 24px rgba(0, 0, 0, 0.45);
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 1px 3px rgba(16, 24, 40, 0.06);
 }
 
 .page {
-  padding: 24px 28px 40px;
+  padding: 28px 32px 48px;
   max-width: 1280px;
   margin: 0 auto;
 }
 
+// Katalyst page header: large, heavy title with a muted one-line subtitle,
+// actions aligned right.
 .page-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
-  margin: 8px 0 20px;
+  margin: 8px 0 24px;
 
   h1 {
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.1px;
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
     margin: 0;
   }
 
   .page-sub {
     color: var(--text-dim);
-    font-size: 12.5px;
+    font-size: 14px;
+    margin-top: 4px;
   }
 }
 
@@ -249,27 +332,31 @@ a {
 }
 
 .glass-panel .mat-mdc-header-row {
-  // Recessed header row (slightly darker than its panel) so it reads as inset,
-  // not floating — no accent decoration, the accent stays rationed.
-  background: rgba(0, 0, 0, 0.28);
+  background: transparent;
+  height: 44px;
 }
 
 .glass-panel .mat-mdc-header-cell {
   @include micro-label;
-  border-bottom-color: var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 
 .glass-panel .mat-mdc-cell {
   color: var(--text);
-  border-bottom-color: rgba(255, 255, 255, 0.06);
+  border-bottom-color: var(--border);
+  font-size: 13.5px;
+}
+
+.glass-panel .mat-mdc-row:last-child .mat-mdc-cell {
+  border-bottom: none;
 }
 
 .glass-panel .mat-mdc-row:hover .mat-mdc-cell {
-  background: var(--surface-2);
+  background: var(--card-hover);
 }
 
-// Critical rows are scannable by position, not color alone: any row carrying a
-// danger/warn pill gets a 2px semantic left rule — pure CSS, no template changes.
+// Critical rows scannable by position, not color alone: rows carrying a
+// danger/warn pill get a 2px semantic left rule.
 .glass-panel .mat-mdc-row:has(.pill.danger) {
   box-shadow: inset 2px 0 0 var(--danger);
 }
@@ -279,7 +366,7 @@ a {
 
 .glass-panel .mat-mdc-paginator {
   background: transparent;
-  border-top: 1px solid var(--hairline-strong);
+  border-top: 1px solid var(--border);
 }
 
 .mat-mdc-paginator-range-label,
@@ -291,95 +378,74 @@ a {
 
 .table-scroll {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 // -------------------------------------------------------------- Status & tags
 
-// Tinted status badge: low-alpha semantic fill over the panel, a 1px hairline
-// border at the semantic color, full-strength semantic text. Fully round — the
-// one deliberately soft shape in an otherwise sharp system, where roundness
-// signals "status token", not softness.
+// Katalyst-style soft badge: tinted background, full-strength semantic text,
+// fully round, no border.
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 11px;
+  padding: 2px 10px;
   border-radius: 999px;
-  border: 1px solid var(--hairline);
+  border: none;
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  line-height: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 20px;
+  background: var(--muted);
   color: var(--text-dim);
   white-space: nowrap;
 }
 
-.pill.ok     { background: rgba(52, 211, 153, 0.10); border-color: rgba(52, 211, 153, 0.35); color: var(--ok); }
-.pill.warn   { background: rgba(240, 180, 41, 0.10); border-color: rgba(240, 180, 41, 0.35); color: var(--warn); }
-.pill.danger { background: rgba(240, 69, 61, 0.11);  border-color: rgba(240, 69, 61, 0.40);  color: var(--danger); }
-.pill.accent { background: var(--accent-soft);       border-color: rgba(76, 141, 255, 0.35); color: var(--accent-text); }
-.pill.muted  { background: rgba(255, 255, 255, 0.04); border-color: var(--hairline);         color: var(--text-dim); }
+.pill.ok     { background: var(--ok-soft);     color: var(--ok); }
+.pill.warn   { background: var(--warn-soft);   color: var(--warn); }
+.pill.danger { background: var(--danger-soft); color: var(--danger); }
+.pill.accent { background: var(--primary-soft); color: var(--primary-hover); }
+.pill.muted  { background: var(--muted);       color: var(--text-dim); }
 
 .tag-chip {
   display: inline-block;
   padding: 1px 8px;
   margin: 1px 4px 1px 0;
   border-radius: 6px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   font-size: 12px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-variant-numeric: tabular-nums;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(237, 239, 243, 0.82);
+  background: var(--muted);
+  color: var(--chip-text);
   white-space: nowrap;
 }
 
 // ------------------------------------------------------------------- Dialogs
 
 .mat-mdc-dialog-surface {
-  position: relative;
-  background: var(--surface-3) !important;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 12px !important;
-  overflow: hidden;
+  background: var(--card) !important;
+  border: 1px solid var(--border);
+  border-radius: 14px !important;
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 2px 8px rgba(0, 0, 0, 0.55),
-    0 24px 60px rgba(0, 0, 0, 0.55);
-
-  // The sole place the brand's dual-color gradient appears in the shell outside
-  // the wordmark: a 1px sliver on the top edge, echoed exactly once per screen.
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--seam);
-  }
+    0 10px 15px -3px rgba(16, 24, 40, 0.08),
+    0 25px 50px -12px rgba(16, 24, 40, 0.25);
 }
 
 .cdk-overlay-dark-backdrop {
-  background: rgba(5, 8, 14, 0.6);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  background: rgba(17, 24, 39, 0.4);
 }
 
-// Menus/selects/datepicker overlays reuse the dialog's solid recipe (no seam —
-// that flourish stays rationed to dialogs and the login card).
 div.mat-mdc-select-panel,
 div.mat-mdc-menu-panel,
 .mat-datepicker-content {
-  background: var(--surface-3) !important;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 10px !important;
+  background: var(--card) !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius) !important;
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 12px 32px rgba(0, 0, 0, 0.55);
+    0 4px 6px -2px rgba(16, 24, 40, 0.05),
+    0 12px 24px -4px rgba(16, 24, 40, 0.12);
 }
 
 .dialog-form {
@@ -391,11 +457,11 @@ div.mat-mdc-menu-panel,
 // -------------------------------------------------------------------- Tabs
 
 .mat-mdc-tab-header {
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 
 .mdc-tab-indicator__content--underline {
-  border-color: var(--accent) !important;
+  border-color: var(--primary) !important;
   border-top-width: 2px !important;
 }
 
@@ -412,14 +478,14 @@ div.mat-mdc-menu-panel,
 pre.payload {
   margin: 0;
   padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--surface-0);
-  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--muted);
+  border: 1px solid var(--border);
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px;
   line-height: 1.5;
   overflow-x: auto;
-  color: rgba(237, 239, 243, 0.82);
+  color: var(--chip-text);
 }
 
 .filter-bar {
@@ -440,8 +506,8 @@ pre.payload {
   font-size: 14px;
 }
 
-// Fine scrollbars matching the obsidian theme.
+// Fine scrollbars for the light canvas.
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--hairline-strong) transparent;
+  scrollbar-color: var(--border-strong) transparent;
 }

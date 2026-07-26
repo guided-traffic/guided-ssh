@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -93,6 +94,10 @@ type uiAuthContext struct {
 // registerUIAuthRoutes attaches the web UI's login endpoints to the mux.
 // Without a UIAuth configuration, /v1/auth responds with 503 (diagnosable).
 func registerUIAuthRoutes(mux *http.ServeMux, deps Deps) {
+	if deps.DevUser != nil && deps.Store != nil {
+		registerDevUIAuthRoutes(mux, deps)
+		return
+	}
 	if deps.UIAuth == nil || deps.Store == nil {
 		mux.HandleFunc("/v1/auth/", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "ui login not configured (server-side oidc required)", http.StatusServiceUnavailable)
@@ -135,12 +140,18 @@ func isSecureRequest(r *http.Request) bool {
 }
 
 // sanitizeRedirect allows only local paths as the return target (no open
-// redirect: no absolute URLs, no protocol-relative "//…").
+// redirect: no absolute URLs, no protocol-relative "//…"). Backslashes are
+// rejected outright because browsers fold "/\evil.com" into "//evil.com"
+// while url.Parse still reports an empty host.
 func sanitizeRedirect(target string) string {
-	if !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") {
+	if !strings.HasPrefix(target, "/") || strings.Contains(target, `\`) {
 		return "/"
 	}
-	return target
+	parsed, err := url.Parse(target)
+	if err != nil || parsed.Scheme != "" || parsed.Host != "" {
+		return "/"
+	}
+	return parsed.RequestURI()
 }
 
 // handleLogin starts the code flow: state + PKCE verifier travel encrypted

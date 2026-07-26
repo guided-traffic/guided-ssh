@@ -5,6 +5,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
 import { SessionService } from './core/session.service';
+import { ThemeService } from './core/theme.service';
 
 @Component({
   selector: 'app-root',
@@ -21,6 +22,7 @@ import { SessionService } from './core/session.service';
 })
 export class App implements OnInit {
   protected readonly session = inject(SessionService);
+  protected readonly theme = inject(ThemeService);
 
   ngOnInit(): void {
     void this.session.init();

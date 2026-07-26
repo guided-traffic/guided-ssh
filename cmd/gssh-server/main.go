@@ -87,6 +87,12 @@ const (
 	// Admin API (Phase 6): IdP group of the admins; empty ⇒ admin API disabled.
 	envAdminGroup = "GSSH_ADMIN_GROUP"
 
+	// INSECURE developer mode for local frontend development (ng serve):
+	// the exact value "insecure" makes every request act as a logged-in
+	// admin ("dev") without any IdP. Any other non-empty value is a
+	// configuration error (fail-fast, no accidental "true"/"1" activation).
+	envDevUIAuth = "GSSH_DEV_UI_AUTH"
+
 	// Web UI roles (Phase 8): auditor may read/export the audit log,
 	// read-only the resource views; admin includes both.
 	envAuditorGroup  = "GSSH_AUDITOR_GROUP"
@@ -491,6 +497,11 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	if adminGroup == "" {
 		logger.Warn("admin api not configured — grant management disabled", "env", envAdminGroup)
 	}
+
+	devUser, adminGroup, err := setupDevUIAuth(logger, adminGroup)
+	if err != nil {
+		return err
+	}
 	startAuditStream(ctx, st, logger)
 
 	pinCfg, err := pinConfigFromEnv()
@@ -515,7 +526,8 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 				OIDCIssuer:   os.Getenv(envOIDCIssuer),
 				OIDCClientID: uiClientID,
 			},
-			UIAuth: uiAuth,
+			UIAuth:  uiAuth,
+			DevUser: devUser,
 			// Host rollout (one-command install): binaries from the image, the
 			// pin, and external URLs. If anything is missing, the gate stays closed (503).
 			Agents: agentdist.New(),
@@ -715,6 +727,35 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*ap
 		BaseURL:    strings.TrimSuffix(os.Getenv(envUIBaseURL), "/"),
 		SessionTTL: sessionTTL,
 	}, nil
+}
+
+// setupDevUIAuth parses GSSH_DEV_UI_AUTH and builds the developer mode's
+// implicit identity. Only the exact value "insecure" activates it — the
+// name states what the operator signs up for: every request without a
+// bearer token acts as a logged-in admin, without any IdP. If no admin
+// group is configured (the usual dev case), "gssh-dev-admins" is used so
+// the admin API's fail-closed gate opens. Returns the (possibly defaulted)
+// admin group alongside the dev user.
+func setupDevUIAuth(logger *slog.Logger, adminGroup string) (*auth.Claims, string, error) {
+	raw := os.Getenv(envDevUIAuth)
+	if raw == "" {
+		return nil, adminGroup, nil
+	}
+	if raw != "insecure" {
+		return nil, "", fmt.Errorf("%s: unknown value %q — set it to %q to acknowledge that every request runs as an admin, or unset it", envDevUIAuth, raw, "insecure")
+	}
+	if adminGroup == "" {
+		adminGroup = "gssh-dev-admins"
+	}
+	logger.Warn("INSECURE DEVELOPER MODE ACTIVE — every request without a bearer token is treated as a logged-in admin; local frontend development only, never expose this server",
+		"env", envDevUIAuth, "admin_group", adminGroup)
+	return &auth.Claims{
+		Issuer:            "gssh-dev",
+		Subject:           "dev-user",
+		Email:             "dev@localhost",
+		PreferredUsername: "dev",
+		Groups:            []string{adminGroup},
+	}, adminGroup, nil
 }
 
 // setupRateLimit builds the rate limiter of the sign/enroll endpoints from
