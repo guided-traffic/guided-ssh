@@ -4,7 +4,7 @@
 export interface Host {
 
   /**
-   * Spätestes valid_before der Host-Zertifikate
+   * Latest valid_before among the host certificates
    */
   cert_valid_before?: string | null;
   created_at: string;

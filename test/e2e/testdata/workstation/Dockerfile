@@ -1,6 +1,6 @@
-# E2E-Workstation ("Mensch"): openssh-client + gssh-Binary (vom Test in den
-# Build-Kontext gelegt). Der Entrypoint startet einen langlebigen ssh-agent —
-# gssh login lädt das Zertifikat dorthin, ssh benutzt es transparent.
+# E2E workstation ("human"): openssh-client + gssh binary (placed into the
+# build context by the test). The entrypoint starts a long-lived ssh-agent —
+# gssh login loads the certificate there, ssh uses it transparently.
 FROM alpine:3.22
 
 RUN apk add --no-cache openssh-client bash curl

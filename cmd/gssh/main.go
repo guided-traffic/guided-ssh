@@ -1,5 +1,5 @@
-// gssh ist das Benutzer-CLI von guided-ssh (Phase 4): SSO-Login, kurzlebige
-// Zertifikate ausschließlich im ssh-agent, transparente ssh-Integration.
+// gssh is the user CLI of guided-ssh (Phase 4): SSO login, short-lived
+// certificates kept exclusively in the ssh-agent, transparent ssh integration.
 package main
 
 import (

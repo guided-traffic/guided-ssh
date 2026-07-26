@@ -6,7 +6,7 @@ export interface EnrollTokenResponse {
   install_command: string;
 
   /**
-   * Klartext
+   * Plaintext
    */
   token: string;
 }

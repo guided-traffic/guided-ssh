@@ -4,12 +4,12 @@
 export interface EnrollTokenRequest {
 
   /**
-   * leer ⇒ Token nicht an einen Hostnamen gebunden
+   * empty ⇒ token not bound to a hostname
    */
   hostname?: string;
 
   /**
-   * Setzt nur --session-audit im install_command; nicht am Token gespeichert
+   * Only sets --session-audit in install_command; not stored on the token
    */
   session_audit?: boolean;
   tags?: {

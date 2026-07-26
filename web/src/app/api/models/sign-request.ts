@@ -4,12 +4,12 @@
 export interface SignRequest {
 
   /**
-   * SSH-Public-Key im authorized_keys-Format
+   * SSH public key in authorized_keys format
    */
   public_key: string;
 
   /**
-   * Gewünschte Laufzeit; wird durch Policy und Grants gedeckelt
+   * Requested validity; capped by policy and grants
    */
   validity_seconds?: number;
 }

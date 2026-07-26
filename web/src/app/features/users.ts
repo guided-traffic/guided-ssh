@@ -17,32 +17,32 @@ import { formatTimestamp } from '../core/format';
     <div class="page">
       <div class="page-header">
         <div>
-          <h1>Benutzer &amp; Gruppen</h1>
-          <div class="page-sub">Aus dem IdP synchronisiert — der IdP bleibt Source of Truth</div>
+          <h1>Users &amp; Groups</h1>
+          <div class="page-sub">Synchronized from the IdP — the IdP remains the source of truth</div>
         </div>
         <button mat-stroked-button (click)="load()" [disabled]="loading()">
-          <mat-icon svgIcon="refresh" />Aktualisieren
+          <mat-icon svgIcon="refresh" />Refresh
         </button>
       </div>
 
       <mat-tab-group>
-        <mat-tab label="Benutzer">
+        <mat-tab label="Users">
           <div class="glass-panel table-scroll" style="margin-top: 16px">
             @if (loading()) {
               <div class="empty-state"><mat-spinner diameter="28" /></div>
             } @else if (users().length === 0) {
-              <div class="empty-state">Noch keine Benutzer synchronisiert.</div>
+              <div class="empty-state">No users synchronized yet.</div>
             } @else {
               <table mat-table [dataSource]="users()">
                 <ng-container matColumnDef="username">
-                  <th mat-header-cell *matHeaderCellDef>Benutzer</th>
+                  <th mat-header-cell *matHeaderCellDef>User</th>
                   <td mat-cell *matCellDef="let u">
                     <div>{{ u.username }}</div>
                     <div class="dim" style="font-size: 12px">{{ u.email }}</div>
                   </td>
                 </ng-container>
                 <ng-container matColumnDef="groups">
-                  <th mat-header-cell *matHeaderCellDef>Gruppen</th>
+                  <th mat-header-cell *matHeaderCellDef>Groups</th>
                   <td mat-cell *matCellDef="let u">
                     @for (group of u.groups; track group) {
                       <span class="tag-chip">{{ group }}</span>
@@ -55,12 +55,12 @@ import { formatTimestamp } from '../core/format';
                   <th mat-header-cell *matHeaderCellDef>Status</th>
                   <td mat-cell *matCellDef="let u">
                     <span [class]="u.active ? 'pill ok' : 'pill danger'">
-                      {{ u.active ? 'aktiv' : 'deaktiviert' }}
+                      {{ u.active ? 'active' : 'deactivated' }}
                     </span>
                   </td>
                 </ng-container>
                 <ng-container matColumnDef="updated">
-                  <th mat-header-cell *matHeaderCellDef>Zuletzt aktualisiert</th>
+                  <th mat-header-cell *matHeaderCellDef>Last Updated</th>
                   <td mat-cell *matCellDef="let u" class="dim">{{ formatTimestamp(u.updated_at) }}</td>
                 </ng-container>
                 <tr mat-header-row *matHeaderRowDef="userColumns"></tr>
@@ -70,16 +70,16 @@ import { formatTimestamp } from '../core/format';
           </div>
         </mat-tab>
 
-        <mat-tab label="Gruppen">
+        <mat-tab label="Groups">
           <div class="glass-panel table-scroll" style="margin-top: 16px">
             @if (loading()) {
               <div class="empty-state"><mat-spinner diameter="28" /></div>
             } @else if (groups().length === 0) {
-              <div class="empty-state">Noch keine Gruppen synchronisiert.</div>
+              <div class="empty-state">No groups synchronized yet.</div>
             } @else {
               <table mat-table [dataSource]="groups()">
                 <ng-container matColumnDef="name">
-                  <th mat-header-cell *matHeaderCellDef>Gruppe</th>
+                  <th mat-header-cell *matHeaderCellDef>Group</th>
                   <td mat-cell *matCellDef="let g">{{ g.name }}</td>
                 </ng-container>
                 <ng-container matColumnDef="issuer">
@@ -87,7 +87,7 @@ import { formatTimestamp } from '../core/format';
                   <td mat-cell *matCellDef="let g" class="dim mono">{{ g.issuer }}</td>
                 </ng-container>
                 <ng-container matColumnDef="created">
-                  <th mat-header-cell *matHeaderCellDef>Angelegt</th>
+                  <th mat-header-cell *matHeaderCellDef>Created</th>
                   <td mat-cell *matCellDef="let g" class="dim">{{ formatTimestamp(g.created_at) }}</td>
                 </ng-container>
                 <tr mat-header-row *matHeaderRowDef="groupColumns"></tr>

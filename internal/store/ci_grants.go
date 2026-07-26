@@ -12,45 +12,45 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Audit-Events für CI-Grant-Änderungen (Phase 7): wie Gruppen-Grants ist jede
-// Mutation einem Actor zuordenbar und wird transaktional geschrieben.
+// Audit events for CI grant changes (phase 7): like group grants, every
+// mutation is attributable to an actor and is written transactionally.
 const (
 	EventCIGrantCreated = "ci_grant.created"
 	EventCIGrantUpdated = "ci_grant.updated"
 	EventCIGrantDeleted = "ci_grant.deleted"
 )
 
-// CIGrant ist eine Zugriffsregel für GitLab-CI-Pipelines (ADR-019):
-// Projekt/Gruppe × Ref-Bedingung × Tag-Selektor → Ziel-Principals.
+// CIGrant is an access rule for GitLab CI pipelines (ADR-019):
+// project/group × ref condition × tag selector → target principals.
 type CIGrant struct {
 	ID uuid.UUID `db:"id"`
-	// ProjectPath ist der GitLab-Projekt- oder Namespace-Pfad; matcht exakt
-	// oder als Namespace-Präfix ("infra" deckt "infra/ansible" ab).
+	// ProjectPath is the GitLab project or namespace path; matches exactly
+	// or as a namespace prefix ("infra" covers "infra/ansible").
 	ProjectPath string `db:"project_path"`
-	// RefPattern ist ein Glob über den Ref-Namen ('*' matcht beliebig,
-	// auch '/'); leer = alle Refs.
+	// RefPattern is a glob over the ref name ('*' matches anything,
+	// including '/'); empty = all refs.
 	RefPattern string `db:"ref_pattern"`
-	// ProtectedOnly beschränkt den Grant auf geschützte Refs (ref_protected).
+	// ProtectedOnly restricts the grant to protected refs (ref_protected).
 	ProtectedOnly bool `db:"protected_only"`
-	// EnvironmentPattern ist ein Glob über den environment-Claim; leer =
-	// keine Bedingung (matcht auch Jobs ohne Environment).
+	// EnvironmentPattern is a glob over the environment claim; empty =
+	// no condition (also matches jobs without an environment).
 	EnvironmentPattern string `db:"environment_pattern"`
-	// TagSelector muss Teilmenge der Host-Tags sein (leer = alle Hosts).
+	// TagSelector must be a subset of the host tags (empty = all hosts).
 	TagSelector map[string]string `db:"tag_selector"`
-	// Principals sind die lokalen Ziel-Benutzer auf den Hosts.
+	// Principals are the local target users on the hosts.
 	Principals         []string  `db:"principals"`
 	MaxValiditySeconds int64     `db:"max_validity_seconds"`
 	CreatedAt          time.Time `db:"created_at"`
 	UpdatedAt          time.Time `db:"updated_at"`
 }
 
-// MaxValidity ist die maximale Zertifikatslaufzeit als Duration.
+// MaxValidity is the maximum certificate validity as a Duration.
 func (g *CIGrant) MaxValidity() time.Duration {
 	return time.Duration(g.MaxValiditySeconds) * time.Second
 }
 
-// CIMatch sind die für die Grant-Auswertung relevanten Claims eines
-// GitLab-Job-Tokens.
+// CIMatch holds the claims of a GitLab job token relevant to grant
+// evaluation.
 type CIMatch struct {
 	ProjectPath  string
 	Ref          string
@@ -58,7 +58,7 @@ type CIMatch struct {
 	Environment  string
 }
 
-// Matches prüft, ob der Grant auf die Job-Claims passt.
+// Matches checks whether the grant matches the job claims.
 func (g *CIGrant) Matches(m CIMatch) bool {
 	if !projectMatches(g.ProjectPath, m.ProjectPath) {
 		return false
@@ -75,13 +75,13 @@ func (g *CIGrant) Matches(m CIMatch) bool {
 	return true
 }
 
-// projectMatches: exakter Pfad oder Namespace-Präfix (Grenze an '/').
+// projectMatches: exact path or namespace prefix (bounded at '/').
 func projectMatches(grantPath, projectPath string) bool {
 	return grantPath == projectPath || strings.HasPrefix(projectPath, grantPath+"/")
 }
 
-// wildcardMatch matcht value gegen ein Glob-Muster, in dem '*' beliebige
-// Zeichen (auch '/') überspannt; andere Zeichen matchen wörtlich.
+// wildcardMatch matches value against a glob pattern in which '*' spans
+// any characters (including '/'); other characters match literally.
 func wildcardMatch(pattern, value string) bool {
 	parts := strings.Split(pattern, "*")
 	if len(parts) == 1 {
@@ -101,7 +101,7 @@ func wildcardMatch(pattern, value string) bool {
 	return strings.HasSuffix(value, parts[len(parts)-1])
 }
 
-// ciGrantAuditEvent baut das Audit-Event zu einer CI-Grant-Änderung.
+// ciGrantAuditEvent builds the audit event for a CI grant change.
 func ciGrantAuditEvent(eventType, actor string, g *CIGrant) (*AuditEvent, error) {
 	payload, err := json.Marshal(map[string]any{
 		"ci_grant_id":          g.ID,
@@ -119,8 +119,8 @@ func ciGrantAuditEvent(eventType, actor string, g *CIGrant) (*AuditEvent, error)
 	return &AuditEvent{EventType: eventType, Actor: actor, Payload: payload}, nil
 }
 
-// createCIGrantTx legt eine CI-Zugriffsregel innerhalb der Transaktion an und
-// schreibt das Audit-Event.
+// createCIGrantTx creates a CI access rule within the transaction and
+// writes the audit event.
 func createCIGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *CIGrant) error {
 	if g.TagSelector == nil {
 		g.TagSelector = map[string]string{}
@@ -144,29 +144,29 @@ func createCIGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *CIGrant) e
 	return insertAuditEvent(ctx, tx, event)
 }
 
-// CreateCIGrant legt eine CI-Zugriffsregel an (füllt ID und Zeitstempel) und
-// schreibt transaktional ein Audit-Event mit dem Actor.
+// CreateCIGrant creates a CI access rule (fills in the ID and timestamp)
+// and writes an audit event with the actor transactionally.
 func (s *Store) CreateCIGrant(ctx context.Context, actor string, g *CIGrant) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return createCIGrantTx(ctx, tx, actor, g)
 	})
 }
 
-// GetCIGrant liefert eine CI-Zugriffsregel per ID.
+// GetCIGrant returns a CI access rule by ID.
 func (s *Store) GetCIGrant(ctx context.Context, id uuid.UUID) (*CIGrant, error) {
 	return queryOne[CIGrant](ctx, s.pool, `SELECT * FROM ci_grants WHERE id = $1`, id)
 }
 
-// ListCIGrants liefert alle CI-Zugriffsregeln.
+// ListCIGrants returns all CI access rules.
 func (s *Store) ListCIGrants(ctx context.Context) ([]CIGrant, error) {
 	return queryAll[CIGrant](ctx, s.pool, `
 		SELECT * FROM ci_grants ORDER BY project_path, created_at, id`)
 }
 
-// MatchCIGrants liefert alle CI-Zugriffsregeln, die auf die Job-Claims passen
-// (Auswertung bei Zertifikatsausstellung). Kandidaten kommen per Projekt-
-// bzw. Namespace-Match aus der Datenbank, die Ref-/Environment-Bedingungen
-// werden in Go geprüft.
+// MatchCIGrants returns all CI access rules that match the job claims
+// (evaluated during certificate issuance). Candidates come from the
+// database via a project/namespace match; the ref/environment conditions
+// are checked in Go.
 func (s *Store) MatchCIGrants(ctx context.Context, m CIMatch) ([]CIGrant, error) {
 	candidates, err := queryAll[CIGrant](ctx, s.pool, `
 		SELECT * FROM ci_grants
@@ -184,7 +184,7 @@ func (s *Store) MatchCIGrants(ctx context.Context, m CIMatch) ([]CIGrant, error)
 	return matched, nil
 }
 
-// updateCIGrantTx aktualisiert eine CI-Zugriffsregel innerhalb der Transaktion.
+// updateCIGrantTx updates a CI access rule within the transaction.
 func updateCIGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *CIGrant) error {
 	if g.TagSelector == nil {
 		g.TagSelector = map[string]string{}
@@ -209,16 +209,16 @@ func updateCIGrantTx(ctx context.Context, tx pgx.Tx, actor string, g *CIGrant) e
 	return insertAuditEvent(ctx, tx, event)
 }
 
-// UpdateCIGrant aktualisiert die veränderlichen Felder einer CI-Zugriffsregel
-// (project_path ist Identität und bleibt fix) und schreibt transaktional ein
-// Audit-Event mit dem Actor.
+// UpdateCIGrant updates the mutable fields of a CI access rule
+// (project_path is identity and stays fixed) and writes an audit event
+// with the actor transactionally.
 func (s *Store) UpdateCIGrant(ctx context.Context, actor string, g *CIGrant) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return updateCIGrantTx(ctx, tx, actor, g)
 	})
 }
 
-// deleteCIGrantTx entfernt eine CI-Zugriffsregel innerhalb der Transaktion.
+// deleteCIGrantTx removes a CI access rule within the transaction.
 func deleteCIGrantTx(ctx context.Context, tx pgx.Tx, actor string, id uuid.UUID) error {
 	deleted, err := queryOne[CIGrant](ctx, tx,
 		`DELETE FROM ci_grants WHERE id = $1 RETURNING *`, id)
@@ -232,15 +232,15 @@ func deleteCIGrantTx(ctx context.Context, tx pgx.Tx, actor string, id uuid.UUID)
 	return insertAuditEvent(ctx, tx, event)
 }
 
-// DeleteCIGrant entfernt eine CI-Zugriffsregel und schreibt transaktional ein
-// Audit-Event mit dem Actor.
+// DeleteCIGrant removes a CI access rule and writes an audit event with
+// the actor transactionally.
 func (s *Store) DeleteCIGrant(ctx context.Context, actor string, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return deleteCIGrantTx(ctx, tx, actor, id)
 	})
 }
 
-// CIGrantSpec ist eine deklarative CI-Zugriffsregel (YAML-Import/Apply).
+// CIGrantSpec is a declarative CI access rule (YAML import/apply).
 type CIGrantSpec struct {
 	ProjectPath        string
 	RefPattern         string
@@ -251,8 +251,8 @@ type CIGrantSpec struct {
 	MaxValiditySeconds int64
 }
 
-// ciGrantKey identifiziert einen CI-Grant für den deklarativen Abgleich über
-// seine vollständige Bedingung (Projekt, Ref-/Environment-Muster, Selektor).
+// ciGrantKey identifies a CI grant for the declarative reconciliation via
+// its full condition (project, ref/environment patterns, selector).
 func ciGrantKey(projectPath, refPattern string, protectedOnly bool, envPattern string, selector map[string]string) (string, error) {
 	if selector == nil {
 		selector = map[string]string{}
@@ -266,30 +266,30 @@ func ciGrantKey(projectPath, refPattern string, protectedOnly bool, envPattern s
 	}, "\x00"), nil
 }
 
-// validateCIGrantSpec prüft Pflichtfelder einer deklarativen CI-Zugriffsregel;
-// Verstöße wrappen ErrInvalidGrantSpec (Client-Fehler).
+// validateCIGrantSpec checks the required fields of a declarative CI access
+// rule; violations wrap ErrInvalidGrantSpec (client error).
 func validateCIGrantSpec(index int, spec CIGrantSpec) error {
 	fail := func(reason string) error {
-		return fmt.Errorf("store: %w: ci-grant %d (projekt %q): %s",
+		return fmt.Errorf("store: %w: ci-grant %d (project %q): %s",
 			ErrInvalidGrantSpec, index+1, spec.ProjectPath, reason)
 	}
 	if spec.ProjectPath == "" {
-		return fail("project fehlt")
+		return fail("project is missing")
 	}
 	if len(spec.Principals) == 0 {
-		return fail("principals fehlen")
+		return fail("principals are missing")
 	}
 	if spec.MaxValiditySeconds <= 0 {
-		return fail("max_validity muss größer 0 sein")
+		return fail("max_validity must be greater than 0")
 	}
 	return nil
 }
 
-// ApplyCIGrants gleicht den CI-Grant-Bestand deklarativ mit specs ab (GitOps):
-// Identität ist die vollständige Bedingung (Projekt, Ref-/Environment-Muster,
-// Tag-Selektor) — neue werden angelegt, abweichende aktualisiert, nicht mehr
-// deklarierte gelöscht. Alles läuft in einer Transaktion; jede Änderung
-// erzeugt ein Audit-Event mit dem Actor.
+// ApplyCIGrants reconciles the CI grant inventory with specs declaratively
+// (GitOps): identity is the full condition (project, ref/environment
+// patterns, tag selector) — new ones are created, differing ones updated,
+// ones no longer declared are deleted. Everything runs in one transaction;
+// every change produces an audit event with the actor.
 func (s *Store) ApplyCIGrants(ctx context.Context, actor string, specs []CIGrantSpec) (*ApplyResult, error) {
 	result := &ApplyResult{}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -319,7 +319,7 @@ func (s *Store) ApplyCIGrants(ctx context.Context, actor string, specs []CIGrant
 				return err
 			}
 			if seen[key] {
-				return fmt.Errorf("store: %w: ci-grant %d (projekt %q): doppelter eintrag für dieselbe bedingung",
+				return fmt.Errorf("store: %w: ci-grant %d (project %q): duplicate entry for the same condition",
 					ErrInvalidGrantSpec, i+1, spec.ProjectPath)
 			}
 			seen[key] = true
@@ -346,8 +346,8 @@ func (s *Store) ApplyCIGrants(ctx context.Context, actor string, specs []CIGrant
 	return result, nil
 }
 
-// applyCISpecTx wendet eine einzelne CI-Spec gegen den Bestand an: vorhandener
-// Grant wird aktualisiert (Duplikate gelöscht), fehlender angelegt.
+// applyCISpecTx applies a single CI spec against the inventory: an existing
+// grant is updated (duplicates deleted), a missing one is created.
 func applyCISpecTx(ctx context.Context, tx pgx.Tx, actor string, spec CIGrantSpec, candidates []CIGrant, result *ApplyResult) error {
 	if len(candidates) == 0 {
 		grant := &CIGrant{

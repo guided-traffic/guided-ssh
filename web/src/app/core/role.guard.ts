@@ -4,15 +4,15 @@ import { CanActivateFn, Router } from '@angular/router';
 import { Role, SessionService } from './session.service';
 
 /**
- * roleGuard prüft die Mindest-Rolle einer Route (route.data['minRole']).
- * Nur Anzeige-Logik — die API lehnt unberechtigte Requests ohnehin ab.
+ * roleGuard checks a route's minimum role (route.data['minRole']).
+ * Display logic only — the API rejects unauthorized requests regardless.
  *
- * Wartet auf session.init(), weil die Initial-Navigation sonst gegen noch
- * leere Rollen prüft. Leitet nie auf '/' um: '' → 'hosts' → Guard → '/' war
- * ein synchroner Endlos-Redirect, der die Seite komplett eingefroren hat.
- * Fallback ist '/hosts' (readonly reicht dort) — und nur, wenn diese Rolle
- * vorhanden ist; sonst wird die Navigation abgebrochen und die App-Shell
- * zeigt Login-, Fehler- oder „keine Rolle“-Karte.
+ * Waits for session.init(), since the initial navigation would otherwise
+ * check against still-empty roles. Never redirects to '/': '' → 'hosts' →
+ * guard → '/' used to be a synchronous infinite redirect that completely
+ * froze the page. The fallback is '/hosts' (readonly is enough there) —
+ * and only if that role is present; otherwise navigation is cancelled and
+ * the app shell shows the login, error, or "no role" card.
  */
 export const roleGuard: CanActivateFn = async (route) => {
   const session = inject(SessionService);

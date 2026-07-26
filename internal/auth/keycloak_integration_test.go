@@ -40,13 +40,13 @@ const (
 	kcAlicePass  = "alice-password"
 )
 
-// keycloakEnv bündelt die URLs des laufenden Keycloak-Containers.
+// keycloakEnv bundles the URLs of the running Keycloak container.
 type keycloakEnv struct {
 	baseURL string
 	issuer  string
 }
 
-// startKeycloak startet Keycloak mit importiertem gssh-Realm.
+// startKeycloak starts Keycloak with the imported gssh realm.
 func startKeycloak(t *testing.T, ctx context.Context) *keycloakEnv {
 	t.Helper()
 	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -76,14 +76,14 @@ func startKeycloak(t *testing.T, ctx context.Context) *keycloakEnv {
 		if ctr != nil {
 			if logs, logErr := ctr.Logs(context.Background()); logErr == nil {
 				raw, _ := io.ReadAll(logs)
-				t.Logf("keycloak-logs:\n%s", raw)
+				t.Logf("keycloak logs:\n%s", raw)
 			}
 		}
-		t.Fatalf("keycloak-container: %v", err)
+		t.Fatalf("keycloak container: %v", err)
 	}
 	endpoint, err := ctr.PortEndpoint(ctx, "8080/tcp", "http")
 	if err != nil {
-		t.Fatalf("keycloak-endpoint: %v", err)
+		t.Fatalf("keycloak endpoint: %v", err)
 	}
 	return &keycloakEnv{
 		baseURL: endpoint,
@@ -91,7 +91,7 @@ func startKeycloak(t *testing.T, ctx context.Context) *keycloakEnv {
 	}
 }
 
-// startPostgres startet Postgres, migriert und liefert den Store.
+// startPostgres starts Postgres, migrates it, and returns the store.
 func startPostgres(t *testing.T, ctx context.Context) *store.Store {
 	t.Helper()
 	ctr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
@@ -104,14 +104,14 @@ func startPostgres(t *testing.T, ctx context.Context) *store.Store {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(ctr) })
 	}
 	if err != nil {
-		t.Fatalf("postgres-container: %v", err)
+		t.Fatalf("postgres container: %v", err)
 	}
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		t.Fatalf("postgres-dsn: %v", err)
+		t.Fatalf("postgres dsn: %v", err)
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
-		t.Fatalf("migrationen: %v", err)
+		t.Fatalf("migrations: %v", err)
 	}
 	st, err := store.New(ctx, dsn)
 	if err != nil {
@@ -121,7 +121,7 @@ func startPostgres(t *testing.T, ctx context.Context) *store.Store {
 	return st
 }
 
-// passwordGrant holt per Direct Access Grant ein ID-Token für den Benutzer.
+// passwordGrant fetches an ID token for the user via Direct Access Grant.
 func (env *keycloakEnv) passwordGrant(t *testing.T, username, password string) string {
 	t.Helper()
 	resp, err := http.PostForm(env.issuer+"/protocol/openid-connect/token", url.Values{
@@ -132,27 +132,27 @@ func (env *keycloakEnv) passwordGrant(t *testing.T, username, password string) s
 		"scope":      {"openid"},
 	})
 	if err != nil {
-		t.Fatalf("password-grant: %v", err)
+		t.Fatalf("password grant: %v", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("password-grant: status %d: %s", resp.StatusCode, body)
+		t.Fatalf("password grant: status %d: %s", resp.StatusCode, body)
 	}
 	var token struct {
 		IDToken string `json:"id_token"`
 	}
 	if err := json.Unmarshal(body, &token); err != nil {
-		t.Fatalf("token-antwort: %v", err)
+		t.Fatalf("token response: %v", err)
 	}
 	if token.IDToken == "" {
-		t.Fatal("kein id_token in antwort")
+		t.Fatal("no id_token in response")
 	}
 	return token.IDToken
 }
 
-// adminToken holt ein Admin-API-Token über den Sync-Service-Account
-// (im Test-Realm zusätzlich mit manage-users ausgestattet).
+// adminToken fetches an Admin API token via the sync service account
+// (additionally granted manage-users in the test realm).
 func (env *keycloakEnv) adminToken(t *testing.T) string {
 	t.Helper()
 	resp, err := http.PostForm(env.issuer+"/protocol/openid-connect/token", url.Values{
@@ -161,36 +161,36 @@ func (env *keycloakEnv) adminToken(t *testing.T) string {
 		"client_secret": {kcSyncSecret},
 	})
 	if err != nil {
-		t.Fatalf("admin-token: %v", err)
+		t.Fatalf("admin token: %v", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("admin-token: status %d: %s", resp.StatusCode, body)
+		t.Fatalf("admin token: status %d: %s", resp.StatusCode, body)
 	}
 	var token struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &token); err != nil {
-		t.Fatalf("admin-token dekodieren: %v", err)
+		t.Fatalf("decoding admin token: %v", err)
 	}
 	return token.AccessToken
 }
 
-// adminRequest führt einen authentifizierten Admin-API-Call aus.
+// adminRequest performs an authenticated Admin API call.
 func (env *keycloakEnv) adminRequest(t *testing.T, method, path string, payload, target any) {
 	t.Helper()
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
 		if err != nil {
-			t.Fatalf("payload marshalen: %v", err)
+			t.Fatalf("marshaling payload: %v", err)
 		}
 		body = bytes.NewReader(data)
 	}
 	req, err := http.NewRequest(method, env.baseURL+"/admin/realms/"+kcRealm+path, body)
 	if err != nil {
-		t.Fatalf("admin-request bauen: %v", err)
+		t.Fatalf("building admin request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+env.adminToken(t))
 	if payload != nil {
@@ -198,38 +198,38 @@ func (env *keycloakEnv) adminRequest(t *testing.T, method, path string, payload,
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("admin-request %s %s: %v", method, path, err)
+		t.Fatalf("admin request %s %s: %v", method, path, err)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		t.Fatalf("admin-request %s %s: status %d: %s", method, path, resp.StatusCode, data)
+		t.Fatalf("admin request %s %s: status %d: %s", method, path, resp.StatusCode, data)
 	}
 	if target != nil {
 		if err := json.Unmarshal(data, target); err != nil {
-			t.Fatalf("admin-antwort dekodieren: %v", err)
+			t.Fatalf("decoding admin response: %v", err)
 		}
 	}
 }
 
-// userID sucht die Keycloak-ID eines Benutzers.
+// userID looks up a user's Keycloak ID.
 func (env *keycloakEnv) userID(t *testing.T, username string) string {
 	t.Helper()
 	var users []map[string]any
 	env.adminRequest(t, http.MethodGet, "/users?username="+url.QueryEscape(username)+"&exact=true", nil, &users)
 	if len(users) != 1 {
-		t.Fatalf("benutzer %q: %d treffer", username, len(users))
+		t.Fatalf("user %q: %d matches", username, len(users))
 	}
 	id, _ := users[0]["id"].(string)
 	if id == "" {
-		t.Fatalf("benutzer %q ohne id", username)
+		t.Fatalf("user %q has no id", username)
 	}
 	return id
 }
 
-// TestKeycloakIntegration testet Phase 3 gegen echten Keycloak + Postgres:
-// Token-Validierung, Sign-Endpoint, Gruppen-Sync und Offboarding.
-// Die Subtests bauen aufeinander auf (gemeinsamer IdP-/DB-Zustand).
+// TestKeycloakIntegration tests Phase 3 against a real Keycloak + Postgres:
+// token validation, sign endpoint, group sync, and offboarding.
+// The subtests build on each other (shared IdP/DB state).
 func TestKeycloakIntegration(t *testing.T) {
 	ctx := context.Background()
 	env := startKeycloak(t, ctx)
@@ -265,13 +265,13 @@ func TestKeycloakIntegration(t *testing.T) {
 	})
 	syncer := auth.NewSyncer(st, source, logger)
 
-	// Phase 6: ohne Grant stellt der Server keine Zertifikate aus. Die Gruppe
-	// wird wie über die Admin-API vorab angelegt (der erste Login bzw. Sync
-	// verknüpft Mitglieder); "admins" bekommt einen Grant auf den lokalen
-	// Benutzer deploy (leerer Selektor = alle Hosts).
+	// Phase 6: without a grant the server issues no certificates. The group
+	// is created up front as it would be via the Admin API (the first login
+	// or sync links members); "admins" gets a grant onto the local user
+	// deploy (empty selector = all hosts).
 	adminsGroup := &store.Group{Issuer: env.issuer, Name: "admins"}
 	if err := st.CreateGroup(ctx, adminsGroup); err != nil {
-		t.Fatalf("gruppe admins anlegen: %v", err)
+		t.Fatalf("creating group admins: %v", err)
 	}
 	grant := &store.AccessGrant{
 		GroupID:            adminsGroup.ID,
@@ -279,23 +279,23 @@ func TestKeycloakIntegration(t *testing.T) {
 		MaxValiditySeconds: 16 * 3600,
 	}
 	if err := st.CreateGrant(ctx, "test", grant); err != nil {
-		t.Fatalf("grant anlegen: %v", err)
+		t.Fatalf("creating grant: %v", err)
 	}
-	// Host für die Host-ACL-Prüfungen (AuthorizedPrincipalsCommand-Pfad).
+	// Host for the host ACL checks (AuthorizedPrincipalsCommand path).
 	host := &store.Host{Name: "web1.example.com"}
 	if err := st.CreateHost(ctx, host); err != nil {
-		t.Fatalf("host anlegen: %v", err)
+		t.Fatalf("creating host: %v", err)
 	}
 
 	idToken := env.passwordGrant(t, "alice", kcAlicePass)
 
-	t.Run("TokenValidierungUndClaims", func(t *testing.T) {
+	t.Run("TokenValidationAndClaims", func(t *testing.T) {
 		claims, err := verifier.Verify(ctx, idToken)
 		if err != nil {
 			t.Fatalf("Verify: %v", err)
 		}
 		if claims.Issuer != env.issuer || claims.PreferredUsername != "alice" || claims.Email != "alice@example.com" {
-			t.Errorf("claims falsch: %+v", claims)
+			t.Errorf("claims wrong: %+v", claims)
 		}
 		groups := slices.Clone(claims.Groups)
 		slices.Sort(groups)
@@ -303,9 +303,9 @@ func TestKeycloakIntegration(t *testing.T) {
 			t.Errorf("groups: %v", claims.Groups)
 		}
 
-		// Manipuliertes Token wird abgelehnt.
+		// A tampered token is rejected.
 		if _, err := verifier.Verify(ctx, idToken+"x"); err == nil {
-			t.Error("manipuliertes token wurde akzeptiert")
+			t.Error("tampered token was accepted")
 		}
 	})
 
@@ -337,7 +337,7 @@ func TestKeycloakIntegration(t *testing.T) {
 		return resp.StatusCode, body
 	}
 
-	t.Run("SignEndpointStelltZertifikatAus", func(t *testing.T) {
+	t.Run("SignEndpointIssuesCertificate", func(t *testing.T) {
 		status, body := signOnce(t, idToken)
 		if status != http.StatusOK {
 			t.Fatalf("sign: status %d: %s", status, body)
@@ -347,28 +347,28 @@ func TestKeycloakIntegration(t *testing.T) {
 			Principals  []string `json:"principals"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			t.Fatalf("antwort dekodieren: %v", err)
+			t.Fatalf("decoding response: %v", err)
 		}
 		parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(resp.Certificate))
 		if err != nil {
-			t.Fatalf("zertifikat parsen: %v", err)
+			t.Fatalf("parsing certificate: %v", err)
 		}
 		cert, ok := parsed.(*ssh.Certificate)
 		if !ok {
-			t.Fatalf("kein zertifikat: %T", parsed)
+			t.Fatalf("not a certificate: %T", parsed)
 		}
 		if !slices.Contains(cert.ValidPrincipals, "alice") || !slices.Contains(cert.ValidPrincipals, "alice@example.com") {
 			t.Errorf("principals: %v", cert.ValidPrincipals)
 		}
 
-		// Zertifikat verifiziert gegen das CA-Bundle (TrustedUserCAKeys).
+		// Certificate verifies against the CA bundle (TrustedUserCAKeys).
 		bundle, err := certAuthority.Bundle(ctx, store.CertTypeUser)
 		if err != nil {
 			t.Fatalf("bundle: %v", err)
 		}
 		caPub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(bundle))
 		if err != nil {
-			t.Fatalf("ca-key parsen: %v", err)
+			t.Fatalf("parsing ca key: %v", err)
 		}
 		checker := &ssh.CertChecker{
 			IsUserAuthority: func(k ssh.PublicKey) bool {
@@ -376,36 +376,36 @@ func TestKeycloakIntegration(t *testing.T) {
 			},
 		}
 		if err := checker.CheckCert("alice", cert); err != nil {
-			t.Errorf("zertifikat nicht gegen ca verifizierbar: %v", err)
+			t.Errorf("certificate not verifiable against ca: %v", err)
 		}
 
-		// Benutzer + Gruppen in DB angelegt.
+		// User + groups created in the DB.
 		user, err := st.GetUserBySubject(ctx, env.issuer, env.userID(t, "alice"))
 		if err != nil {
-			t.Fatalf("benutzer in db: %v", err)
+			t.Fatalf("user in db: %v", err)
 		}
 		groups, err := st.ListUserGroups(ctx, user.ID)
 		if err != nil {
-			t.Fatalf("gruppen in db: %v", err)
+			t.Fatalf("groups in db: %v", err)
 		}
 		if len(groups) != 2 {
-			t.Errorf("db-gruppen: %d, erwartet 2", len(groups))
+			t.Errorf("db groups: %d, expected 2", len(groups))
 		}
 
-		// Host-ACL: alice ist über den admins-Grant als deploy berechtigt.
+		// Host ACL: alice is authorized as deploy via the admins grant.
 		principals, err := st.ListAuthorizedPrincipals(ctx, host.ID, "deploy")
 		if err != nil {
 			t.Fatalf("ListAuthorizedPrincipals: %v", err)
 		}
 		if !slices.Contains(principals, "alice") {
-			t.Errorf("host-acl ohne alice: %v", principals)
+			t.Errorf("host acl without alice: %v", principals)
 		}
 	})
 
-	t.Run("GruppenSyncEntferntGruppe", func(t *testing.T) {
+	t.Run("GroupSyncRemovesGroup", func(t *testing.T) {
 		aliceID := env.userID(t, "alice")
 
-		// Gruppe "admins" in Keycloak entziehen.
+		// Revoke the "admins" group in Keycloak.
 		var groups []map[string]any
 		env.adminRequest(t, http.MethodGet, "/groups", nil, &groups)
 		adminsID := ""
@@ -415,7 +415,7 @@ func TestKeycloakIntegration(t *testing.T) {
 			}
 		}
 		if adminsID == "" {
-			t.Fatal("gruppe admins nicht gefunden")
+			t.Fatal("group admins not found")
 		}
 		env.adminRequest(t, http.MethodDelete, "/users/"+aliceID+"/groups/"+adminsID, nil, nil)
 
@@ -424,27 +424,27 @@ func TestKeycloakIntegration(t *testing.T) {
 		}
 		user, err := st.GetUserBySubject(ctx, env.issuer, aliceID)
 		if err != nil {
-			t.Fatalf("benutzer in db: %v", err)
+			t.Fatalf("user in db: %v", err)
 		}
 		dbGroups, err := st.ListUserGroups(ctx, user.ID)
 		if err != nil {
-			t.Fatalf("gruppen in db: %v", err)
+			t.Fatalf("groups in db: %v", err)
 		}
 		if len(dbGroups) != 1 || dbGroups[0].Name != "dev" {
-			t.Errorf("db-gruppen nach sync: %+v, erwartet nur dev", dbGroups)
+			t.Errorf("db groups after sync: %+v, expected only dev", dbGroups)
 		}
 	})
 
-	// E2E Phase 6: Gruppe entfernt (voriger Subtest) ⇒ der nächste Login mit
-	// frischem Token schlägt fehl und die Host-ACL ist aktualisiert.
-	t.Run("GrantEntzugBlockiertAusstellungUndHostACL", func(t *testing.T) {
+	// E2E Phase 6: group removed (previous subtest) ⇒ the next login with a
+	// fresh token fails and the host ACL is updated.
+	t.Run("GrantRevocationBlocksIssuanceAndHostACL", func(t *testing.T) {
 		freshToken := env.passwordGrant(t, "alice", kcAlicePass)
 		status, body := signOnce(t, freshToken)
 		if status != http.StatusForbidden {
-			t.Fatalf("sign ohne grant: status %d (erwartet 403): %s", status, body)
+			t.Fatalf("sign without grant: status %d (expected 403): %s", status, body)
 		}
 		if !strings.Contains(string(body), "grants") {
-			t.Errorf("fehlermeldung ohne hinweis auf grants: %s", body)
+			t.Errorf("error message has no mention of grants: %s", body)
 		}
 
 		principals, err := st.ListAuthorizedPrincipals(ctx, host.ID, "deploy")
@@ -452,14 +452,14 @@ func TestKeycloakIntegration(t *testing.T) {
 			t.Fatalf("ListAuthorizedPrincipals: %v", err)
 		}
 		if len(principals) != 0 {
-			t.Errorf("host-acl nicht aktualisiert: %v", principals)
+			t.Errorf("host acl not updated: %v", principals)
 		}
 	})
 
-	t.Run("OffboardingBlockiertNeuausstellung", func(t *testing.T) {
+	t.Run("OffboardingBlocksReissuance", func(t *testing.T) {
 		aliceID := env.userID(t, "alice")
 
-		// Benutzer in Keycloak deaktivieren (vollständige Repräsentation PUTten).
+		// Deactivate the user in Keycloak (PUT the full representation).
 		var user map[string]any
 		env.adminRequest(t, http.MethodGet, "/users/"+aliceID, nil, &user)
 		user["enabled"] = false
@@ -469,25 +469,25 @@ func TestKeycloakIntegration(t *testing.T) {
 			t.Fatalf("SyncOnce: %v", err)
 		}
 
-		// Token ist noch gültig — Ausstellung muss trotzdem scheitern (403).
+		// Token is still valid — issuance must still fail (403).
 		status, body := signOnce(t, idToken)
 		if status != http.StatusForbidden {
-			t.Fatalf("sign nach offboarding: status %d (erwartet 403): %s", status, body)
+			t.Fatalf("sign after offboarding: status %d (expected 403): %s", status, body)
 		}
 
 		dbUser, err := st.GetUserBySubject(ctx, env.issuer, aliceID)
 		if err != nil {
-			t.Fatalf("benutzer in db: %v", err)
+			t.Fatalf("user in db: %v", err)
 		}
 		if dbUser.Active {
-			t.Error("benutzer in db noch aktiv")
+			t.Error("user still active in db")
 		}
 		dbGroups, err := st.ListUserGroups(ctx, dbUser.ID)
 		if err != nil {
-			t.Fatalf("gruppen in db: %v", err)
+			t.Fatalf("groups in db: %v", err)
 		}
 		if len(dbGroups) != 0 {
-			t.Errorf("gruppen nicht entzogen: %+v", dbGroups)
+			t.Errorf("groups not revoked: %+v", dbGroups)
 		}
 	})
 }

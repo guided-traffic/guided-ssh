@@ -1,6 +1,7 @@
-# Flux-Kustomization des Clusters production: synct das production-Overlay
-# aus dem GitOps-Repo (GitRepository flux-system legt `flux bootstrap` an)
-# und entschlüsselt SOPS-Secrets mit dem age-Key im Secret sops-age.
+# Flux Kustomization for the production cluster: syncs the production
+# overlay from the GitOps repo (GitRepository flux-system is created by
+# `flux bootstrap`) and decrypts SOPS secrets with the age key in the
+# sops-age secret.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

@@ -9,22 +9,22 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func TestRunOhneArgumente(t *testing.T) {
+func TestRunWithoutArguments(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, nil); got != 2 {
-		t.Fatalf("Run() = %d, erwartet 2", got)
+		t.Fatalf("Run() = %d, expected 2", got)
 	}
-	if !strings.Contains(stderr.String(), "kommandos") {
-		t.Errorf("usage fehlt: %q", stderr.String())
+	if !strings.Contains(stderr.String(), "commands") {
+		t.Errorf("usage missing: %q", stderr.String())
 	}
 }
 
-func TestRunUnbekanntesKommando(t *testing.T) {
+func TestRunUnknownCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := Run(&stdout, &stderr, []string{"gibtsnicht"}); got != 2 {
-		t.Fatalf("Run(gibtsnicht) = %d, erwartet 2", got)
+	if got := Run(&stdout, &stderr, []string{"doesnotexist"}); got != 2 {
+		t.Fatalf("Run(doesnotexist) = %d, expected 2", got)
 	}
-	if !strings.Contains(stderr.String(), "gibtsnicht") {
+	if !strings.Contains(stderr.String(), "doesnotexist") {
 		t.Errorf("stderr: %q", stderr.String())
 	}
 }
@@ -34,7 +34,7 @@ func TestRunHelp(t *testing.T) {
 	if got := Run(&stdout, &stderr, []string{"help"}); got != 0 {
 		t.Fatalf("Run(help) = %d", got)
 	}
-	if !strings.Contains(stdout.String(), "kommandos") {
+	if !strings.Contains(stdout.String(), "commands") {
 		t.Errorf("stdout: %q", stdout.String())
 	}
 }
@@ -49,10 +49,10 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
-func TestRunLoginFlagFehler(t *testing.T) {
+func TestRunLoginFlagError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := Run(&stdout, &stderr, []string{"login", "--gibtsnicht"}); got != 2 {
-		t.Fatalf("Run(login --gibtsnicht) = %d, erwartet 2", got)
+	if got := Run(&stdout, &stderr, []string{"login", "--doesnotexist"}); got != 2 {
+		t.Fatalf("Run(login --doesnotexist) = %d, expected 2", got)
 	}
 }
 
@@ -63,14 +63,14 @@ func TestRunIntegrate(t *testing.T) {
 	}
 	want := `Match host "*.corp.example.com" exec "gssh login --if-needed"`
 	if !strings.Contains(stdout.String(), want) {
-		t.Errorf("schnipsel fehlt:\n%s", stdout.String())
+		t.Errorf("snippet missing:\n%s", stdout.String())
 	}
 }
 
-func TestRunIntegrateFlagFehler(t *testing.T) {
+func TestRunIntegrateFlagError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := Run(&stdout, &stderr, []string{"integrate", "--kaputt"}); got != 2 {
-		t.Fatalf("Run(integrate --kaputt) = %d, erwartet 2", got)
+	if got := Run(&stdout, &stderr, []string{"integrate", "--broken"}); got != 2 {
+		t.Fatalf("Run(integrate --broken) = %d, expected 2", got)
 	}
 }
 
@@ -78,52 +78,52 @@ func TestRunLogout(t *testing.T) {
 	keyring := startAgent(t)
 	priv, pub := testKeyPair(t)
 	if err := loadIntoAgent(keyring, priv, testSignCert(t, newTestSigner(t), pub, time.Hour)); err != nil {
-		t.Fatalf("vorbereiten: %v", err)
+		t.Fatalf("setup: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"logout"}); got != 0 {
 		t.Fatalf("logout = %d (stderr: %s)", got, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "1 agent-einträge entfernt") {
+	if !strings.Contains(stdout.String(), "1 agent entries removed") {
 		t.Errorf("stdout: %q", stdout.String())
 	}
 	if keys, _ := keyring.List(); len(keys) != 0 {
-		t.Errorf("agent nicht leer: %d einträge", len(keys))
+		t.Errorf("agent not empty: %d entries", len(keys))
 	}
 }
 
-func TestRunLogoutOhneAgent(t *testing.T) {
+func TestRunLogoutWithoutAgent(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"logout"}); got != 1 {
-		t.Fatalf("logout = %d, erwartet 1", got)
+		t.Fatalf("logout = %d, expected 1", got)
 	}
 }
 
-func TestRunStatusOhneZertifikat(t *testing.T) {
+func TestRunStatusWithoutCertificate(t *testing.T) {
 	startAgent(t)
-	t.Setenv(envConfig, t.TempDir()+"/fehlt.yaml")
+	t.Setenv(envConfig, t.TempDir()+"/missing.yaml")
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"status"}); got != 1 {
-		t.Fatalf("status = %d, erwartet 1", got)
+		t.Fatalf("status = %d, expected 1", got)
 	}
-	if !strings.Contains(stdout.String(), "kein guided-ssh-zertifikat") {
+	if !strings.Contains(stdout.String(), "no guided-ssh certificate") {
 		t.Errorf("stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "fehler:") {
-		t.Errorf("config-fehler fehlt in ausgabe: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "error:") {
+		t.Errorf("config error missing from output: %q", stdout.String())
 	}
 }
 
-func TestRunStatusMitZertifikat(t *testing.T) {
+func TestRunStatusWithCertificate(t *testing.T) {
 	keyring := startAgent(t)
 	idp := newFakeIDP(t)
 	sign := newFakeSign(t, idp.idToken, time.Hour, false)
 	config := minimalConfig(t, idp, sign)
 	priv, pub := testKeyPair(t)
 	if err := loadIntoAgent(keyring, priv, testSignCert(t, newTestSigner(t), pub, time.Hour)); err != nil {
-		t.Fatalf("vorbereiten: %v", err)
+		t.Fatalf("setup: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -131,46 +131,46 @@ func TestRunStatusMitZertifikat(t *testing.T) {
 		t.Fatalf("status = %d (stderr: %s)", got, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"konfiguration:", "user:alice@fake-idp", "alice, alice@example.com", "gültig bis"} {
+	for _, want := range []string{"configuration:", "user:alice@fake-idp", "alice, alice@example.com", "valid until"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("status-ausgabe ohne %q:\n%s", want, out)
+			t.Errorf("status output missing %q:\n%s", want, out)
 		}
 	}
 }
 
-func TestRunStatusAbgelaufen(t *testing.T) {
+func TestRunStatusExpired(t *testing.T) {
 	keyring := startAgent(t)
-	t.Setenv(envConfig, t.TempDir()+"/fehlt.yaml")
-	// Abgelaufenes Zertifikat direkt in den Keyring legen (ohne Lifetime,
-	// damit es nicht sofort entfernt wird).
+	t.Setenv(envConfig, t.TempDir()+"/missing.yaml")
+	// Put an expired certificate directly into the keyring (without a
+	// lifetime, so it isn't removed immediately).
 	priv, pub := testKeyPair(t)
 	cert := testSignCert(t, newTestSigner(t), pub, -time.Hour)
 	err := keyring.Add(agent.AddedKey{PrivateKey: priv, Certificate: cert, Comment: agentCommentPrefix + " " + cert.KeyId})
 	if err != nil {
-		t.Fatalf("vorbereiten: %v", err)
+		t.Fatalf("setup: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"status"}); got != 1 {
-		t.Fatalf("status = %d, erwartet 1 (abgelaufen)", got)
+		t.Fatalf("status = %d, expected 1 (expired)", got)
 	}
-	if !strings.Contains(stdout.String(), "abgelaufen") {
+	if !strings.Contains(stdout.String(), "expired") {
 		t.Errorf("stdout: %q", stdout.String())
 	}
 }
 
-func TestRunStatusOhneAgent(t *testing.T) {
+func TestRunStatusWithoutAgent(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
-	t.Setenv(envConfig, t.TempDir()+"/fehlt.yaml")
+	t.Setenv(envConfig, t.TempDir()+"/missing.yaml")
 	var stdout, stderr bytes.Buffer
 	if got := Run(&stdout, &stderr, []string{"status"}); got != 1 {
-		t.Fatalf("status = %d, erwartet 1", got)
+		t.Fatalf("status = %d, expected 1", got)
 	}
 }
 
-func TestRunStatusFlagFehler(t *testing.T) {
+func TestRunStatusFlagError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := Run(&stdout, &stderr, []string{"status", "--kaputt"}); got != 2 {
-		t.Fatalf("status --kaputt = %d, erwartet 2", got)
+	if got := Run(&stdout, &stderr, []string{"status", "--broken"}); got != 2 {
+		t.Fatalf("status --broken = %d, expected 2", got)
 	}
 }

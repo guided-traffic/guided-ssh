@@ -16,10 +16,10 @@ import (
 	"time"
 )
 
-// passwordGrant holt ein ID-Token von Dex per Resource-Owner-Password-Grant
-// (passwordConnector: ldap). Der Token-Endpoint prüft den Host-Header nicht,
-// daher reicht der lokale Port-Forward; der iss-Claim bleibt die konfigurierte
-// In-Cluster-Issuer-URL und passt damit zum Server.
+// passwordGrant fetches an ID token from Dex via the resource owner
+// password grant (passwordConnector: ldap). The token endpoint does not
+// check the Host header, so the local port-forward suffices; the iss claim
+// stays the configured in-cluster issuer URL and thus matches the server.
 func passwordGrant(dexLocalURL, username, password string) (string, error) {
 	form := url.Values{
 		"grant_type": {"password"},
@@ -44,17 +44,17 @@ func passwordGrant(dexLocalURL, username, password string) (string, error) {
 		return "", err
 	}
 	if payload.IDToken == "" {
-		return "", fmt.Errorf("antwort ohne id_token: %s", body)
+		return "", fmt.Errorf("response without id_token: %s", body)
 	}
 	return payload.IDToken, nil
 }
 
-// jwtClaims dekodiert den Payload eines JWT (ohne Signaturprüfung — nur für
-// Test-Assertions über Claims wie groups).
+// jwtClaims decodes the payload of a JWT (without signature verification —
+// only for test assertions over claims like groups).
 func jwtClaims(token string) (map[string]any, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return nil, fmt.Errorf("kein jwt: %d segmente", len(parts))
+		return nil, fmt.Errorf("not a jwt: %d segments", len(parts))
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
@@ -67,7 +67,7 @@ func jwtClaims(token string) (map[string]any, error) {
 	return claims, nil
 }
 
-// tokenGroups liest den groups-Claim eines ID-Tokens.
+// tokenGroups reads the groups claim of an ID token.
 func tokenGroups(token string) ([]string, error) {
 	claims, err := jwtClaims(token)
 	if err != nil {
@@ -89,13 +89,13 @@ var (
 	valueRe = regexp.MustCompile(`value="([^"]*)"`)
 )
 
-// approveDeviceFlow spielt den "Browser" des Device-Flows: die von gssh
-// ausgegebene Verification-URI wird über den lokalen Dex-Port-Forward geöffnet
-// und die HTML-Formulare (User-Code → LDAP-Login) werden generisch ausgefüllt.
-// Erfolgskriterium ist nicht diese Funktion, sondern der Exit-Code von
-// `gssh login --device` — hier wird nur bestmöglich geklickt.
+// approveDeviceFlow plays the "browser" of the device flow: the
+// verification URI printed by gssh is opened over the local Dex port-forward
+// and the HTML forms (user code → LDAP login) are filled in generically.
+// The success criterion is not this function but the exit code of
+// `gssh login --device` — this just clicks through as best-effort.
 func approveDeviceFlow(dexLocalURL, verificationURI, userCode, username, password string) error {
-	// In-Cluster-Host durch den lokalen Forward ersetzen, Pfad+Query behalten.
+	// Replace the in-cluster host with the local forward, keep path+query.
 	parsed, err := url.Parse(verificationURI)
 	if err != nil {
 		return fmt.Errorf("verification-uri: %w", err)
@@ -124,10 +124,10 @@ func approveDeviceFlow(dexLocalURL, verificationURI, userCode, username, passwor
 	for step := 0; step < 8; step++ {
 		match := formRe.FindStringSubmatch(string(body))
 		if match == nil {
-			return nil // keine Formulare mehr — Flow abgeschlossen
+			return nil // no more forms — flow complete
 		}
-		// Dex escapet das action-Attribut HTML-mäßig (&amp;) — erst dekodieren,
-		// sonst geht der state-Parameter verloren.
+		// Dex HTML-escapes the action attribute (&amp;) — decode first,
+		// otherwise the state parameter is lost.
 		action, fields := html.UnescapeString(match[1]), match[2]
 		form := url.Values{}
 		for _, input := range inputRe.FindAllStringSubmatch(fields, -1) {
@@ -162,5 +162,5 @@ func approveDeviceFlow(dexLocalURL, verificationURI, userCode, username, passwor
 		body, _ = io.ReadAll(resp.Body)
 		resp.Body.Close()
 	}
-	return fmt.Errorf("device-flow nach 8 formularen nicht abgeschlossen; letzte seite:\n%s", body)
+	return fmt.Errorf("device flow not complete after 8 forms; last page:\n%s", body)
 }

@@ -5,22 +5,22 @@ import (
 	"strings"
 )
 
-// UserKeyID baut die KeyID eines Benutzer-Zertifikats: user:<sub>@<idp>.
+// UserKeyID builds the KeyID of a user certificate: user:<sub>@<idp>.
 func UserKeyID(subject, issuer string) string {
 	return fmt.Sprintf("user:%s@%s", subject, issuer)
 }
 
-// CIKeyID baut die KeyID eines CI-Zertifikats:
-// ci:<project_path>:<pipeline_id>:<job_id> — jede Ausstellung ist im Audit
-// eindeutig einer Pipeline und einem Job zuzuordnen (Phase 7).
+// CIKeyID builds the KeyID of a CI certificate:
+// ci:<project_path>:<pipeline_id>:<job_id> — every issuance is uniquely
+// attributable to a pipeline and a job in the audit trail (Phase 7).
 func CIKeyID(projectPath, pipelineID, jobID string) string {
 	return fmt.Sprintf("ci:%s:%s:%s", projectPath, pipelineID, jobID)
 }
 
-// CIPrincipals sind die Identitäts-Principals eines CI-Zertifikats (ADR-019):
-// ci:<project_path> plus alle Namespace-Vorfahren (ci:infra/ansible, ci:infra).
-// Welche lokalen Benutzer sie auf einem Host erreichen, entscheiden die
-// CI-Grants über AuthorizedPrincipalsCommand — analog ADR-018.
+// CIPrincipals are the identity principals of a CI certificate (ADR-019):
+// ci:<project_path> plus all namespace ancestors (ci:infra/ansible, ci:infra).
+// Which local users they can reach on a host is decided by the CI grants via
+// AuthorizedPrincipalsCommand — analogous to ADR-018.
 func CIPrincipals(projectPath string) []string {
 	principals := []string{"ci:" + projectPath}
 	for {
@@ -33,7 +33,7 @@ func CIPrincipals(projectPath string) []string {
 	}
 }
 
-// HostKeyID baut die KeyID eines Host-Zertifikats: host:<name>.
+// HostKeyID builds the KeyID of a host certificate: host:<name>.
 func HostKeyID(hostname string) string {
 	return fmt.Sprintf("host:%s", hostname)
 }

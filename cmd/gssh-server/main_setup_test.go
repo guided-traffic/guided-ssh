@@ -25,16 +25,16 @@ func discardLogger() *slog.Logger {
 func TestHostCertValidityFromEnv(t *testing.T) {
 	t.Setenv(envHostCertValidity, "")
 	if v, err := hostCertValidityFromEnv(); err != nil || v != 0 {
-		t.Fatalf("leer: %v %v (0, nil erwartet)", v, err)
+		t.Fatalf("empty: %v %v (want 0, nil)", v, err)
 	}
 	t.Setenv(envHostCertValidity, "3m")
 	if v, err := hostCertValidityFromEnv(); err != nil || v != 3*time.Minute {
 		t.Fatalf("3m: %v %v", v, err)
 	}
-	for _, invalid := range []string{"quatsch", "-5m", "0s"} {
+	for _, invalid := range []string{"garbage", "-5m", "0s"} {
 		t.Setenv(envHostCertValidity, invalid)
 		if _, err := hostCertValidityFromEnv(); err == nil {
-			t.Errorf("%q: fehler erwartet", invalid)
+			t.Errorf("%q: expected an error", invalid)
 		}
 	}
 }
@@ -166,42 +166,42 @@ func TestCAModeFromEnv(t *testing.T) {
 }
 
 func TestSetupOIDC(t *testing.T) {
-	// Ohne Issuer: Endpoint bewusst deaktiviert (nil, nil).
+	// Without an issuer: endpoint deliberately disabled (nil, nil).
 	t.Setenv(envOIDCIssuer, "")
 	verifier, err := setupOIDC(context.Background(), discardLogger())
 	if verifier != nil || err != nil {
-		t.Fatalf("ohne issuer: %v %v", verifier, err)
+		t.Fatalf("without issuer: %v %v", verifier, err)
 	}
-	// Issuer ohne Client-ID: fail-fast (Security-Review Phase 10).
+	// Issuer without a client ID: fail-fast (security review Phase 10).
 	t.Setenv(envOIDCIssuer, "https://idp.example")
 	t.Setenv(envOIDCClientID, "")
 	if _, err := setupOIDC(context.Background(), discardLogger()); err == nil {
-		t.Fatal("issuer ohne client-id muss fehlschlagen")
+		t.Fatal("issuer without a client id must fail")
 	}
 }
 
 func TestSetupUIAuth(t *testing.T) {
-	// Ohne Client-Secret: BFF bewusst deaktiviert (nil, nil).
+	// Without a client secret: BFF deliberately disabled (nil, nil).
 	t.Setenv(envUIOIDCClientSecret, "")
 	cfg, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui")
 	if cfg != nil || err != nil {
-		t.Fatalf("ohne secret: %v %v", cfg, err)
+		t.Fatalf("without secret: %v %v", cfg, err)
 	}
-	// Secret ohne Issuer bzw. ohne Client-ID: Konfigurationsfehler (fail-fast).
-	t.Setenv(envUIOIDCClientSecret, "geheim")
+	// Secret without issuer or without client ID: configuration error (fail-fast).
+	t.Setenv(envUIOIDCClientSecret, "secret")
 	t.Setenv(envOIDCIssuer, "")
 	if _, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui"); err == nil {
-		t.Fatal("secret ohne issuer muss fehlschlagen")
+		t.Fatal("secret without issuer must fail")
 	}
 	t.Setenv(envOIDCIssuer, "https://idp.example")
 	if _, err := setupUIAuth(context.Background(), discardLogger(), ""); err == nil {
-		t.Fatal("secret ohne client-id muss fehlschlagen")
+		t.Fatal("secret without client id must fail")
 	}
 }
 
-// TestSetupUIAuthKomplett: vollständige Konfiguration gegen einen Fake-IdP
-// (nur Discovery) — prüft Scopes-Override, TTL-Parsing und Base-URL-Trim.
-func TestSetupUIAuthKomplett(t *testing.T) {
+// TestSetupUIAuthComplete: a complete configuration against a fake IdP
+// (discovery only) — checks scopes override, TTL parsing, and base-URL trimming.
+func TestSetupUIAuthComplete(t *testing.T) {
 	var idp *httptest.Server
 	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -215,7 +215,7 @@ func TestSetupUIAuthKomplett(t *testing.T) {
 	}))
 	t.Cleanup(idp.Close)
 
-	t.Setenv(envUIOIDCClientSecret, "geheim")
+	t.Setenv(envUIOIDCClientSecret, "secret")
 	t.Setenv(envOIDCIssuer, idp.URL)
 	t.Setenv(envMasterKey, base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv(envUIOIDCScopes, "openid, email")
@@ -226,7 +226,7 @@ func TestSetupUIAuthKomplett(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupUIAuth: %v", err)
 	}
-	if cfg.OAuth.ClientID != "gssh-ui" || cfg.OAuth.ClientSecret != "geheim" {
+	if cfg.OAuth.ClientID != "gssh-ui" || cfg.OAuth.ClientSecret != "secret" {
 		t.Errorf("oauth-client = %s/%s", cfg.OAuth.ClientID, cfg.OAuth.ClientSecret)
 	}
 	if !slices.Equal(cfg.OAuth.Scopes, []string{"openid", "email"}) {
@@ -236,45 +236,45 @@ func TestSetupUIAuthKomplett(t *testing.T) {
 		t.Errorf("session-ttl = %v", cfg.SessionTTL)
 	}
 	if cfg.BaseURL != "https://gssh.example.com" {
-		t.Errorf("base-url = %q (trailing slash nicht entfernt?)", cfg.BaseURL)
+		t.Errorf("base-url = %q (trailing slash not removed?)", cfg.BaseURL)
 	}
 	if cfg.Verifier == nil || cfg.Codec == nil {
-		t.Error("verifier/codec fehlen")
+		t.Error("verifier/codec missing")
 	}
 
-	// Ungültige Session-TTL: Konfigurationsfehler (fail-fast).
-	t.Setenv(envUISessionTTL, "nix")
+	// Invalid session TTL: configuration error (fail-fast).
+	t.Setenv(envUISessionTTL, "nope")
 	if _, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui"); err == nil {
-		t.Error("ungültige ttl muss fehlschlagen")
+		t.Error("invalid ttl must fail")
 	}
 }
 
-func TestSetupCIOIDCDeaktiviert(t *testing.T) {
+func TestSetupCIOIDCDisabled(t *testing.T) {
 	t.Setenv(envCIIssuer, "")
 	verifier, err := setupCIOIDC(context.Background(), discardLogger())
 	if verifier != nil || err != nil {
-		t.Fatalf("ohne issuer: %v %v", verifier, err)
+		t.Fatalf("without issuer: %v %v", verifier, err)
 	}
 }
 
 func TestCheckAudienceSeparation(t *testing.T) {
-	// Unterschiedliche Issuer: keine Einschränkung.
+	// Different issuers: no restriction.
 	t.Setenv(envOIDCIssuer, "https://idp.example")
 	t.Setenv(envCIIssuer, "https://gitlab.example")
 	t.Setenv(envOIDCClientID, "guided-ssh")
 	t.Setenv(envCIAudience, "")
 	if err := checkAudienceSeparation(); err != nil {
-		t.Fatalf("verschiedene issuer: %v", err)
+		t.Fatalf("different issuers: %v", err)
 	}
-	// Gleicher Issuer + kollidierende Audience (CI-Default guided-ssh): Fehler.
+	// Same issuer + colliding audience (CI default guided-ssh): error.
 	t.Setenv(envCIIssuer, "https://idp.example")
 	if err := checkAudienceSeparation(); err == nil {
-		t.Fatal("audience-kollision muss den start verhindern")
+		t.Fatal("audience collision must prevent startup")
 	}
-	// Gleicher Issuer, getrennte Audiences: ok.
+	// Same issuer, separate audiences: ok.
 	t.Setenv(envCIAudience, "gitlab-ci")
 	if err := checkAudienceSeparation(); err != nil {
-		t.Fatalf("getrennte audiences: %v", err)
+		t.Fatalf("separate audiences: %v", err)
 	}
 }
 
@@ -285,31 +285,31 @@ func TestSetupRateLimit(t *testing.T) {
 	t.Setenv(envFailPerMinute, "")
 	t.Setenv(envRateTrustXFF, "")
 	if rl := setupRateLimit(logger); rl == nil {
-		t.Fatal("default: limiter erwartet")
+		t.Fatal("default: expected a limiter")
 	}
 
 	t.Setenv(envRatePerMinute, "0")
 	if rl := setupRateLimit(logger); rl != nil {
-		t.Fatal("\"0\" muss das rate-limiting deaktivieren")
+		t.Fatal("\"0\" must disable rate limiting")
 	}
 
 	t.Setenv(envRatePerMinute, "120")
 	t.Setenv(envFailPerMinute, "30")
 	t.Setenv(envRateTrustXFF, "true")
 	if rl := setupRateLimit(logger); rl == nil {
-		t.Fatal("konfigurierter limiter erwartet")
+		t.Fatal("expected a configured limiter")
 	}
 
-	// Ungültige Werte fallen auf Defaults zurück statt zu crashen.
-	t.Setenv(envRatePerMinute, "viele")
+	// Invalid values fall back to defaults instead of crashing.
+	t.Setenv(envRatePerMinute, "many")
 	t.Setenv(envFailPerMinute, "-3")
 	if rl := setupRateLimit(logger); rl == nil {
-		t.Fatal("ungültige werte: default-limiter erwartet")
+		t.Fatal("invalid values: expected the default limiter")
 	}
 }
 
-// setPinEnv setzt alle Pin-Variablen, damit kein Subtest die Umgebung des
-// Entwicklers oder des vorherigen Falls erbt.
+// setPinEnv sets every pin variable so no subtest inherits the developer's
+// environment or the previous case.
 func setPinEnv(t *testing.T, staticPin, certFile, refresh, publicURL, uiBaseURL string) {
 	t.Helper()
 	t.Setenv(envPublicPin, staticPin)
@@ -319,76 +319,76 @@ func setPinEnv(t *testing.T, staticPin, certFile, refresh, publicURL, uiBaseURL 
 	t.Setenv(envUIBaseURL, uiBaseURL)
 }
 
-// TestPinConfigFromEnv: ein ungültiger statischer Pin oder ein unbrauchbares
-// Refresh-Intervall bricht den Start ab (fail-fast) — still ohne Pin
-// weiterzulaufen wäre die gefährlichere Variante.
+// TestPinConfigFromEnv: an invalid static pin or an unusable refresh
+// interval aborts startup (fail-fast) — silently continuing without a pin
+// would be the more dangerous option.
 func TestPinConfigFromEnv(t *testing.T) {
 	setPinEnv(t, "", "", "", "", "")
 	cfg, err := pinConfigFromEnv()
 	if err != nil || cfg != (api.PinProviderConfig{}) {
-		t.Fatalf("leer: %+v %v (leere config, nil erwartet)", cfg, err)
+		t.Fatalf("empty: %+v %v (want empty config, nil)", cfg, err)
 	}
 
-	// GSSH_PUBLIC_URL ist die Dial-Quelle, GSSH_UI_BASE_URL der Fallback;
-	// der abschließende Slash gehört nicht in die Basis-URL.
+	// GSSH_PUBLIC_URL is the dial source, GSSH_UI_BASE_URL the fallback;
+	// the trailing slash does not belong in the base URL.
 	setPinEnv(t, "", "", "", "https://gssh.example.com/", "https://ui.example.com")
 	if cfg, err = pinConfigFromEnv(); err != nil || cfg.DialURL != "https://gssh.example.com" {
 		t.Fatalf("public-url: %+v %v", cfg, err)
 	}
 	setPinEnv(t, "", "", "", "", "https://ui.example.com")
 	if cfg, err = pinConfigFromEnv(); err != nil || cfg.DialURL != "https://ui.example.com" {
-		t.Fatalf("ui-base-url als fallback: %+v %v", cfg, err)
+		t.Fatalf("ui-base-url as fallback: %+v %v", cfg, err)
 	}
 
 	validPin := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	setPinEnv(t, validPin, "/etc/gssh/tls.crt", "30s", "", "")
 	cfg, err = pinConfigFromEnv()
 	if err != nil {
-		t.Fatalf("gültige konfiguration: %v", err)
+		t.Fatalf("valid configuration: %v", err)
 	}
 	if cfg.StaticPin != validPin || cfg.CertFile != "/etc/gssh/tls.crt" || cfg.Refresh != 30*time.Second {
 		t.Fatalf("config = %+v", cfg)
 	}
 
-	for _, invalid := range []string{"kein-base64!", "AAAA"} {
+	for _, invalid := range []string{"not-base64!", "AAAA"} {
 		setPinEnv(t, invalid, "", "", "", "")
 		if _, err := pinConfigFromEnv(); err == nil {
-			t.Errorf("pin %q: startfehler erwartet", invalid)
+			t.Errorf("pin %q: expected a startup error", invalid)
 		}
 	}
 
-	for _, invalid := range []string{"quatsch", "-5m", "0s"} {
+	for _, invalid := range []string{"garbage", "-5m", "0s"} {
 		setPinEnv(t, "", "", invalid, "", "")
 		if _, err := pinConfigFromEnv(); err == nil {
-			t.Errorf("refresh %q: startfehler erwartet", invalid)
+			t.Errorf("refresh %q: expected a startup error", invalid)
 		}
 	}
 }
 
-func TestStartGroupSyncOhneKonfiguration(t *testing.T) {
-	// Ohne GSSH_KC_CLIENT_ID kehrt der Sync ohne Nebenwirkungen zurück
-	// (kein Netz, kein Store-Zugriff).
+func TestStartGroupSyncWithoutConfiguration(t *testing.T) {
+	// Without GSSH_KC_CLIENT_ID, the sync returns without side effects
+	// (no network, no store access).
 	t.Setenv(envKCClientID, "")
 	startGroupSync(context.Background(), nil, discardLogger())
 }
 
-func TestStartAuditStreamOhneKonfiguration(t *testing.T) {
+func TestStartAuditStreamWithoutConfiguration(t *testing.T) {
 	t.Setenv(envAuditStream, "")
 	t.Setenv(envAuditWebhookURL, "")
 	startAuditStream(context.Background(), nil, discardLogger())
 }
 
-func TestRunEnrollTokenUngueltigeTags(t *testing.T) {
+func TestRunEnrollTokenInvalidTags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := run(&stdout, &stderr, []string{"enroll-token", "-tags", "kaputt"}); got != 2 {
-		t.Fatalf("ungültige tags = %d, erwartet 2", got)
+	if got := run(&stdout, &stderr, []string{"enroll-token", "-tags", "broken"}); got != 2 {
+		t.Fatalf("invalid tags = %d, want 2", got)
 	}
 	if !strings.Contains(stderr.String(), "tag") {
-		t.Errorf("stderr ohne tag-hinweis: %q", stderr.String())
+		t.Errorf("stderr without tag hint: %q", stderr.String())
 	}
 }
 
-// setDBEnv setzt eine vollständige DB-Konfiguration für Tests.
+// setDBEnv sets a complete DB configuration for tests.
 func setDBEnv(t *testing.T, host, port, user, password, name, sslmode string) {
 	t.Helper()
 	t.Setenv(envDBHost, host)
@@ -400,46 +400,46 @@ func setDBEnv(t *testing.T, host, port, user, password, name, sslmode string) {
 }
 
 func TestDBConnString(t *testing.T) {
-	// Vollständige Konfiguration inkl. Sonderzeichen im Passwort.
-	setDBEnv(t, "db.example.com", "5433", "gssh", "p@ss:wort/mit?zeichen", "gsshdb", "require")
+	// Complete configuration including special characters in the password.
+	setDBEnv(t, "db.example.com", "5433", "gssh", "p@ss:word/with?chars", "gsshdb", "require")
 	got, err := dbConnString()
 	if err != nil {
 		t.Fatalf("dbConnString: %v", err)
 	}
-	want := "postgres://gssh:p%40ss%3Awort%2Fmit%3Fzeichen@db.example.com:5433/gsshdb?sslmode=require"
+	want := "postgres://gssh:p%40ss%3Aword%2Fwith%3Fchars@db.example.com:5433/gsshdb?sslmode=require"
 	if got != want {
-		t.Errorf("dbConnString = %q, erwartet %q", got, want)
+		t.Errorf("dbConnString = %q, want %q", got, want)
 	}
 
-	// Port und SSL-Mode optional: Treiber-Defaults greifen.
+	// Port and SSL mode optional: driver defaults apply.
 	setDBEnv(t, "db", "", "u", "p", "d", "")
 	if got, err := dbConnString(); err != nil || got != "postgres://u:p@db/d" {
-		t.Errorf("ohne port/sslmode: %q, %v", got, err)
+		t.Errorf("without port/sslmode: %q, %v", got, err)
 	}
 
-	// Fehlende Pflicht-Variablen: Fehler nennt alle fehlenden Namen.
+	// Missing required variables: the error names all missing variables.
 	setDBEnv(t, "", "", "u", "", "d", "")
 	if _, err := dbConnString(); err == nil ||
 		!strings.Contains(err.Error(), envDBHost) || !strings.Contains(err.Error(), envDBPassword) {
-		t.Errorf("fehlende pflicht-variablen: %v (erwartet hinweis auf %s und %s)", err, envDBHost, envDBPassword)
+		t.Errorf("missing required variables: %v (expected a hint about %s and %s)", err, envDBHost, envDBPassword)
 	}
 }
 
-func TestRunMigrateDBUnerreichbar(t *testing.T) {
-	// Port 1 lehnt Verbindungen sofort ab — kein Timeout nötig.
+func TestRunMigrateDBUnreachable(t *testing.T) {
+	// Port 1 rejects connections immediately — no timeout needed.
 	setDBEnv(t, "127.0.0.1", "1", "gssh", "gssh", "gssh", "disable")
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"migrate"}); got != 1 {
-		t.Fatalf("unerreichbare datenbank = %d, erwartet 1 (stderr: %s)", got, stderr.String())
+		t.Fatalf("unreachable database = %d, want 1 (stderr: %s)", got, stderr.String())
 	}
 }
 
-func TestServeUngueltigeHostCertValidity(t *testing.T) {
-	// serve schlägt an der DB-Konfiguration fehl, bevor die Validity geprüft
-	// wird — die Env-Validierung selbst deckt TestHostCertValidityFromEnv ab.
-	// Hier nur der frühe Fehlerpfad des Serverstarts ohne Store.
+func TestServeInvalidHostCertValidity(t *testing.T) {
+	// serve fails on the DB configuration before the validity is checked —
+	// the env validation itself is covered by TestHostCertValidityFromEnv.
+	// Here only the early error path of the server start without a store.
 	setDBEnv(t, "", "", "", "", "", "")
 	if err := serve(discardLogger(), "127.0.0.1:0", "", ""); err == nil {
-		t.Fatal("serve ohne db-konfiguration muss fehlschlagen")
+		t.Fatal("serve without db configuration must fail")
 	}
 }

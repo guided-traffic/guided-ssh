@@ -5,18 +5,19 @@ import (
 	"time"
 )
 
-// RunPAMSession ist das Ziel des pam_exec-Hooks (session open/close in sshd und
-// sudo). Es baut aus der PAM-Umgebung ein Session-Ereignis und liefert es an den
-// Daemon-Socket. Der Aufrufer (cli) beendet sich IMMER mit 0 — der Hook ist
-// `optional` und darf Login/sudo niemals blockieren (fail-open). Der Serial für
-// sshd-Sessions wird erst im Daemon aus den zuvor gemeldeten Login-Daten ergänzt.
+// RunPAMSession is the target of the pam_exec hook (session open/close in
+// sshd and sudo). It builds a session event from the PAM environment and
+// delivers it to the daemon socket. The caller (cli) ALWAYS exits with 0 —
+// the hook is `optional` and must never block login/sudo (fail-open). The
+// serial for sshd sessions is only filled in by the daemon from previously
+// reported login data.
 //
-// env liefert Umgebungsvariablen (os.Getenv bzw. ein Fake in Tests); now erlaubt
-// den Zeitstempel in Tests zu fixieren.
+// env supplies environment variables (os.Getenv, or a fake in tests); now
+// lets tests pin the timestamp.
 func RunPAMSession(ctx context.Context, stateDir string, env func(string) string, now func() time.Time) error {
 	token := readSocketToken(stateDir)
 	if token == "" {
-		// Session-Audit nicht aktiviert (oder Token fehlt) — nichts zu tun.
+		// Session audit not enabled (or token missing) — nothing to do.
 		return nil
 	}
 	event, ok := pamEvent(env, now)
@@ -33,8 +34,9 @@ func RunPAMSession(ctx context.Context, stateDir string, env func(string) string
 	return postSocketJSON(postCtx, client, token, "/session-event", event)
 }
 
-// pamEvent bildet die PAM-Umgebung auf ein sessionEventWire ab. ok=false, wenn
-// Pflichtfelder fehlen (PAM_TYPE/PAM_SERVICE/PAM_USER) — dann wird nichts gesendet.
+// pamEvent maps the PAM environment onto a sessionEventWire. ok=false when
+// required fields are missing (PAM_TYPE/PAM_SERVICE/PAM_USER) — nothing is
+// sent in that case.
 func pamEvent(env func(string) string, now func() time.Time) (sessionEventWire, bool) {
 	phase := pamPhase(env("PAM_TYPE"))
 	service := env("PAM_SERVICE")
@@ -44,7 +46,7 @@ func pamEvent(env func(string) string, now func() time.Time) (sessionEventWire, 
 	}
 	remoteUser := env("PAM_RUSER")
 	if remoteUser == "" {
-		remoteUser = env("SUDO_USER") // sudo setzt PAM_RUSER nicht immer
+		remoteUser = env("SUDO_USER") // sudo does not always set PAM_RUSER
 	}
 	return sessionEventWire{
 		Phase:      phase,
@@ -53,15 +55,16 @@ func pamEvent(env func(string) string, now func() time.Time) (sessionEventWire, 
 		RemoteUser: remoteUser,
 		RemoteAddr: env("PAM_RHOST"),
 		TTY:        env("PAM_TTY"),
-		// Command ist best-effort: sudo stellt SUDO_COMMAND im Session-Env oft
-		// bereit, garantiert ist es nicht (zuverlässig nur via sudo-Logfile/Plugin).
+		// Command is best-effort: sudo often provides SUDO_COMMAND in the
+		// session env, but it's not guaranteed (reliable only via the
+		// sudo logfile/plugin).
 		Command:    env("SUDO_COMMAND"),
 		OccurredAt: now(),
 	}, true
 }
 
-// pamPhase mappt PAM_TYPE (open_session/close_session) auf phase; leer bei
-// unbekanntem Typ (z. B. auth/account — dort ist kein pam_exec konfiguriert).
+// pamPhase maps PAM_TYPE (open_session/close_session) to phase; empty for
+// an unknown type (e.g. auth/account — no pam_exec is configured there).
 func pamPhase(pamType string) string {
 	switch pamType {
 	case "open_session":

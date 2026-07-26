@@ -1,7 +1,7 @@
-// Package metrics stellt die Prometheus-Metriken des gssh-servers bereit
-// (Plan Phase 11): ausgestellte Zertifikate, HTTP-Fehlerraten und
-// Agent-Heartbeats. Die Metriken landen in der Default-Registry und werden
-// über Handler() (Endpoint /metrics, eigener Listener) ausgeliefert.
+// Package metrics provides the Prometheus metrics for the gssh server
+// (plan phase 11): certificates issued, HTTP error rates, and agent
+// heartbeats. The metrics land in the default registry and are served via
+// Handler() (endpoint /metrics, dedicated listener).
 package metrics
 
 import (
@@ -14,34 +14,34 @@ import (
 )
 
 var (
-	// CertificatesIssued zählt erfolgreich ausgestellte Zertifikate nach
-	// Requester (user/ci/host) und Zertifikatstyp (user/host).
+	// CertificatesIssued counts successfully issued certificates by
+	// requester (user/ci/host) and certificate type (user/host).
 	CertificatesIssued = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gssh_certificates_issued_total",
-		Help: "Erfolgreich ausgestellte SSH-Zertifikate.",
+		Help: "Successfully issued SSH certificates.",
 	}, []string{"requester", "cert_type"})
 
-	// HTTPResponses zählt HTTP-Antworten nach Status-Code; Fehlerraten
-	// ergeben sich aus rate() über die 4xx/5xx-Codes.
+	// HTTPResponses counts HTTP responses by status code; error rates
+	// follow from rate() over the 4xx/5xx codes.
 	HTTPResponses = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gssh_http_responses_total",
-		Help: "HTTP-Antworten nach Status-Code (API- und Agent-Endpunkte).",
+		Help: "HTTP responses by status code (API and agent endpoints).",
 	}, []string{"code"})
 
-	// AgentHeartbeats zählt Agent-Kontakte (mTLS-Requests, die last_seen_at
-	// stempeln).
+	// AgentHeartbeats counts agent contacts (mTLS requests that stamp
+	// last_seen_at).
 	AgentHeartbeats = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "gssh_agent_heartbeats_total",
-		Help: "Heartbeats der Host-Agents (erfolgreiche mTLS-Kontakte).",
+		Help: "Heartbeats from host agents (successful mTLS contacts).",
 	})
 )
 
-// Handler liefert den Prometheus-Exposition-Handler (/metrics).
+// Handler returns the Prometheus exposition handler (/metrics).
 func Handler() http.Handler {
 	return promhttp.Handler()
 }
 
-// Middleware zählt die Antworten des umschlossenen Handlers nach Status-Code.
+// Middleware counts the wrapped handler's responses by status code.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -50,8 +50,8 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// statusRecorder merkt sich den geschriebenen Status-Code; ohne explizites
-// WriteHeader gilt 200 (net/http-Konvention).
+// statusRecorder remembers the written status code; without an explicit
+// WriteHeader, 200 applies (net/http convention).
 type statusRecorder struct {
 	http.ResponseWriter
 	status int

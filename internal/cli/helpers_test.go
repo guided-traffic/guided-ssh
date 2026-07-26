@@ -20,13 +20,12 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// startAgent startet einen In-Memory-ssh-agent (Keyring) auf einem
-// Unix-Socket, setzt SSH_AUTH_SOCK und liefert den Keyring für direkte
-// Assertions.
+// startAgent starts an in-memory ssh-agent (keyring) on a unix socket, sets
+// SSH_AUTH_SOCK, and returns the keyring for direct assertions.
 func startAgent(t *testing.T) agent.Agent {
 	t.Helper()
-	// Kurzer Temp-Pfad statt t.TempDir(): sun_path ist auf ~104 Zeichen
-	// begrenzt (darwin) und lange Testnamen sprengen das Limit.
+	// Short temp path instead of t.TempDir(): sun_path is limited to ~104
+	// characters (darwin), and long test names exceed that limit.
 	dir, err := os.MkdirTemp("", "gssh")
 	if err != nil {
 		t.Fatalf("tempdir: %v", err)
@@ -35,7 +34,7 @@ func startAgent(t *testing.T) agent.Agent {
 	sock := filepath.Join(dir, "a.sock")
 	listener, err := net.Listen("unix", sock)
 	if err != nil {
-		t.Fatalf("agent-socket: %v", err)
+		t.Fatalf("agent socket: %v", err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	keyring := agent.NewKeyring()
@@ -52,9 +51,9 @@ func startAgent(t *testing.T) agent.Agent {
 	return keyring
 }
 
-// fakeIDP ist ein minimaler OIDC-Provider für CLI-Tests: Discovery, Authorize
-// (Redirect mit Code), Token- und Device-Endpoint. auth.Flow prüft die
-// Signatur des id_token nicht — ein statischer Wert genügt.
+// fakeIDP is a minimal OIDC provider for CLI tests: discovery, authorize
+// (redirect with code), token, and device endpoint. auth.Flow does not
+// verify the id_token's signature — a static value is enough.
 type fakeIDP struct {
 	server     *httptest.Server
 	idToken    string
@@ -77,7 +76,7 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	mux.HandleFunc("GET /auth", func(w http.ResponseWriter, r *http.Request) {
 		redirect, err := url.Parse(r.URL.Query().Get("redirect_uri"))
 		if err != nil {
-			http.Error(w, "redirect_uri fehlt", http.StatusBadRequest)
+			http.Error(w, "redirect_uri missing", http.StatusBadRequest)
 			return
 		}
 		q := redirect.Query()
@@ -110,8 +109,8 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	return idp
 }
 
-// fakeSign ist ein Fake des Sign-Endpoints: signiert eingereichte Public Keys
-// mit einer Wegwerf-CA und protokolliert die angefragte Laufzeit.
+// fakeSign is a fake of the sign endpoint: signs submitted public keys with
+// a throwaway CA and records the requested validity.
 type fakeSign struct {
 	server       *httptest.Server
 	signer       ssh.Signer
@@ -120,35 +119,35 @@ type fakeSign struct {
 	lastValidity atomic.Int64
 }
 
-// newFakeSign startet den Fake-Sign-Endpoint; tlsMode schaltet HTTPS ein
-// (für Pinning-Tests).
+// newFakeSign starts the fake sign endpoint; tlsMode enables HTTPS (for
+// pinning tests).
 func newFakeSign(t *testing.T, wantToken string, validity time.Duration, tlsMode bool) *fakeSign {
 	t.Helper()
 	_, caPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		t.Fatalf("ca-key erzeugen: %v", err)
+		t.Fatalf("generating ca key: %v", err)
 	}
 	signer, err := ssh.NewSignerFromKey(caPriv)
 	if err != nil {
-		t.Fatalf("ca-signer: %v", err)
+		t.Fatalf("ca signer: %v", err)
 	}
 	fs := &fakeSign{signer: signer, wantToken: wantToken, validity: validity}
 
 	mux := http.NewServeMux()
 	signHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+fs.wantToken {
-			http.Error(w, "id-token ungültig", http.StatusUnauthorized)
+			http.Error(w, "id token invalid", http.StatusUnauthorized)
 			return
 		}
 		var req signUserRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "request-body ungültig", http.StatusBadRequest)
+			http.Error(w, "request body invalid", http.StatusBadRequest)
 			return
 		}
 		fs.lastValidity.Store(req.ValiditySeconds)
 		pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.PublicKey))
 		if err != nil {
-			http.Error(w, "public_key ungültig", http.StatusBadRequest)
+			http.Error(w, "public_key invalid", http.StatusBadRequest)
 			return
 		}
 		validity := fs.validity
@@ -175,8 +174,8 @@ func newFakeSign(t *testing.T, wantToken string, validity time.Duration, tlsMode
 	return fs
 }
 
-// testSignCert baut und signiert ein Benutzerzertifikat mit der Test-CA;
-// negative validity erzeugt ein bereits abgelaufenes Zertifikat.
+// testSignCert builds and signs a user certificate with the test CA;
+// negative validity produces an already-expired certificate.
 func testSignCert(t *testing.T, signer ssh.Signer, pub ssh.PublicKey, validity time.Duration) *ssh.Certificate {
 	t.Helper()
 	now := time.Now()
@@ -190,49 +189,49 @@ func testSignCert(t *testing.T, signer ssh.Signer, pub ssh.PublicKey, validity t
 		ValidBefore:     uint64(now.Add(validity).Unix()),         //nolint:gosec // dito
 	}
 	if err := cert.SignCert(rand.Reader, signer); err != nil {
-		t.Fatalf("zertifikat signieren: %v", err)
+		t.Fatalf("signing certificate: %v", err)
 	}
 	return cert
 }
 
-// testKeyPair erzeugt ein Ed25519-Schlüsselpaar samt SSH-Public-Key.
+// testKeyPair generates an Ed25519 key pair along with the SSH public key.
 func testKeyPair(t *testing.T) (ed25519.PrivateKey, ssh.PublicKey) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		t.Fatalf("schlüsselpaar: %v", err)
+		t.Fatalf("key pair: %v", err)
 	}
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
-		t.Fatalf("ssh-public-key: %v", err)
+		t.Fatalf("ssh public key: %v", err)
 	}
 	return priv, sshPub
 }
 
-// writeConfig legt eine Konfigurationsdatei im Temp-Verzeichnis an.
+// writeConfig creates a configuration file in the temp directory.
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("config schreiben: %v", err)
+		t.Fatalf("writing config: %v", err)
 	}
 	return path
 }
 
-// minimalConfig baut eine gültige Konfiguration für idp + sign-endpoint.
+// minimalConfig builds a valid configuration for idp + sign endpoint.
 func minimalConfig(t *testing.T, idp *fakeIDP, sign *fakeSign) string {
 	t.Helper()
 	return writeConfig(t, fmt.Sprintf("api_url: %s\nissuer: %s\nclient_id: gssh-cli\n",
 		sign.server.URL, idp.server.URL))
 }
 
-// stubBrowser ersetzt openBrowser: folgt der Authorize-URL wie ein Browser
-// (inkl. Redirect zum Localhost-Callback).
+// stubBrowser replaces openBrowser: follows the authorize URL like a
+// browser (including the redirect to the localhost callback).
 func stubBrowser(t *testing.T) {
 	t.Helper()
 	orig := openBrowser
 	openBrowser = func(authURL string) error {
-		resp, err := http.Get(authURL) //nolint:gosec // Test-URL vom Fake-IdP
+		resp, err := http.Get(authURL) //nolint:gosec // test URL from the fake IdP
 		if err != nil {
 			return err
 		}
@@ -241,7 +240,7 @@ func stubBrowser(t *testing.T) {
 	t.Cleanup(func() { openBrowser = orig })
 }
 
-// stubExecSSH ersetzt execSSH und liefert die aufgezeichneten Argumente.
+// stubExecSSH replaces execSSH and returns the recorded arguments.
 func stubExecSSH(t *testing.T, fail error) *[]string {
 	t.Helper()
 	orig := execSSH
@@ -258,6 +257,6 @@ func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		t.Errorf("json schreiben: %v", err)
+		t.Errorf("writing json: %v", err)
 	}
 }

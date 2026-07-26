@@ -16,42 +16,43 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// CITokenVerifier validiert rohe GitLab-Job-Tokens (implementiert von
-// *auth.CIVerifier; Tests nutzen einen Fake).
+// CITokenVerifier validates raw GitLab job tokens (implemented by
+// *auth.CIVerifier; tests use a fake).
 type CITokenVerifier interface {
 	Verify(ctx context.Context, rawToken string) (*auth.CIClaims, error)
 }
 
-// CIStore liefert CI-Zugriffsregeln und Projekt-Service-Accounts
-// (*store.Store erfüllt das Interface, Tests nutzen einen Fake).
+// CIStore provides CI access grants and project service accounts
+// (*store.Store satisfies the interface, tests use a fake).
 type CIStore interface {
 	MatchCIGrants(ctx context.Context, m store.CIMatch) ([]store.CIGrant, error)
 	EnsureCIServiceAccount(ctx context.Context, issuer, projectPath string) (*store.ServiceAccount, error)
 }
 
-// defaultCIValidity ist die Standard-Laufzeit von CI-Zertifikaten (Plan: 1 h,
-// identisch zum Policy-Maximum des Requester-Typs ci).
+// defaultCIValidity is the default lifetime of CI certificates (plan: 1h,
+// identical to the policy maximum of the ci requester type).
 const defaultCIValidity = time.Hour
 
-// handleSignCI tauscht ein validiertes GitLab-Job-Token gegen ein kurzlebiges
-// SSH-Zertifikat: Token prüfen, Claims auf CI-Grants mappen (ohne passenden
-// Grant kein Zertifikat), Laufzeit dreifach gedeckelt (Grants, Policy 1 h,
-// Token-Ablauf = Job-Timeout), Policy-geprüft signieren, Audit transaktional.
+// handleSignCI exchanges a validated GitLab job token for a short-lived SSH
+// certificate: check the token, map claims onto CI grants (no matching
+// grant means no certificate), lifetime capped three ways (grants,
+// 1h policy, token expiry = job timeout), sign policy-checked, audit
+// transactionally.
 //
-// Die Zertifikats-Principals sind Projekt-Identitäts-Principals
-// (ci:<project_path> + Namespace-Vorfahren, ADR-019) — welche lokalen
-// Benutzer sie erreichen, entscheidet der Host anhand der CI-Grants.
+// The certificate principals are project identity principals
+// (ci:<project_path> + namespace ancestors, ADR-019) — which local users
+// they can reach is decided by the host based on the CI grants.
 func handleSignCI(certAuthority *ca.CA, verifier CITokenVerifier, ciStore CIStore, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rawToken, ok := bearerToken(r)
 		if !ok {
-			http.Error(w, "authorization: bearer-token fehlt", http.StatusUnauthorized)
+			http.Error(w, "authorization: bearer token missing", http.StatusUnauthorized)
 			return
 		}
 		claims, err := verifier.Verify(r.Context(), rawToken)
 		if err != nil {
-			logger.Info("sign/ci: token abgelehnt", "error", err)
-			http.Error(w, "job-token ungültig", http.StatusUnauthorized)
+			logger.Info("sign/ci: token rejected", "error", err)
+			http.Error(w, "job token invalid", http.StatusUnauthorized)
 			return
 		}
 
@@ -67,26 +68,26 @@ func handleSignCI(certAuthority *ca.CA, verifier CITokenVerifier, ciStore CIStor
 			Environment:  claims.Environment,
 		})
 		if err != nil {
-			logger.Error("sign/ci: ci-grants laden fehlgeschlagen", "project", claims.ProjectPath, "error", err)
+			logger.Error("sign/ci: loading ci grants failed", "project", claims.ProjectPath, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		if len(grants) == 0 {
-			logger.Info("sign/ci: kein passender ci-grant",
+			logger.Info("sign/ci: no matching ci grant",
 				"project", claims.ProjectPath, "ref", claims.Ref,
 				"ref_protected", claims.RefProtected, "environment", claims.Environment)
-			http.Error(w, "kein passender ci-grant für dieses projekt/ref — zertifikat wird nicht ausgestellt", http.StatusForbidden)
+			http.Error(w, "no matching ci grant for this project/ref — certificate will not be issued", http.StatusForbidden)
 			return
 		}
 
 		account, err := ciStore.EnsureCIServiceAccount(r.Context(), claims.Issuer, claims.ProjectPath)
 		if err != nil {
-			logger.Error("sign/ci: service-account fehlgeschlagen", "project", claims.ProjectPath, "error", err)
+			logger.Error("sign/ci: service account failed", "project", claims.ProjectPath, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		if !account.Active {
-			http.Error(w, "ci-zugang für dieses projekt ist deaktiviert", http.StatusForbidden)
+			http.Error(w, "ci access for this project is disabled", http.StatusForbidden)
 			return
 		}
 
@@ -99,13 +100,13 @@ func handleSignCI(certAuthority *ca.CA, verifier CITokenVerifier, ciStore CIStor
 		}
 		validAfter := time.Now().Add(-signBackdate)
 		validBefore := validAfter.Add(validity)
-		// GitLab setzt den Token-Ablauf auf das Job-Timeout — länger als der
-		// Job lebt kein CI-Zertifikat.
+		// GitLab sets the token expiry to the job timeout — no CI
+		// certificate lives longer than the job.
 		if !claims.ExpiresAt.IsZero() && validBefore.After(claims.ExpiresAt) {
 			validBefore = claims.ExpiresAt
 		}
 		if !validBefore.After(validAfter) {
-			http.Error(w, "job-token läuft zu bald ab für ein zertifikat", http.StatusBadRequest)
+			http.Error(w, "job token expires too soon for a certificate", http.StatusBadRequest)
 			return
 		}
 
@@ -139,7 +140,7 @@ func handleSignCI(certAuthority *ca.CA, verifier CITokenVerifier, ciStore CIStor
 			return
 		}
 		if err != nil {
-			logger.Error("sign/ci: ausstellung fehlgeschlagen", "key_id", certReq.KeyID, "error", err)
+			logger.Error("sign/ci: issuance failed", "key_id", certReq.KeyID, "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -156,8 +157,8 @@ func handleSignCI(certAuthority *ca.CA, verifier CITokenVerifier, ciStore CIStor
 	}
 }
 
-// maxCIGrantValidity liefert die höchste maximale Laufzeit über alle
-// passenden CI-Grants (additive Semantik wie ADR-018).
+// maxCIGrantValidity returns the highest maximum lifetime across all
+// matching CI grants (additive semantics as in ADR-018).
 func maxCIGrantValidity(grants []store.CIGrant) time.Duration {
 	var allowed time.Duration
 	for _, g := range grants {

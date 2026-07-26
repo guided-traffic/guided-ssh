@@ -9,8 +9,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 )
 
-// ciTokenClaims sind gültige GitLab-Job-Token-Claims (GitLab kodiert Zahlen
-// und Booleans traditionell als Strings).
+// ciTokenClaims are valid GitLab job token claims (GitLab traditionally
+// encodes numbers and booleans as strings).
 func ciTokenClaims() map[string]any {
 	return map[string]any{
 		"aud":            auth.DefaultCIAudience,
@@ -41,7 +41,7 @@ func newCIVerifier(t *testing.T, idp *fakeIDP) *auth.CIVerifier {
 	return verifier
 }
 
-func TestCIVerifierGueltigesToken(t *testing.T) {
+func TestCIVerifierValidToken(t *testing.T) {
 	idp := newFakeIDP(t)
 	verifier := newCIVerifier(t, idp)
 
@@ -50,7 +50,7 @@ func TestCIVerifierGueltigesToken(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 	if claims.ProjectPath != "infra/ansible" || claims.NamespacePath != "infra" {
-		t.Errorf("projekt: %q / %q", claims.ProjectPath, claims.NamespacePath)
+		t.Errorf("project: %q / %q", claims.ProjectPath, claims.NamespacePath)
 	}
 	if claims.Ref != "main" || claims.RefType != "branch" || !claims.RefProtected {
 		t.Errorf("ref: %+v", claims)
@@ -66,12 +66,12 @@ func TestCIVerifierGueltigesToken(t *testing.T) {
 	}
 }
 
-func TestCIVerifierNumerischeUndBoolClaims(t *testing.T) {
+func TestCIVerifierNumericAndBoolClaims(t *testing.T) {
 	idp := newFakeIDP(t)
 	verifier := newCIVerifier(t, idp)
 
-	// GitLab könnte die Typen ändern: Zahlen und echte Booleans müssen auch
-	// funktionieren (flexString).
+	// GitLab might change the types: numbers and real booleans must also
+	// work (flexString).
 	overrides := ciTokenClaims()
 	overrides["pipeline_id"] = 4711
 	overrides["job_id"] = 815
@@ -97,19 +97,19 @@ func TestCIVerifierUnprotectedRef(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 	if claims.RefProtected {
-		t.Error("ref_protected=false wurde true")
+		t.Error("ref_protected=false became true")
 	}
 }
 
-func TestCIVerifierFehlerfaelle(t *testing.T) {
+func TestCIVerifierErrorCases(t *testing.T) {
 	idp := newFakeIDP(t)
 	verifier := newCIVerifier(t, idp)
 	ctx := context.Background()
 
-	// Falsche Audience (Benutzer-Client statt guided-ssh).
+	// Wrong audience (user client instead of guided-ssh).
 	wrongAud := ciTokenClaims()
 	wrongAud["aud"] = fakeClientID
-	// Abgelaufenes Token.
+	// Expired token.
 	expired := ciTokenClaims()
 	expired["exp"] = time.Now().Add(-time.Hour).Unix()
 
@@ -117,23 +117,23 @@ func TestCIVerifierFehlerfaelle(t *testing.T) {
 		name  string
 		token string
 	}{
-		{"kaputtes token", "kein-jwt"},
-		{"falsche audience", idp.IDToken(wrongAud)},
-		{"abgelaufen", idp.IDToken(expired)},
-		{"project_path fehlt", idp.IDToken(withDeleted(ciTokenClaims(), "project_path"))},
-		{"ref fehlt", idp.IDToken(withDeleted(ciTokenClaims(), "ref"))},
-		{"pipeline_id fehlt", idp.IDToken(withDeleted(ciTokenClaims(), "pipeline_id"))},
-		{"job_id fehlt", idp.IDToken(withDeleted(ciTokenClaims(), "job_id"))},
+		{"broken token", "not-a-jwt"},
+		{"wrong audience", idp.IDToken(wrongAud)},
+		{"expired", idp.IDToken(expired)},
+		{"project_path missing", idp.IDToken(withDeleted(ciTokenClaims(), "project_path"))},
+		{"ref missing", idp.IDToken(withDeleted(ciTokenClaims(), "ref"))},
+		{"pipeline_id missing", idp.IDToken(withDeleted(ciTokenClaims(), "pipeline_id"))},
+		{"job_id missing", idp.IDToken(withDeleted(ciTokenClaims(), "job_id"))},
 	}
 	for _, c := range cases {
 		_, err := verifier.Verify(ctx, c.token)
 		if !errors.Is(err, auth.ErrInvalidToken) {
-			t.Errorf("%s: err = %v, erwartet ErrInvalidToken", c.name, err)
+			t.Errorf("%s: err = %v, expected ErrInvalidToken", c.name, err)
 		}
 	}
 }
 
-// withDeleted markiert einen Claim zur Entfernung (fakeIDP entfernt bei nil).
+// withDeleted marks a claim for removal (fakeIDP removes it when nil).
 func withDeleted(claims map[string]any, key string) map[string]any {
 	claims[key] = nil
 	return claims

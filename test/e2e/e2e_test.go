@@ -24,46 +24,46 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// TestE2E fährt die Szenarien des Plans (Phase 13) in fester Reihenfolge auf
-// einer gemeinsamen Umgebung: SSO-Login, Grant-Änderung, CI-Zertifikat +
-// Ansible, Host-Rotation, Chaos (API down), Offboarding, Audit sowie die
-// interne Test-Datenbank (Postgres-Sidecar, eigenes Helm-Release).
-// Session-/sudo-Audit-Events sind hier bewusst nicht abgedeckt (Opt-in-Feature,
-// PAM-Verhalten ist in den Phase-9-Tests verifiziert).
+// TestE2E runs the plan's scenarios (Phase 13) in a fixed order against a
+// shared environment: SSO login, grant change, CI certificate + Ansible,
+// host rotation, chaos (API down), offboarding, audit, and the internal
+// test database (Postgres sidecar, separate Helm release).
+// Session/sudo audit events are deliberately not covered here (opt-in
+// feature; PAM behavior is verified in the Phase 9 tests).
 func TestE2E(t *testing.T) {
 	if testing.Short() {
-		t.Skip("e2e übersprungen (-short)")
+		t.Skip("e2e skipped (-short)")
 	}
 	e := setupEnv(t)
 
 	step := func(name string, fn func(*testing.T)) {
 		t.Helper()
 		if !t.Run(name, fn) {
-			t.Fatalf("szenario %s fehlgeschlagen — folge-szenarien bauen darauf auf", name)
+			t.Fatalf("scenario %s failed — subsequent scenarios build on it", name)
 		}
 	}
 	step("01_SSO_Login_DeviceFlow", e.testSSOLogin)
-	step("02_Grant_Aenderung", e.testGrantChange)
-	step("03_CI_Zertifikat_Ansible", e.testCIProvisioning)
+	step("02_Grant_Change", e.testGrantChange)
+	step("03_CI_Certificate_Ansible", e.testCIProvisioning)
 	step("04_Host_Rotation", e.testHostRotation)
 	step("05_Chaos_API_Down", e.testChaos)
 	step("06_Offboarding", e.testOffboarding)
-	step("07_Audit_Vollstaendigkeit", e.testAudit)
-	step("08_Interne_Datenbank", e.testInternalDatabase)
+	step("07_Audit_Completeness", e.testAudit)
+	step("08_Internal_Database", e.testInternalDatabase)
 }
 
-// testInternalDatabase: internalDatabase.enabled — zweites Helm-Release im
-// selben Namespace, Postgres läuft als nativer Sidecar im Server-Pod, ohne
-// DB-Secret. Geprüft wird der komplette Pfad Sidecar → Migrationen → Server
-// healthy → CA gebootstrapt, die Ephemeralität (Pod-Neustart ⇒ leere
-// Datenbank ⇒ NEUE CA — deshalb nur für Tests) und der Render-Guard gegen
-// ein gleichzeitig gesetztes DB-Secret.
+// testInternalDatabase: internalDatabase.enabled — a second Helm release in
+// the same namespace, Postgres runs as a native sidecar in the server pod,
+// without a DB secret. This verifies the complete path sidecar → migrations
+// → server healthy → CA bootstrapped, the ephemerality (pod restart ⇒ empty
+// database ⇒ NEW CA — hence tests only) and the render guard against a
+// simultaneously set DB secret.
 func (e *env) testInternalDatabase(t *testing.T) {
 	chart := filepath.Join(e.repoRoot, "deploy/helm/guided-ssh")
-	// Release-Name enthält den Chart-Namen ⇒ fullname == Release-Name.
+	// Release name contains the chart name ⇒ fullname == release name.
 	const release = "guided-ssh-internal"
 
-	// CA-Secret — das einzige Pflicht-Secret bei interner Datenbank.
+	// CA secret — the only required secret with an internal database.
 	masterKey := make([]byte, 32)
 	if _, err := rand.Read(masterKey); err != nil {
 		t.Fatal(err)
@@ -81,14 +81,14 @@ func (e *env) testInternalDatabase(t *testing.T) {
 		"upgrade", "--install", release, chart,
 		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m")
 	if err != nil {
-		t.Fatalf("helm install (interne datenbank): %v\n%s", err, out)
+		t.Fatalf("helm install (internal database): %v\n%s", err, out)
 	}
 	t.Cleanup(func() {
 		_, _ = run("", "", "helm", "--kube-context", e.context(), "uninstall", release, "-n", e.ns)
 	})
 
 	pf := e.portForward("svc/"+release, 80)
-	e.poll(60*time.Second, "healthz (interne datenbank)", func() error {
+	e.poll(60*time.Second, "healthz (internal database)", func() error {
 		_, err := httpGet(pf.URL()+"/healthz", "")
 		return err
 	})
@@ -97,50 +97,53 @@ func (e *env) testInternalDatabase(t *testing.T) {
 		t.Fatalf("ca-bundle: %v", err)
 	}
 	if !strings.Contains(bundleBefore, "ssh-") {
-		t.Fatalf("ca-bundle ohne ssh-key: %q", bundleBefore)
+		t.Fatalf("ca-bundle without ssh-key: %q", bundleBefore)
 	}
 
-	// Ephemeralität: Pod löschen ⇒ emptyDir weg ⇒ frische Datenbank ⇒ der
-	// Server bootstrapt eine NEUE CA. Bleibt das Bundle identisch, ist die
-	// Datenbank nicht pod-lokal (Persistenz oder falsche Verbindung).
+	// Ephemerality: delete pod ⇒ emptyDir gone ⇒ fresh database ⇒ the server
+	// bootstraps a NEW CA. If the bundle stays identical, the database is
+	// not pod-local (persistence or wrong connection).
 	e.mustKubectl("delete", "pod", "-l", "app.kubernetes.io/instance="+release, "--wait=true")
 	e.mustKubectl("rollout", "status", "deploy/"+release, "--timeout=300s")
 	pf.restart()
-	e.poll(60*time.Second, "healthz nach pod-neustart", func() error {
+	e.poll(60*time.Second, "healthz after pod restart", func() error {
 		_, err := httpGet(pf.URL()+"/healthz", "")
 		return err
 	})
 	bundleAfter, err := httpGet(pf.URL()+"/v1/ca/bundle/user", "")
 	if err != nil {
-		t.Fatalf("ca-bundle nach neustart: %v", err)
+		t.Fatalf("ca-bundle after restart: %v", err)
 	}
 	if bundleAfter == bundleBefore {
-		t.Error("ca-bundle nach pod-neustart unverändert — interne datenbank ist nicht ephemeral")
+		t.Error("ca-bundle unchanged after pod restart — internal database is not ephemeral")
 	}
 
-	// Guard: internalDatabase + DB-Secret gleichzeitig ⇒ Render-Fehler mit
-	// klarer Meldung (Schutz vor versehentlicher Test-Datenbank).
+	// Guard: internalDatabase + DB secret at the same time ⇒ render error
+	// with a clear message (protection against an accidental test database).
 	out, err = run("", "", "helm", "template", release, chart,
-		"-f", values, "--set", "secrets.db.existingSecret=darf-nicht-sein")
+		"-f", values, "--set", "secrets.db.existingSecret=must-not-exist")
 	if err == nil {
-		t.Fatal("helm template mit internalDatabase + db-secret muss fehlschlagen")
+		t.Fatal("helm template with internalDatabase + db-secret must fail")
 	}
-	if !strings.Contains(out, "schließen sich gegenseitig aus") {
-		t.Errorf("guard-fehlermeldung unerwartet: %q", out)
+	// The guard message itself is produced by
+	// deploy/helm/guided-ssh/templates/_helpers.tpl.
+	if !strings.Contains(out, "mutually exclusive") {
+		t.Errorf("unexpected guard error message: %q", out)
 	}
 }
 
-// startWS startet ein Workstation-Kommando asynchron (für Device-Flow und
-// langlaufende SSH-Sessions).
+// startWS starts a workstation command asynchronously (for device flow and
+// long-running SSH sessions).
 func (e *env) startWS(command string) *exec.Cmd {
 	return exec.Command("kubectl", "--context", e.context(), "-n", e.ns,
 		"exec", "pod/workstation", "--", "sh", "-c",
 		"export SSH_AUTH_SOCK=/tmp/agent.sock GSSH_CONFIG=/etc/gssh/config.yaml HOME=/root; "+command)
 }
 
-// testSSOLogin: kompletter Mensch-Durchstich — gssh login --device im
-// Workstation-Pod, Suite "klickt" den Dex-Device-Flow (LDAP-Login alice),
-// danach transparentes ssh mit striktem Host-Zertifikats-Check.
+// testSSOLogin: the complete human end-to-end path — gssh login --device in
+// the workstation pod, the suite "clicks through" the Dex device flow
+// (LDAP login as alice), then transparent ssh with strict host certificate
+// checking.
 func (e *env) testSSOLogin(t *testing.T) {
 	login := e.startWS("gssh login --device")
 	stderr, err := login.StderrPipe()
@@ -150,7 +153,7 @@ func (e *env) testSSOLogin(t *testing.T) {
 	var stdout bytes.Buffer
 	login.Stdout = &stdout
 	if err := login.Start(); err != nil {
-		t.Fatalf("gssh login starten: %v", err)
+		t.Fatalf("starting gssh login: %v", err)
 	}
 
 	type prompt struct{ uri, code string }
@@ -161,10 +164,10 @@ func (e *env) testSSOLogin(t *testing.T) {
 		scanner := bufio.NewScanner(io.TeeReader(stderr, &stderrLog))
 		for scanner.Scan() {
 			line := scanner.Text()
-			if rest, ok := strings.CutPrefix(line, "im browser öffnen: "); ok {
+			if rest, ok := strings.CutPrefix(line, "open in browser: "); ok {
 				p.uri = strings.TrimSpace(rest)
 			}
-			if rest, ok := strings.CutPrefix(line, "code eingeben: "); ok {
+			if rest, ok := strings.CutPrefix(line, "enter code: "); ok {
 				p.code = strings.TrimSpace(rest)
 			}
 			if p.uri != "" && p.code != "" {
@@ -180,11 +183,11 @@ func (e *env) testSSOLogin(t *testing.T) {
 	case p = <-promptCh:
 	case <-time.After(60 * time.Second):
 		_ = login.Process.Kill()
-		t.Fatalf("device-flow-prompt nicht erschienen; stderr:\n%s", stderrLog.String())
+		t.Fatalf("device flow prompt did not appear; stderr:\n%s", stderrLog.String())
 	}
 	t.Logf("device-flow: %s (code %s)", p.uri, p.code)
 	if err := approveDeviceFlow(e.dexPF.URL(), p.uri, p.code, "alice", alicePassword); err != nil {
-		t.Fatalf("device-flow bestätigen: %v", err)
+		t.Fatalf("approving device flow: %v", err)
 	}
 
 	done := make(chan error, 1)
@@ -196,34 +199,34 @@ func (e *env) testSSOLogin(t *testing.T) {
 		}
 	case <-time.After(90 * time.Second):
 		_ = login.Process.Kill()
-		t.Fatalf("gssh login hängt; stderr:\n%s", stderrLog.String())
+		t.Fatalf("gssh login hangs; stderr:\n%s", stderrLog.String())
 	}
-	if !strings.Contains(stdout.String(), "angemeldet:") {
-		t.Fatalf("login-ausgabe unerwartet: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "signed in:") {
+		t.Fatalf("unexpected login output: %s", stdout.String())
 	}
 
-	// Zertifikat liegt nur im Agenten; status bestätigt Gültigkeit.
+	// Certificate only lives in the agent; status confirms validity.
 	e.mustWS("gssh status")
 
-	// SSH als deploy auf role=web (Grant dev×web), Host-Cert CA-verifiziert.
+	// SSH as deploy onto role=web (grant dev×web), host cert CA-verified.
 	if out := strings.TrimSpace(e.mustWS(sshCmd("deploy", e.webFQDN, "whoami"))); out != "deploy" {
-		t.Fatalf("whoami = %q, erwartet deploy", out)
+		t.Fatalf("whoami = %q, expected deploy", out)
 	}
-	// root: kein Grant ⇒ fail-closed.
+	// root: no grant ⇒ fail-closed.
 	if _, err := e.ws(sshCmd("root", e.webFQDN, "true")); err == nil {
-		t.Fatal("login als root muss scheitern (kein grant)")
+		t.Fatal("login as root must fail (no grant)")
 	}
-	// db-Host: noch kein Grant für role=db ⇒ fail-closed.
+	// db host: no grant yet for role=db ⇒ fail-closed.
 	if _, err := e.ws(sshCmd("deploy", e.dbFQDN, "true")); err == nil {
-		t.Fatal("login auf db-host muss scheitern (kein grant für role=db)")
+		t.Fatal("login to db host must fail (no grant for role=db)")
 	}
 }
 
-// testGrantChange: Grant deklarativ ergänzen (role=db) → Zugriff kommt;
-// zurücknehmen → Zugriff geht (jeweils innerhalb der Cache-TTL des Agenten).
+// testGrantChange: add a grant declaratively (role=db) → access appears;
+// revoke it → access disappears (each within the agent's cache TTL).
 func (e *env) testGrantChange(t *testing.T) {
 	e.adminApply(grantsWithDB)
-	e.poll(120*time.Second, "neuer grant wirkt auf db-host", func() error {
+	e.poll(120*time.Second, "new grant takes effect on db host", func() error {
 		out, err := e.ws(sshCmd("deploy", e.dbFQDN, "whoami"))
 		if err != nil {
 			return err
@@ -234,17 +237,17 @@ func (e *env) testGrantChange(t *testing.T) {
 		return nil
 	})
 	e.adminApply(grantsBase)
-	e.waitError(120*time.Second, "grant-entzug wirkt auf db-host", func() error {
+	e.waitError(120*time.Second, "grant revocation takes effect on db host", func() error {
 		_, err := e.ws(sshCmd("deploy", e.dbFQDN, "true"))
 		return err
 	})
 }
 
-// testCIProvisioning: simuliertes GitLab-Job-Token → gssh ci-login (echtes
-// Binary, lokaler ssh-agent) → Ansible provisioniert den Testhost über den
-// Agenten; Negativfälle unprotected ref. Go-SSH verifiziert das Ergebnis.
+// testCIProvisioning: simulated GitLab job token → gssh ci-login (real
+// binary, local ssh-agent) → Ansible provisions the test host through the
+// agent; negative case unprotected ref. Go-SSH verifies the result.
 func (e *env) testCIProvisioning(t *testing.T) {
-	// In-Process ssh-agent als Unix-Socket für gssh ci-login und Ansible.
+	// In-process ssh-agent as a Unix socket for gssh ci-login and Ansible.
 	sock := filepath.Join(e.tmp, "ci-agent.sock")
 	keyring := agent.NewKeyring()
 	listener, err := net.Listen("unix", sock)
@@ -273,7 +276,7 @@ func (e *env) testCIProvisioning(t *testing.T) {
 		t.Fatalf("gssh ci-login: %v\n%s", err, out)
 	}
 
-	// Zertifikat im Agenten: KeyID ordnet Pipeline und Job zu.
+	// Certificate in the agent: KeyID maps to pipeline and job.
 	keys, err := keyring.List()
 	if err != nil {
 		t.Fatal(err)
@@ -289,19 +292,19 @@ func (e *env) testCIProvisioning(t *testing.T) {
 		}
 	}
 	if !foundCert {
-		t.Fatalf("kein ci-zertifikat mit erwarteter keyid im agenten (%d schlüssel)", len(keys))
+		t.Fatalf("no ci certificate with expected keyid in the agent (%d keys)", len(keys))
 	}
 
-	// Unprotected Ref ⇒ 403 (Grant verlangt protected_only).
+	// Unprotected ref ⇒ 403 (grant requires protected_only).
 	badToken, err := e.gitlab.jobToken(map[string]any{"ref_protected": "false"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status := e.signCIStatus(badToken); status != http.StatusForbidden {
-		t.Errorf("unprotected ref: status %d, erwartet 403", status)
+		t.Errorf("unprotected ref: status %d, expected 403", status)
 	}
 
-	// SSH-Zugang zum Testhost über Port-Forward.
+	// SSH access to the test host over port-forward.
 	pfWeb := e.portForward("svc/testhost-web", 22)
 	addr := fmt.Sprintf("127.0.0.1:%d", pfWeb.local)
 	signers, err := keyring.Signers()
@@ -323,9 +326,9 @@ func (e *env) testCIProvisioning(t *testing.T) {
 - hosts: all
   gather_facts: false
   tasks:
-    - name: erreichbarkeit
+    - name: reachability
       ansible.builtin.ping:
-    - name: provisionierungs-marker schreiben
+    - name: write provisioning marker
       ansible.builtin.copy:
         content: "provisioned-by-ansible\n"
         dest: /tmp/e2e-provisioned
@@ -340,25 +343,25 @@ func (e *env) testCIProvisioning(t *testing.T) {
 			t.Fatalf("ansible-playbook: %v\n%s", err, out)
 		}
 		if !strings.Contains(out, "failed=0") {
-			t.Fatalf("ansible-playbook mit fehlern:\n%s", out)
+			t.Fatalf("ansible-playbook reported failures:\n%s", out)
 		}
 		if got, err := goSSH(addr, "deploy", signers, hostCB, "cat /tmp/e2e-provisioned"); err != nil ||
 			!strings.Contains(got, "provisioned-by-ansible") {
-			t.Fatalf("provisionierungs-marker fehlt: %v %q", err, got)
+			t.Fatalf("provisioning marker missing: %v %q", err, got)
 		}
 	} else {
-		t.Log("ansible-playbook nicht installiert — go-ssh deckt den zertifikatspfad ab")
+		t.Log("ansible-playbook not installed — go-ssh covers the certificate path")
 	}
 
-	// Der Zertifikatspfad selbst (immer, auch ohne Ansible).
+	// The certificate path itself (always, even without Ansible).
 	if got, err := goSSH(addr, "deploy", signers, hostCB, "whoami"); err != nil || strings.TrimSpace(got) != "deploy" {
 		t.Fatalf("ci-ssh whoami: %v %q", err, got)
 	}
 }
 
-// testHostRotation: kurze Host-Zertifikatslaufzeit (3m via
-// GSSH_HOST_CERT_VALIDITY) ⇒ der Daemon rotiert bei 2/3 Laufzeit; sshd wird
-// per reload_command neu geladen und Logins funktionieren weiter.
+// testHostRotation: short host certificate lifetime (3m via
+// GSSH_HOST_CERT_VALIDITY) ⇒ the daemon rotates at 2/3 of the lifetime;
+// sshd is reloaded via reload_command and logins keep working.
 func (e *env) testHostRotation(t *testing.T) {
 	serialOf := func() (uint64, *ssh.Certificate, error) {
 		out, err := e.execPod("deploy/testhost-web", "cat /etc/ssh/ssh_host_ed25519_key-cert.pub")
@@ -367,11 +370,11 @@ func (e *env) testHostRotation(t *testing.T) {
 		}
 		parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(out))
 		if err != nil {
-			return 0, nil, fmt.Errorf("host-zertifikat parsen: %w", err)
+			return 0, nil, fmt.Errorf("parsing host certificate: %w", err)
 		}
 		cert, ok := parsed.(*ssh.Certificate)
 		if !ok {
-			return 0, nil, fmt.Errorf("kein zertifikat: %T", parsed)
+			return 0, nil, fmt.Errorf("not a certificate: %T", parsed)
 		}
 		return cert.Serial, cert, nil
 	}
@@ -381,31 +384,31 @@ func (e *env) testHostRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rotated *ssh.Certificate
-	e.poll(4*time.Minute, "host-zertifikat rotiert", func() error {
+	e.poll(4*time.Minute, "host certificate rotated", func() error {
 		serial, cert, err := serialOf()
 		if err != nil {
 			return err
 		}
 		if serial == before {
-			return fmt.Errorf("serial unverändert (%d)", serial)
+			return fmt.Errorf("serial unchanged (%d)", serial)
 		}
 		rotated = cert
 		return nil
 	})
 	if lifetime := time.Duration(rotated.ValidBefore-rotated.ValidAfter) * time.Second; lifetime != 3*time.Minute {
-		t.Errorf("laufzeit des rotierten zertifikats = %s, erwartet 3m", lifetime)
+		t.Errorf("lifetime of rotated certificate = %s, expected 3m", lifetime)
 	}
-	// sshd hat das neue Zertifikat geladen (reload_command) — Login läuft weiter.
+	// sshd has loaded the new certificate (reload_command) — login keeps working.
 	if out := strings.TrimSpace(e.mustWS(sshCmd("deploy", e.webFQDN, "whoami"))); out != "deploy" {
-		t.Fatalf("whoami nach rotation = %q", out)
+		t.Fatalf("whoami after rotation = %q", out)
 	}
 }
 
-// testChaos: API weg ⇒ bestehende SSH-Session lebt weiter, der Agent-Cache
-// trägt neue Logins bis zur TTL (30s), danach fail-closed; nach Wiederanlauf
-// funktioniert alles wieder.
+// testChaos: API gone ⇒ existing SSH session keeps living, the agent cache
+// carries new logins until the TTL (30s), then fail-closed; after restart
+// everything works again.
 func (e *env) testChaos(t *testing.T) {
-	// Langlaufende Session VOR dem Ausfall öffnen.
+	// Open a long-running session BEFORE the outage.
 	session := e.startWS(sshCmd("deploy", e.webFQDN, "sleep 45; echo SESSION_ALIVE"))
 	var sessionOut bytes.Buffer
 	session.Stdout = &sessionOut
@@ -416,50 +419,50 @@ func (e *env) testChaos(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	e.mustKubectl("scale", "deployment/guided-ssh", "--replicas=0")
-	e.poll(60*time.Second, "api-pods beendet", func() error {
+	e.poll(60*time.Second, "api pods terminated", func() error {
 		out, err := e.kubectl("get", "pods", "-l", "app.kubernetes.io/instance=guided-ssh", "-o", "name")
 		if err != nil {
 			return err
 		}
 		if strings.TrimSpace(out) != "" {
-			return fmt.Errorf("pods noch da: %s", out)
+			return fmt.Errorf("pods still present: %s", out)
 		}
 		return nil
 	})
 	downSince := time.Now()
 
-	// Cache trägt Logins bis zur TTL.
+	// Cache carries logins until the TTL.
 	if out, err := e.ws(sshCmd("deploy", e.webFQDN, "whoami")); err != nil || !strings.Contains(out, "deploy") {
-		t.Fatalf("login aus agent-cache bei api-ausfall: %v %q", err, out)
+		t.Fatalf("login from agent cache during api outage: %v %q", err, out)
 	}
 
-	// TTL (30s) ablaufen lassen ⇒ fail-closed.
+	// Let the TTL (30s) expire ⇒ fail-closed.
 	if wait := 40*time.Second - time.Since(downSince); wait > 0 {
 		time.Sleep(wait)
 	}
 	if _, err := e.ws(sshCmd("deploy", e.webFQDN, "true")); err == nil {
-		t.Fatal("login muss nach ablauf der cache-ttl scheitern (fail-closed)")
+		t.Fatal("login must fail after the cache TTL expires (fail-closed)")
 	}
 
-	// Die bestehende Session hat den kompletten Ausfall überlebt.
+	// The existing session survived the entire outage.
 	done := make(chan error, 1)
 	go func() { done <- session.Wait() }()
 	select {
 	case err := <-done:
 		if err != nil || !strings.Contains(sessionOut.String(), "SESSION_ALIVE") {
-			t.Fatalf("bestehende session hat den api-ausfall nicht überlebt: %v\n%s", err, sessionOut.String())
+			t.Fatalf("existing session did not survive the api outage: %v\n%s", err, sessionOut.String())
 		}
 	case <-time.After(60 * time.Second):
 		_ = session.Process.Kill()
-		t.Fatalf("session hängt:\n%s", sessionOut.String())
+		t.Fatalf("session hangs:\n%s", sessionOut.String())
 	}
 
-	// Wiederanlauf: API hoch, Port-Forward neu (alter Pod ist weg), Login ok.
+	// Restart: API back up, port-forward renewed (old pod is gone), login ok.
 	e.mustKubectl("scale", "deployment/guided-ssh", "--replicas=1")
 	e.mustKubectl("rollout", "status", "deploy/guided-ssh", "--timeout=180s")
 	e.apiPF.restart()
 	e.waitHealthy()
-	e.poll(120*time.Second, "login nach api-wiederanlauf", func() error {
+	e.poll(120*time.Second, "login after api restart", func() error {
 		out, err := e.ws(sshCmd("deploy", e.webFQDN, "whoami"))
 		if err != nil {
 			return err
@@ -471,9 +474,9 @@ func (e *env) testChaos(t *testing.T) {
 	})
 }
 
-// testOffboarding: alice verliert die IdP-Gruppe dev ⇒ keine neue Ausstellung
-// (403) und die Host-ACL verweigert das noch gültige Zertifikat innerhalb der
-// Cache-TTL — der Offboarding-Pfad der Erfolgskriterien.
+// testOffboarding: alice loses the IdP group dev ⇒ no new issuance (403) and
+// the host ACL denies the still-valid certificate within the cache TTL —
+// the offboarding path of the success criteria.
 func (e *env) testOffboarding(t *testing.T) {
 	e.applyConfigMap("glauth-config", map[string]string{
 		"config.cfg": render(glauthConfig, map[string]string{"ALICE_OTHERGROUPS": "5501"}),
@@ -482,7 +485,7 @@ func (e *env) testOffboarding(t *testing.T) {
 	e.mustKubectl("rollout", "status", "deploy/glauth", "--timeout=120s")
 
 	var freshToken string
-	e.poll(120*time.Second, "frisches token ohne dev-gruppe", func() error {
+	e.poll(120*time.Second, "fresh token without dev group", func() error {
 		token, err := passwordGrant(e.dexPF.URL(), "alice", alicePassword)
 		if err != nil {
 			return err
@@ -493,28 +496,28 @@ func (e *env) testOffboarding(t *testing.T) {
 		}
 		for _, g := range groups {
 			if g == "dev" {
-				return fmt.Errorf("token enthält noch dev: %v", groups)
+				return fmt.Errorf("token still contains dev: %v", groups)
 			}
 		}
 		freshToken = token
 		return nil
 	})
 
-	// Keine neue Ausstellung; der Versuch aktualisiert zugleich die
-	// DB-Gruppen aus den Token-Claims (Offboarding ohne Admin-API-Sync).
+	// No new issuance; the attempt also updates the DB groups from the
+	// token claims (offboarding without admin API sync).
 	if status, body := e.signUserStatus(freshToken); status != http.StatusForbidden {
-		t.Fatalf("sign nach gruppen-entzug: status %d (%s), erwartet 403", status, body)
+		t.Fatalf("sign after group revocation: status %d (%s), expected 403", status, body)
 	}
 
-	// Noch gültiges Zertifikat im Agenten ⇒ Host-ACL verweigert nach Cache-TTL.
-	e.waitError(120*time.Second, "host-acl entzieht alice", func() error {
+	// Still-valid certificate in the agent ⇒ host ACL denies after cache TTL.
+	e.waitError(120*time.Second, "host acl revokes alice", func() error {
 		_, err := e.ws(sshCmd("deploy", e.webFQDN, "true"))
 		return err
 	})
 }
 
-// testAudit: Ausstellungen (Mensch + CI mit Pipeline-Zuordnung), Enrollments
-// und Grant-Änderungen sind über die Admin-API abfragbar und exportierbar.
+// testAudit: issuances (human + CI with pipeline mapping), enrollments, and
+// grant changes are queryable and exportable via the admin API.
 func (e *env) testAudit(t *testing.T) {
 	token := e.adminToken()
 
@@ -523,13 +526,13 @@ func (e *env) testAudit(t *testing.T) {
 		t.Fatalf("audit-export: %v", err)
 	}
 	for _, want := range []string{
-		"ca.cert_issued",                // Ausstellungen (Mensch + CI)
-		"ci:platform/deploy:4711:815",   // CI-Ausstellung der Pipeline zugeordnet
-		"host.enrolled",                 // Enrollment beider Testhosts
-		"grant.created", "grant.deleted", // Grant-Änderung aus Szenario 02
+		"ca.cert_issued",                 // issuances (human + CI)
+		"ci:platform/deploy:4711:815",    // CI issuance mapped to the pipeline
+		"host.enrolled",                  // enrollment of both test hosts
+		"grant.created", "grant.deleted", // grant change from scenario 02
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("audit-export ohne %q", want)
+			t.Errorf("audit-export missing %q", want)
 		}
 	}
 
@@ -538,20 +541,20 @@ func (e *env) testAudit(t *testing.T) {
 		t.Fatalf("audit-export csv: %v", err)
 	}
 	if !strings.HasPrefix(csv, "id,occurred_at,event_type,actor,payload") {
-		t.Errorf("csv-header unerwartet: %q", strings.SplitN(csv, "\n", 2)[0])
+		t.Errorf("unexpected csv header: %q", strings.SplitN(csv, "\n", 2)[0])
 	}
 
-	// Ausstellungen inkl. Principals sind über die Ressourcen-Ansicht abfragbar.
+	// Issuances including principals are queryable via the resource view.
 	certs, err := httpGet(e.apiPF.URL()+"/v1/admin/certificates", token)
 	if err != nil {
 		t.Fatalf("certificates: %v", err)
 	}
 	if !strings.Contains(certs, "alice") {
-		t.Errorf("zertifikatsliste ohne alice-principal")
+		t.Errorf("certificate list missing alice principal")
 	}
 }
 
-// signUserStatus ruft POST /v1/sign/user mit frischem Schlüsselpaar auf.
+// signUserStatus calls POST /v1/sign/user with a fresh key pair.
 func (e *env) signUserStatus(idToken string) (int, string) {
 	e.t.Helper()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -573,14 +576,14 @@ func (e *env) signUserStatus(idToken string) (int, string) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		e.t.Fatalf("sign/user erreichen: %v", err)
+		e.t.Fatalf("reaching sign/user: %v", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(body)
 }
 
-// signCIStatus ruft POST /v1/sign/ci mit frischem Schlüsselpaar auf.
+// signCIStatus calls POST /v1/sign/ci with a fresh key pair.
 func (e *env) signCIStatus(jobToken string) int {
 	e.t.Helper()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -602,15 +605,15 @@ func (e *env) signCIStatus(jobToken string) int {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		e.t.Fatalf("sign/ci erreichen: %v", err)
+		e.t.Fatalf("reaching sign/ci: %v", err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
 }
 
-// hostKeyCallback verifiziert Host-Zertifikate gegen das CA-Bundle des Servers
-// (gleiches Muster wie der Phase-7-Integrationstest).
+// hostKeyCallback verifies host certificates against the server's CA bundle
+// (same pattern as the Phase 7 integration test).
 func (e *env) hostKeyCallback(t *testing.T, hostname string) ssh.HostKeyCallback {
 	t.Helper()
 	bundle, err := httpGet(e.apiPF.URL()+"/v1/ca/bundle/host", "")
@@ -626,16 +629,16 @@ func (e *env) hostKeyCallback(t *testing.T, hostname string) ssh.HostKeyCallback
 	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		cert, ok := key.(*ssh.Certificate)
 		if !ok {
-			return fmt.Errorf("kein host-zertifikat: %T", key)
+			return fmt.Errorf("not a host certificate: %T", key)
 		}
 		if !checker.IsHostAuthority(cert.SignatureKey, "") {
-			return fmt.Errorf("host-zertifikat von unbekannter ca")
+			return fmt.Errorf("host certificate from unknown ca")
 		}
 		return checker.CheckCert(hostname, cert)
 	}
 }
 
-// goSSH verbindet sich mit Agent-Signern und führt ein Kommando aus.
+// goSSH connects using agent signers and runs a command.
 func goSSH(addr, user string, signers []ssh.Signer, hostCB ssh.HostKeyCallback, command string) (string, error) {
 	cfg := &ssh.ClientConfig{
 		User:            user,

@@ -1,58 +1,58 @@
-# GitLab-CI-Integration (Phase 7)
+# GitLab CI Integration (Phase 7)
 
-GitLab-Runner erhalten für die Dauer eines Jobs ein kurzlebiges SSH-Zertifikat —
-ohne statische Keys in CI-Variablen. GitLab stellt pro Job ein OIDC `id_token`
-aus; guided-ssh validiert es gegen den GitLab-JWKS-Endpoint und stellt ein
-Zertifikat mit pipeline-gebundener KeyID und projektgebundenen Principals aus
+GitLab runners receive a short-lived SSH certificate for the duration of a job —
+without static keys in CI variables. GitLab issues an OIDC `id_token` per job;
+guided-ssh validates it against the GitLab JWKS endpoint and issues a
+certificate with a pipeline-bound key ID and project-bound principals
 (ADR-019).
 
-## Ablauf
+## Flow
 
 ```
-GitLab-Job (id_tokens) ──► gssh ci-login ──► POST /v1/sign/ci ──► CA
+GitLab job (id_tokens) ──► gssh ci-login ──► POST /v1/sign/ci ──► CA
       │                          │                  │
-      │  GSSH_CI_TOKEN (JWT)     │  Token + PubKey  │  validiert Issuer/JWKS/
-      │                          │                  │  Audience, matcht CI-Grants
-      └── ssh-agent ◄── Zertifikat (≤ 1 h, ci:<project>:<pipeline>:<job>) ──┘
+      │  GSSH_CI_TOKEN (JWT)     │  token + pubkey  │  validates issuer/JWKS/
+      │                          │                  │  audience, matches CI grants
+      └── ssh-agent ◄── certificate (≤ 1 h, ci:<project>:<pipeline>:<job>) ──┘
 ```
 
-- **KeyID** `ci:<project_path>:<pipeline_id>:<job_id>` — jede Ausstellung ist
-  im Audit eindeutig einer Pipeline und einem Job zuzuordnen.
-- **Principals** `ci:<project_path>` plus Namespace-Vorfahren (`ci:infra`) —
-  welche lokalen Benutzer sie erreichen, entscheidet der Host über die
-  CI-Grants (AuthorizedPrincipalsCommand), analog ADR-018.
-- **Laufzeit** dreifach gedeckelt: CI-Grant-Maximum, Policy (1 h hart) und
-  Token-Ablauf (GitLab setzt `exp` auf das Job-Timeout).
-- Pro Projekt wird ein Service-Account (kind `gitlab-ci`) geführt;
-  `active = false` deaktiviert die Ausstellung für das Projekt (Not-Aus).
+- **Key ID** `ci:<project_path>:<pipeline_id>:<job_id>` — every issuance is
+  uniquely attributable to a pipeline and job in the audit trail.
+- **Principals** `ci:<project_path>` plus namespace ancestors (`ci:infra`) —
+  which local users they can reach is decided by the host via the
+  CI grants (AuthorizedPrincipalsCommand), analogous to ADR-018.
+- **Validity** capped threefold: the CI grant maximum, policy (1 h hard cap),
+  and token expiry (GitLab sets `exp` to the job timeout).
+- A service account (kind `gitlab-ci`) is maintained per project;
+  `active = false` disables issuance for the project (kill switch).
 
-## Server-Konfiguration
+## Server configuration
 
 ```sh
-GSSH_CI_ISSUER=https://gitlab.example.com   # GitLab-Basis-URL (OIDC-Issuer)
-GSSH_CI_AUDIENCE=guided-ssh                 # optional, Default guided-ssh
+GSSH_CI_ISSUER=https://gitlab.example.com   # GitLab base URL (OIDC issuer)
+GSSH_CI_AUDIENCE=guided-ssh                 # optional, default guided-ssh
 ```
 
-Ohne `GSSH_CI_ISSUER` bleibt `POST /v1/sign/ci` deaktiviert (503). GitLab und
-der Benutzer-IdP sind strikt getrennte Issuer mit getrennten Audiences —
-CI-Tokens werden nie am Benutzer-Endpoint akzeptiert.
+Without `GSSH_CI_ISSUER`, `POST /v1/sign/ci` stays disabled (503). GitLab and
+the user IdP are strictly separate issuers with separate audiences —
+CI tokens are never accepted at the user endpoint.
 
-## CI-Grants
+## CI grants
 
-Ein CI-Grant bindet Projekt/Gruppe × Ref-Bedingung × Host-Tags an lokale
-Ziel-Benutzer:
+A CI grant binds project/group × ref condition × host tags to local
+target users:
 
-| Feld | Bedeutung |
+| Field | Meaning |
 |---|---|
-| `project` | Projekt-Pfad (`infra/ansible`) oder Namespace (`infra` deckt alle Projekte darunter ab) |
-| `ref` | Glob über den Ref-Namen (`main`, `release/*`); leer = alle Refs |
-| `protected_only` | nur geschützte Refs (`ref_protected`), Default `true` |
-| `environment` | Glob über den `environment`-Claim; leer = keine Bedingung |
-| `tags` | Tag-Selektor über Host-Tags (⊆-Semantik, leer = alle Hosts) |
-| `principals` | lokale Ziel-Benutzer auf den Hosts (z. B. `deploy`) |
-| `max_validity` | Laufzeit-Maximum (zusätzlich hart durch Policy 1 h gedeckelt) |
+| `project` | project path (`infra/ansible`) or namespace (`infra` covers all projects beneath it) |
+| `ref` | glob over the ref name (`main`, `release/*`); empty = all refs |
+| `protected_only` | protected refs only (`ref_protected`), default `true` |
+| `environment` | glob over the `environment` claim; empty = no condition |
+| `tags` | tag selector over host tags (⊆ semantics, empty = all hosts) |
+| `principals` | local target users on the hosts (e.g. `deploy`) |
+| `max_validity` | maximum validity (additionally hard-capped by the 1 h policy) |
 
-Verwaltung wie Gruppen-Grants — CLI:
+Managed like group grants — CLI:
 
 ```sh
 gssh-admin ci-grant create --project infra/ansible --ref main \
@@ -60,7 +60,7 @@ gssh-admin ci-grant create --project infra/ansible --ref main \
 gssh-admin ci-grant list
 ```
 
-oder deklarativ in derselben `grants.yaml` (GitOps, `gssh-admin apply -f`):
+or declaratively in the same `grants.yaml` (GitOps, `gssh-admin apply -f`):
 
 ```yaml
 ci_grants:
@@ -73,13 +73,13 @@ ci_grants:
     max_validity: 1h
 ```
 
-Fehlt der `ci_grants:`-Abschnitt, bleiben CI-Grants beim Apply unangetastet;
-ein leerer Abschnitt löscht alle. Semantik wie ADR-018: nur additiv, kein
-deny; Entzug über Grant-Entfernung.
+If the `ci_grants:` section is missing, CI grants are left untouched on
+apply; an empty section deletes all of them. Semantics as in ADR-018: purely
+additive, no deny; revocation via grant removal.
 
-## Referenz-Pipeline
+## Reference pipeline
 
-Vollständiges Beispiel: [`deploy/examples/gitlab-ci/.gitlab-ci.yml`](../deploy/examples/gitlab-ci/.gitlab-ci.yml)
+Full example: [`deploy/examples/gitlab-ci/.gitlab-ci.yml`](../deploy/examples/gitlab-ci/.gitlab-ci.yml)
 
 ```yaml
 provision:
@@ -97,30 +97,31 @@ provision:
     - ansible-playbook -i inventory.yml site.yml
 ```
 
-Kernpunkte:
+Key points:
 
-- `id_tokens` mit `aud: guided-ssh` erzeugt das Job-Token in `GSSH_CI_TOKEN`
-  (das entfernte `CI_JOB_JWT` wird nicht unterstützt).
-- `gssh ci-login` lädt Schlüssel + Zertifikat ausschließlich in den ssh-agent
-  des Jobs — Ansible nutzt den Agenten automatisch, keine Key-Dateien.
-- Der Job braucht einen laufenden ssh-agent (`eval $(ssh-agent -s)`).
-- Selbstsignierte Server: `--pin-sha256`/`GSSH_PIN_SHA256` (SPKI-Pinning wie
-  in der Benutzer-CLI).
+- `id_tokens` with `aud: guided-ssh` produces the job token in `GSSH_CI_TOKEN`
+  (the deprecated `CI_JOB_JWT` is not supported).
+- `gssh ci-login` loads the key + certificate exclusively into the job's
+  ssh-agent — Ansible uses the agent automatically, no key files.
+- The job needs a running ssh-agent (`eval $(ssh-agent -s)`).
+- Self-signed servers: `--pin-sha256`/`GSSH_PIN_SHA256` (SPKI pinning as
+  in the user CLI).
 
 ## Ansible
 
-Beispiel-Playbook und Inventory-Muster:
-[`deploy/examples/ansible/`](../deploy/examples/ansible/) — zertifikatsbasiert,
-der Zielbenutzer (`ansible_user`) muss Principal eines passenden CI-Grants
-sein. Die Clients müssen der Host-CA vertrauen (`@cert-authority`-Zeile aus
-`GET /v1/ca/bundle/host`), sonst Host-Key-Prompt/`known_hosts`-Pflege.
+Example playbook and inventory pattern:
+[`deploy/examples/ansible/`](../deploy/examples/ansible/) — certificate-based,
+the target user (`ansible_user`) must be a principal of a matching CI grant.
+Clients must trust the host CA (`@cert-authority` line from
+`GET /v1/ca/bundle/host`), otherwise a host-key prompt/`known_hosts`
+maintenance is required.
 
-## Sicherheitsnotizen
+## Security notes
 
-- Audience-Vorgabe `aud: guided-ssh` verhindert, dass fremde für andere
-  Dienste ausgestellte GitLab-Tokens akzeptiert werden.
-- `protected_only: true` (Default) verhindert, dass beliebige Feature-Branches
-  (jeder mit Push-Rechten) Produktionszugriff erhalten.
-- Bindung Pipeline↔Host ist so granular wie der Grant: ein Zertifikat von
-  Projekt A funktioniert nicht auf Hosts, die nur für Projekt B freigegeben
-  sind (Projekt-Principals, ADR-019).
+- The audience requirement `aud: guided-ssh` prevents GitLab tokens issued
+  for other services from being accepted.
+- `protected_only: true` (default) prevents arbitrary feature branches
+  (anyone with push rights) from gaining production access.
+- The pipeline↔host binding is as granular as the grant: a certificate from
+  project A does not work on hosts that are only authorized for project B
+  (project principals, ADR-019).

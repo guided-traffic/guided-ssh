@@ -3,15 +3,15 @@ kind: Kustomization
 namespace: guided-ssh
 resources:
   - ../../base/guided-ssh
-  # SOPS-verschlüsselt committen (siehe ../../../.sops.yaml und README) —
-  # Flux entschlüsselt beim Apply (decryption.provider: sops).
+  # Commit SOPS-encrypted (see ../../../.sops.yaml and README) —
+  # Flux decrypts on apply (decryption.provider: sops).
   - secrets.yaml
 patches:
   - path: helmrelease-patch.yaml
   - path: sync-config-patch.yaml
-# grants.yaml (Zielzustand der Zugriffsregeln) landet als ConfigMap beim
-# Sync-CronJob. Kein Hash-Suffix: jeder Job-Pod liest beim Start ohnehin den
-# aktuellen Stand.
+# grants.yaml (target state of the access rules) ends up as a ConfigMap for
+# the sync CronJob. No hash suffix: every job pod reads the current state
+# on start anyway.
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:

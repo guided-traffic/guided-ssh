@@ -10,17 +10,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Audit-Events für Host-Sessions (Phase 9): Session-Start/-Ende und sudo werden
-// vom Host-Agent gemeldet und transaktional mit dem Session-Zustand geschrieben.
+// Audit events for host sessions (phase 9): session start/end and sudo are
+// reported by the host agent and written transactionally with the session state.
 const (
 	EventSessionOpened = "session.opened"
 	EventSessionClosed = "session.closed"
 	EventSudo          = "session.sudo"
 )
 
-// SessionEvent ist ein vom Host-Agent gemeldetes Session-/sudo-Ereignis.
-// OccurredAt ist die Host-Zeit des Ereignisses (verzögert eingeliefert möglich);
-// CertSerial ist nil, wenn der Agent keinen Serial korrelieren konnte.
+// SessionEvent is a session/sudo event reported by the host agent.
+// OccurredAt is the host-side time of the event (may be delivered late);
+// CertSerial is nil if the agent could not correlate a serial.
 type SessionEvent struct {
 	HostID     uuid.UUID
 	HostName   string
@@ -34,10 +34,10 @@ type SessionEvent struct {
 	OccurredAt time.Time
 }
 
-// actor liefert den Audit-Actor: der meldende Host.
+// actor returns the audit actor: the reporting host.
 func (e SessionEvent) actor() string { return "host:" + e.HostName }
 
-// nullableTime gibt nil für den Zero-Value zurück (⇒ SQL COALESCE auf now()).
+// nullableTime returns nil for the zero value (⇒ SQL COALESCE falls back to now()).
 func nullableTime(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
@@ -45,9 +45,9 @@ func nullableTime(t time.Time) *time.Time {
 	return &t
 }
 
-// OpenHostSession legt eine aktive Session an und schreibt ein session.opened-
-// Audit-Event. Ist ein CertSerial gesetzt und einem Zertifikat zuordenbar, wird
-// user_id daraus korreliert (unbekannter Serial ⇒ NULL, tolerant).
+// OpenHostSession creates an active session and writes a session.opened
+// audit event. If CertSerial is set and maps to a certificate, user_id is
+// correlated from it (unknown serial ⇒ NULL, tolerant).
 func (s *Store) OpenHostSession(ctx context.Context, e SessionEvent) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var userID *uuid.UUID
@@ -58,7 +58,7 @@ func (s *Store) OpenHostSession(ctx context.Context, e SessionEvent) error {
 			case err == nil:
 				userID = cert.UserID
 			case errors.Is(err, ErrNotFound):
-				// tolerant: lokales Konto ohne guided-ssh-Zertifikat o. Ä.
+				// tolerant: local account without a guided-ssh certificate or similar.
 			default:
 				return err
 			}
@@ -93,10 +93,10 @@ func (s *Store) OpenHostSession(ctx context.Context, e SessionEvent) error {
 	})
 }
 
-// CloseHostSession schließt die jüngste passende offene Session (host + lokaler
-// Benutzer + tty) und schreibt ein session.closed-Audit-Event. Findet sich keine
-// offene Session (z. B. Start vor Aktivierung des Audits verpasst), wird nur das
-// Audit-Event geschrieben — verlust-tolerant.
+// CloseHostSession closes the most recent matching open session (host +
+// local user + tty) and writes a session.closed audit event. If no open
+// session is found (e.g. its start was missed before auditing was
+// enabled), only the audit event is written — loss-tolerant.
 func (s *Store) CloseHostSession(ctx context.Context, e SessionEvent) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		closed, err := queryOne[HostSession](ctx, tx, `
@@ -136,9 +136,9 @@ func (s *Store) CloseHostSession(ctx context.Context, e SessionEvent) error {
 	})
 }
 
-// RecordSudoEvent schreibt ein session.sudo-Audit-Event (Ziel-Benutzer,
-// aufrufender Benutzer, Kommando). Das Kommando ist best-effort (siehe
-// pam-session-Helper); es wird kein Session-Zustand geführt.
+// RecordSudoEvent writes a session.sudo audit event (target user, invoking
+// user, command). The command is best-effort (see the pam-session helper);
+// no session state is maintained.
 func (s *Store) RecordSudoEvent(ctx context.Context, e SessionEvent) error {
 	payload, err := json.Marshal(map[string]any{
 		"host_id":       e.HostID,
@@ -156,8 +156,8 @@ func (s *Store) RecordSudoEvent(ctx context.Context, e SessionEvent) error {
 	})
 }
 
-// ListActiveSessions liefert die aktiven Sessions (ended_at IS NULL), neueste
-// zuerst — Grundlage der späteren Dashboards.
+// ListActiveSessions returns the active sessions (ended_at IS NULL), newest
+// first — the basis for later dashboards.
 func (s *Store) ListActiveSessions(ctx context.Context, limit int) ([]HostSession, error) {
 	return queryAll[HostSession](ctx, s.pool, `
 		SELECT * FROM host_sessions

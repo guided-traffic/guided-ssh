@@ -1,8 +1,8 @@
 //go:build integration
 
-// Phase-5-Integrationstest: Container-Host mit sshd, Enrollment über die
-// echte API (inkl. mTLS-Agent-Listener), Login mit Benutzerzertifikat über
-// den kompletten Pfad TrustedUserCAKeys + AuthorizedPrincipalsCommand.
+// Phase 5 integration test: container host with sshd, enrollment against
+// the real API (incl. mTLS agent listener), login with a user certificate
+// through the full TrustedUserCAKeys + AuthorizedPrincipalsCommand path.
 package agentd_test
 
 import (
@@ -36,14 +36,14 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// hostInternal ist der DNS-Name, unter dem Container den Test-Host erreichen
+// hostInternal is the DNS name under which containers reach the test host
 // (testcontainers WithHostPortAccess).
 const hostInternal = "host.testcontainers.internal"
 
-func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
+func TestEnrollmentAndLoginEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
-	// ── Postgres + Store + CA ────────────────────────────────────────────
+	// ── Postgres + store + CA ────────────────────────────────────────────
 	pgCtr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("guidedssh"),
 		tcpostgres.WithUsername("guidedssh"),
@@ -54,14 +54,14 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(pgCtr) })
 	}
 	if err != nil {
-		t.Fatalf("postgres-container: %v", err)
+		t.Fatalf("postgres container: %v", err)
 	}
 	dsn, err := pgCtr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
-		t.Fatalf("migrationen: %v", err)
+		t.Fatalf("migrations: %v", err)
 	}
 	st, err := store.New(ctx, dsn)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 
-	// ── Öffentliche API (Enroll) + Agent-API (mTLS) auf Host-Ports ───────
+	// ── Public API (enroll) + agent API (mTLS) on host ports ─────────────
 	publicListener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = agentServer.Close() })
 	agentPort := agentListener.Addr().(*net.TCPAddr).Port
 
-	// ── Benutzer, Gruppe, Grant, Enrollment-Token ────────────────────────
+	// ── User, group, grant, enrollment token ─────────────────────────────
 	alice := &store.User{Issuer: "idp", Subject: "s1", Username: "alice", Email: "alice@example.com", Active: true}
 	if err := st.CreateUser(ctx, alice); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 	if err := st.SetUserGroups(ctx, alice.ID, []uuid.UUID{ops.ID}); err != nil {
 		t.Fatal(err)
 	}
-	// ops darf als alice und deploy auf Hosts mit env=prod.
+	// ops may log in as alice and deploy on hosts with env=prod.
 	grant := &store.AccessGrant{
 		GroupID: ops.ID, TagSelector: map[string]string{"env": "prod"},
 		Principals: []string{"alice", "deploy"}, MaxValiditySeconds: 3600,
@@ -155,10 +155,10 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ── Agent-Binary für linux bauen ─────────────────────────────────────
+	// ── Build the agent binary for linux ─────────────────────────────────
 	binaryPath := buildAgentBinary(t)
 
-	// ── sshd-Container ───────────────────────────────────────────────────
+	// ── sshd container ────────────────────────────────────────────────────
 	req := testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			FromDockerfile: testcontainers.FromDockerfile{Context: "testdata/sshd"},
@@ -175,7 +175,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(ctr) })
 	}
 	if err != nil {
-		t.Fatalf("sshd-container: %v", err)
+		t.Fatalf("sshd container: %v", err)
 	}
 	t.Cleanup(func() {
 		if !t.Failed() {
@@ -183,15 +183,15 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		}
 		if logs, logErr := ctr.Logs(context.Background()); logErr == nil {
 			raw, _ := io.ReadAll(logs)
-			t.Logf("container-logs:\n%s", raw)
+			t.Logf("container logs:\n%s", raw)
 		}
 	})
 
 	if err := ctr.CopyFileToContainer(ctx, binaryPath, "/usr/local/bin/gssh-agentd", 0o755); err != nil {
-		t.Fatalf("binary kopieren: %v", err)
+		t.Fatalf("copying binary: %v", err)
 	}
 
-	// ── Enrollment im Container ──────────────────────────────────────────
+	// ── Enrollment inside the container ──────────────────────────────────
 	code, output, err := ctr.Exec(ctx, []string{
 		"/usr/local/bin/gssh-agentd", "enroll",
 		"--server", fmt.Sprintf("http://%s:%d", hostInternal, publicPort),
@@ -207,17 +207,17 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		t.Fatalf("enroll exit %d: %s", code, raw)
 	}
 
-	// Host in der DB registriert, Tags aus dem Token.
+	// Host registered in the DB, tags from the token.
 	host, err := st.GetHostByName(ctx, "web1.test")
 	if err != nil {
-		t.Fatalf("host nicht registriert: %v", err)
+		t.Fatalf("host not registered: %v", err)
 	}
 	tags, err := st.GetHostTags(ctx, host.ID)
 	if err != nil || tags["env"] != "prod" {
 		t.Fatalf("host-tags: %v %v", tags, err)
 	}
 
-	// ── sshd abwarten (entrypoint startet agentd + sshd nach Enrollment) ─
+	// ── Wait for sshd (entrypoint starts agentd + sshd after enrollment) ─
 	mappedPort, err := ctr.MappedPort(ctx, "22/tcp")
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 	}
 	sshAddr := net.JoinHostPort(containerHost, mappedPort.Port())
 
-	// ── Benutzerzertifikat ausstellen (wie POST /v1/sign/user) ───────────
+	// ── Issue a user certificate (like POST /v1/sign/user) ────────────────
 	userPub, userPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		Extensions:  map[string]string{"permit-pty": ""},
 	}, ca.IssueRef{Actor: "test", UserID: &alice.ID})
 	if err != nil {
-		t.Fatalf("benutzerzertifikat: %v", err)
+		t.Fatalf("user certificate: %v", err)
 	}
 	keySigner, err := ssh.NewSignerFromKey(userPriv)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Host-Zertifikate gegen das Host-CA-Bundle verifizieren.
+	// Verify host certificates against the host CA bundle.
 	hostBundle, err := certAuthority.Bundle(ctx, store.CertTypeHost)
 	if err != nil {
 		t.Fatal(err)
@@ -270,44 +270,45 @@ func TestEnrollmentUndLoginEndToEnd(t *testing.T) {
 			return strings.Contains(hostBundle, marshaled)
 		},
 	}
-	// Der Test verbindet über localhost:<mapped-port>; das Host-Zertifikat
-	// trägt aber die Principals web1.test/web1 — deshalb Principal-Prüfung
-	// gegen den registrierten Hostnamen statt der Verbindungsadresse.
+	// The test connects via localhost:<mapped-port>; but the host
+	// certificate carries the principals web1.test/web1 — so check the
+	// principal against the registered hostname instead of the connection
+	// address.
 	hostKeyCallback := func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		cert, ok := key.(*ssh.Certificate)
 		if !ok {
-			return fmt.Errorf("kein host-zertifikat: %T", key)
+			return fmt.Errorf("not a host certificate: %T", key)
 		}
 		if !checker.IsHostAuthority(cert.SignatureKey, "") {
-			return fmt.Errorf("host-zertifikat von unbekannter ca")
+			return fmt.Errorf("host certificate from unknown ca")
 		}
 		return checker.CheckCert("web1.test", cert)
 	}
 
-	// ── Login-Pfade ──────────────────────────────────────────────────────
-	// alice: Grant-Principal "alice" matcht Zertifikats-Principal alice.
+	// ── Login paths ────────────────────────────────────────────────────────
+	// alice: grant principal "alice" matches the certificate principal alice.
 	assertWhoami(t, sshAddr, "alice", certSigner, hostKeyCallback, "alice")
-	// deploy: Grant-Pfad — Zertifikat trägt alice, Grant erlaubt deploy.
+	// deploy: grant path — certificate carries alice, grant allows deploy.
 	assertWhoami(t, sshAddr, "deploy", certSigner, hostKeyCallback, "deploy")
-	// root: kein Grant ⇒ AuthorizedPrincipalsCommand liefert nichts ⇒ abgelehnt.
+	// root: no grant ⇒ AuthorizedPrincipalsCommand returns nothing ⇒ denied.
 	if err := trySSH(sshAddr, "root", certSigner, hostKeyCallback); err == nil {
-		t.Fatal("login als root muss scheitern (kein grant, fail-closed)")
+		t.Fatal("login as root must fail (no grant, fail-closed)")
 	}
 }
 
-// buildAgentBinary baut gssh-agentd für linux/<runner-arch>.
+// buildAgentBinary builds gssh-agentd for linux/<runner-arch>.
 func buildAgentBinary(t *testing.T) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "gssh-agentd")
 	cmd := exec.Command("go", "build", "-o", out, "github.com/guided-traffic/guided-ssh/cmd/gssh-agentd")
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+runtime.GOARCH, "CGO_ENABLED=0")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("agent-binary bauen: %v\n%s", err, output)
+		t.Fatalf("building agent binary: %v\n%s", err, output)
 	}
 	return out
 }
 
-// trySSH versucht Login + `whoami`; liefert Fehler oder die Ausgabe.
+// trySSH attempts login + `whoami`; returns an error or the output.
 func trySSH(addr, user string, signer ssh.Signer, hostKeyCallback ssh.HostKeyCallback) error {
 	config := &ssh.ClientConfig{
 		User:            user,
@@ -330,12 +331,12 @@ func trySSH(addr, user string, signer ssh.Signer, hostKeyCallback ssh.HostKeyCal
 		return err
 	}
 	if got := strings.TrimSpace(string(output)); got != user {
-		return fmt.Errorf("whoami = %q, erwartet %q", got, user)
+		return fmt.Errorf("whoami = %q, want %q", got, user)
 	}
 	return nil
 }
 
-// assertWhoami wartet auf sshd (Retry) und prüft den Login.
+// assertWhoami waits for sshd (retrying) and checks the login.
 func assertWhoami(t *testing.T, addr, user string, signer ssh.Signer, hostKeyCallback ssh.HostKeyCallback, want string) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
@@ -346,5 +347,5 @@ func assertWhoami(t *testing.T, addr, user string, signer ssh.Signer, hostKeyCal
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("ssh als %s (erwartet whoami=%s): %v", user, want, lastErr)
+	t.Fatalf("ssh as %s (expected whoami=%s): %v", user, want, lastErr)
 }

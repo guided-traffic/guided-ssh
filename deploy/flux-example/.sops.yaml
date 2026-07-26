@@ -1,7 +1,7 @@
-# SOPS-Konfiguration des GitOps-Repos: jede secrets.yaml wird mit age
-# verschlüsselt; encrypted_regex lässt Metadaten im Klartext, damit Diffs
-# reviewbar bleiben. Public-Key durch den eigenen ersetzen (age-keygen,
-# siehe README Abschnitt "Secrets mit SOPS").
+# SOPS configuration for the GitOps repo: every secrets.yaml is encrypted
+# with age; encrypted_regex leaves metadata in plaintext so diffs stay
+# reviewable. Replace the public key with your own (age-keygen,
+# see README section "Secrets with SOPS").
 creation_rules:
   - path_regex: .*secrets\.yaml$
     encrypted_regex: ^(data|stringData)$

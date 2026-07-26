@@ -1,9 +1,9 @@
-// Kleine Formatierungshelfer der Views (bewusst ohne Pipe-Boilerplate).
+// Small formatting helpers for the views (deliberately without pipe boilerplate).
 
-/** relativeTime formatiert einen Zeitstempel als deutsche Relativzeit. */
+/** relativeTime formats a timestamp as a relative time string. */
 export function relativeTime(iso: string | null | undefined): string {
   if (!iso) {
-    return 'nie';
+    return 'never';
   }
   const then = new Date(iso).getTime();
   const diffSec = Math.round((Date.now() - then) / 1000);
@@ -23,10 +23,10 @@ export function relativeTime(iso: string | null | undefined): string {
     }
     value = Math.floor(value / factor);
   }
-  return diffSec >= 0 ? `vor ${value} ${unit}` : `in ${value} ${unit}`;
+  return diffSec >= 0 ? `${value} ${unit} ago` : `in ${value} ${unit}`;
 }
 
-/** formatSeconds formatiert eine Dauer in Sekunden kompakt (16 h, 30 d, 45 min). */
+/** formatSeconds formats a duration in seconds compactly (16 h, 30 d, 45 min). */
 export function formatSeconds(seconds: number): string {
   if (seconds % 86400 === 0) {
     return `${seconds / 86400} d`;
@@ -40,7 +40,7 @@ export function formatSeconds(seconds: number): string {
   return `${seconds} s`;
 }
 
-/** formatBytes formatiert eine Byte-Größe kompakt (14,8 MB). */
+/** formatBytes formats a byte size compactly (14.8 MB). */
 export function formatBytes(bytes: number): string {
   const units = ['B', 'kB', 'MB', 'GB'];
   let value = bytes;
@@ -50,15 +50,15 @@ export function formatBytes(bytes: number): string {
     unit++;
   }
   const rounded = unit === 0 ? value : Math.round(value * 10) / 10;
-  return `${rounded.toLocaleString('de-DE')} ${units[unit]}`;
+  return `${rounded.toLocaleString('en-US')} ${units[unit]}`;
 }
 
-/** formatTimestamp formatiert einen ISO-Zeitstempel lokal und lesbar. */
+/** formatTimestamp formats an ISO timestamp locally and readably. */
 export function formatTimestamp(iso: string | null | undefined): string {
   if (!iso) {
     return '—';
   }
-  return new Date(iso).toLocaleString('de-DE', {
+  return new Date(iso).toLocaleString('en-US', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -68,19 +68,19 @@ export function formatTimestamp(iso: string | null | undefined): string {
   });
 }
 
-/** prettyJson formatiert ein Objekt als eingerücktes JSON. */
+/** prettyJson formats an object as indented JSON. */
 export function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? '';
 }
 
-/** tagsToText serialisiert einen Tag-Selektor als "k=v, k2=v2". */
+/** tagsToText serializes a tag selector as "k=v, k2=v2". */
 export function tagsToText(tags: Record<string, string> | undefined | null): string {
   return Object.entries(tags ?? {})
     .map(([k, v]) => `${k}=${v}`)
     .join(', ');
 }
 
-/** textToTags parst "k=v, k2=v2" in einen Tag-Selektor; wirft bei Syntaxfehlern. */
+/** textToTags parses "k=v, k2=v2" into a tag selector; throws on syntax errors. */
 export function textToTags(text: string): Record<string, string> {
   const tags: Record<string, string> = {};
   for (const raw of text.split(',')) {
@@ -90,14 +90,14 @@ export function textToTags(text: string): Record<string, string> {
     }
     const idx = pair.indexOf('=');
     if (idx <= 0) {
-      throw new Error(`ungültiges Tag „${pair}“ (erwartet key=value)`);
+      throw new Error(`invalid tag "${pair}" (expected key=value)`);
     }
     tags[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
   }
   return tags;
 }
 
-/** csvToList parst eine Komma-Liste in ein bereinigtes Array. */
+/** csvToList parses a comma-separated list into a cleaned-up array. */
 export function csvToList(text: string): string[] {
   return text
     .split(',')

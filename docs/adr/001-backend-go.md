@@ -1,24 +1,24 @@
 # ADR-001: Backend in Go
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Die Plattform besteht aus API-Server/CA, Benutzer-CLI (`gssh`), Admin-CLI
-(`gssh-admin`) und Host-Agent (`gssh-agentd`). Host-Agent und CLIs müssen auf
-heterogenen Zielsystemen ohne Laufzeitabhängigkeiten laufen; das Herzstück ist
-SSH-Zertifikatslogik.
+The platform consists of the API server/CA, the user CLI (`gssh`), the admin
+CLI (`gssh-admin`), and the host agent (`gssh-agentd`). The host agent and
+CLIs must run on heterogeneous target systems without runtime dependencies;
+SSH certificate logic is at the core.
 
-## Entscheidung
+## Decision
 
-Alle Serverkomponenten, CLIs und der Host-Agent werden in Go implementiert.
+All server components, CLIs, and the host agent are implemented in Go.
 
-## Konsequenzen
+## Consequences
 
-- `golang.org/x/crypto/ssh` deckt SSH-Zertifikate (Bau, Signatur, Parsing) nativ ab.
-- Statische Binaries (`CGO_ENABLED=0`) für Host-Agent/CLI — Installation per Paket
-  ohne Abhängigkeiten; einfaches Cross-Compiling (linux/amd64, linux/arm64, darwin/arm64).
-- Ein Sprachstack für Server, CLI und Agent — geteilter Code (API-Typen, Client).
-- NSS-/PAM-Module (Phase 9) benötigen ggf. C-Interop; bewusst nach hinten geschoben
-  (siehe ADR-005).
+- `golang.org/x/crypto/ssh` natively covers SSH certificates (building, signing, parsing).
+- Static binaries (`CGO_ENABLED=0`) for host agent/CLI — package-based
+  installation without dependencies; simple cross-compiling (linux/amd64, linux/arm64, darwin/arm64).
+- A single language stack for server, CLI, and agent — shared code (API types, client).
+- NSS/PAM modules (Phase 9) may require C interop; deliberately deferred
+  (see ADR-005).

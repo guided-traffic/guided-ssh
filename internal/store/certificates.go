@@ -4,15 +4,15 @@ import (
 	"context"
 )
 
-// NextCertificateSerial vergibt die nächste Zertifikats-Seriennummer.
+// NextCertificateSerial assigns the next certificate serial number.
 func (s *Store) NextCertificateSerial(ctx context.Context) (int64, error) {
 	var serial int64
 	err := s.pool.QueryRow(ctx, `SELECT nextval('certificate_serial_seq')`).Scan(&serial)
 	return serial, err
 }
 
-// insertCertificate persistiert die Metadaten eines ausgestellten Zertifikats
-// über den gegebenen querier (Pool oder Transaktion). Nil-IssuerContext wird zu {}.
+// insertCertificate persists the metadata of an issued certificate through
+// the given querier (pool or transaction). A nil IssuerContext becomes {}.
 func insertCertificate(ctx context.Context, q querier, c *Certificate) error {
 	created, err := queryOne[Certificate](ctx, q, `
 		INSERT INTO certificates
@@ -29,18 +29,18 @@ func insertCertificate(ctx context.Context, q querier, c *Certificate) error {
 	return nil
 }
 
-// CreateCertificate persistiert die Metadaten eines ausgestellten Zertifikats
-// und füllt ID und Zeitstempel.
+// CreateCertificate persists the metadata of an issued certificate and
+// fills in the ID and timestamp.
 func (s *Store) CreateCertificate(ctx context.Context, c *Certificate) error {
 	return insertCertificate(ctx, s.pool, c)
 }
 
-// GetCertificateBySerial liefert ein Zertifikat per Seriennummer.
+// GetCertificateBySerial returns a certificate by serial number.
 func (s *Store) GetCertificateBySerial(ctx context.Context, serial int64) (*Certificate, error) {
 	return queryOne[Certificate](ctx, s.pool, `SELECT * FROM certificates WHERE serial = $1`, serial)
 }
 
-// ListCertificates liefert Zertifikate, neueste zuerst. limit 0 ⇒ alle.
+// ListCertificates returns certificates, newest first. limit 0 ⇒ all.
 func (s *Store) ListCertificates(ctx context.Context, limit int) ([]Certificate, error) {
 	return queryAll[Certificate](ctx, s.pool, `
 		SELECT * FROM certificates

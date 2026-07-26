@@ -14,8 +14,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
 
-// rolloutMux baut einen Mux mit ausschließlich den drei Rollout-Routen — die
-// übrigen Server-Abhängigkeiten sind für Phase B irrelevant.
+// rolloutMux builds a mux with exclusively the three rollout routes — the
+// remaining server dependencies are irrelevant for phase B.
 func rolloutMux(t *testing.T, deps Deps) *http.ServeMux {
 	t.Helper()
 	if deps.Logger == nil {
@@ -26,7 +26,7 @@ func rolloutMux(t *testing.T, deps Deps) *http.ServeMux {
 	return mux
 }
 
-// get führt einen GET gegen den Mux aus.
+// get executes a GET against the mux.
 func get(t *testing.T, mux *http.ServeMux, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -34,78 +34,78 @@ func get(t *testing.T, mux *http.ServeMux, path string) *httptest.ResponseRecord
 	return recorder
 }
 
-// twoAgents sind zwei Fake-Binaries mit realistischen Hex-Hashes.
+// twoAgents are two fake binaries with realistic hex hashes.
 var twoAgents = fakeAgents{
 	{OS: "linux", Arch: "amd64", Size: 15728640, SHA256: strings.Repeat("a1", 32)},
 	{OS: "linux", Arch: "arm64", Size: 14680064, SHA256: strings.Repeat("b2", 32)},
 }
 
-// TestManifestBereit: bei offenem Gate listet das Manifest alle Binaries,
-// meldet rollout_ready und nennt die aktive Pin-Quelle.
-func TestManifestBereit(t *testing.T) {
+// TestManifestReady: with the gate open, the manifest lists all binaries,
+// reports rollout_ready, and names the active pin source.
+func TestManifestReady(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
 	recorder := get(t, rolloutMux(t, deps), "/v1/agents")
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, erwartet 200", recorder.Code)
+		t.Fatalf("status = %d, expected 200", recorder.Code)
 	}
 	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
-		t.Errorf("Cache-Control = %q, erwartet no-store", got)
+		t.Errorf("Cache-Control = %q, expected no-store", got)
 	}
 
 	var manifest agentManifest
 	if err := json.NewDecoder(recorder.Body).Decode(&manifest); err != nil {
-		t.Fatalf("manifest dekodieren: %v", err)
+		t.Fatalf("decoding manifest: %v", err)
 	}
 	if !manifest.RolloutReady || len(manifest.Missing) != 0 {
-		t.Errorf("rollout_ready = %v, missing = %v — erwartet true/leer", manifest.RolloutReady, manifest.Missing)
+		t.Errorf("rollout_ready = %v, missing = %v — expected true/empty", manifest.RolloutReady, manifest.Missing)
 	}
 	if manifest.Version != version.String() {
-		t.Errorf("version = %q, erwartet %q", manifest.Version, version.String())
+		t.Errorf("version = %q, expected %q", manifest.Version, version.String())
 	}
 	if manifest.PinSource != PinSourceStatic {
-		t.Errorf("pin_source = %q, erwartet %q", manifest.PinSource, PinSourceStatic)
+		t.Errorf("pin_source = %q, expected %q", manifest.PinSource, PinSourceStatic)
 	}
 	want := []agentManifestItem{
 		{OS: "linux", Arch: "amd64", Size: 15728640, SHA256: strings.Repeat("a1", 32)},
 		{OS: "linux", Arch: "arm64", Size: 14680064, SHA256: strings.Repeat("b2", 32)},
 	}
 	if !slices.Equal(manifest.Agents, want) {
-		t.Errorf("agents = %+v, erwartet %+v", manifest.Agents, want)
+		t.Errorf("agents = %+v, expected %+v", manifest.Agents, want)
 	}
 }
 
-// TestManifestBeiGeschlossenemGate: das Manifest bleibt erreichbar und weist die
-// fehlenden Bedingungen aus — genau dafür ist es nicht gatet.
-func TestManifestBeiGeschlossenemGate(t *testing.T) {
+// TestManifestWithClosedGate: the manifest stays reachable and lists
+// the missing conditions — that is exactly why it is not gated.
+func TestManifestWithClosedGate(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = fakeAgents{}
 	deps.AgentPublicURL = ""
 	recorder := get(t, rolloutMux(t, deps), "/v1/agents")
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, erwartet 200 (diagnosefunktion)", recorder.Code)
+		t.Fatalf("status = %d, expected 200 (diagnostic function)", recorder.Code)
 	}
 	var manifest agentManifest
 	if err := json.NewDecoder(recorder.Body).Decode(&manifest); err != nil {
-		t.Fatalf("manifest dekodieren: %v", err)
+		t.Fatalf("decoding manifest: %v", err)
 	}
 	if manifest.RolloutReady {
-		t.Error("rollout_ready = true trotz fehlender bedingungen")
+		t.Error("rollout_ready = true despite missing conditions")
 	}
 	if !slices.Equal(manifest.Missing, []string{rolloutMissingBinaries, rolloutMissingAgentURL}) {
-		t.Errorf("missing = %v, erwartet [binaries agent_public_url]", manifest.Missing)
+		t.Errorf("missing = %v, expected [binaries agent_public_url]", manifest.Missing)
 	}
 	if len(manifest.Agents) != 0 {
-		t.Errorf("agents = %+v, erwartet leer", manifest.Agents)
+		t.Errorf("agents = %+v, expected empty", manifest.Agents)
 	}
 }
 
-// TestManifestNenntPinFehlerKategorie: liefert keine Pin-Quelle einen Pin,
-// weist das Manifest die grobe Kategorie aus — der Volltext bleibt im Log, das
-// Manifest ist unauthentifiziert öffentlich.
-func TestManifestNenntPinFehlerKategorie(t *testing.T) {
+// TestManifestReportsPinErrorCategory: if no pin source returns a pin, the
+// manifest reports the coarse category — the full text stays in the log,
+// the manifest is unauthenticated and public.
+func TestManifestReportsPinErrorCategory(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
 	logger, _ := testLogger()
@@ -113,97 +113,98 @@ func TestManifestNenntPinFehlerKategorie(t *testing.T) {
 
 	recorder := get(t, rolloutMux(t, deps), "/v1/agents")
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, erwartet 200", recorder.Code)
+		t.Fatalf("status = %d, expected 200", recorder.Code)
 	}
 	body := recorder.Body.String()
 
 	var manifest agentManifest
 	if err := json.NewDecoder(strings.NewReader(body)).Decode(&manifest); err != nil {
-		t.Fatalf("manifest dekodieren: %v", err)
+		t.Fatalf("decoding manifest: %v", err)
 	}
 	if manifest.PinError != PinErrNoPublicURL {
-		t.Errorf("pin_error = %q, erwartet %q", manifest.PinError, PinErrNoPublicURL)
+		t.Errorf("pin_error = %q, expected %q", manifest.PinError, PinErrNoPublicURL)
 	}
-	if strings.Contains(body, "ist kein https-url") {
-		t.Errorf("manifest enthält den fehler-volltext: %s", body)
+	if strings.Contains(body, "is not a https url") {
+		t.Errorf("manifest contains the full error text: %s", body)
 	}
 }
 
-// TestDownloadStreamtBinary prüft den Erfolgsfall inklusive Header.
-func TestDownloadStreamtBinary(t *testing.T) {
+// TestDownloadStreamsBinary checks the success case including headers.
+func TestDownloadStreamsBinary(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
 	recorder := get(t, rolloutMux(t, deps), "/v1/agents/linux/arm64")
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, erwartet 200 (body %q)", recorder.Code, recorder.Body.String())
+		t.Fatalf("status = %d, expected 200 (body %q)", recorder.Code, recorder.Body.String())
 	}
 	if got := recorder.Header().Get("Content-Type"); got != "application/octet-stream" {
-		t.Errorf("Content-Type = %q, erwartet application/octet-stream", got)
+		t.Errorf("Content-Type = %q, expected application/octet-stream", got)
 	}
 	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
-		t.Errorf("Cache-Control = %q, erwartet no-store", got)
+		t.Errorf("Cache-Control = %q, expected no-store", got)
 	}
 	if got := recorder.Header().Get("Content-Length"); got != strconv.FormatInt(14680064, 10) {
-		t.Errorf("Content-Length = %q, erwartet 14680064", got)
+		t.Errorf("Content-Length = %q, expected 14680064", got)
 	}
 	if recorder.Body.String() != "arm64" {
-		t.Errorf("body = %q, erwartet den binary-inhalt", recorder.Body.String())
+		t.Errorf("body = %q, expected the binary content", recorder.Body.String())
 	}
 }
 
-// TestDownloadUnbekannteArch: nicht eingebettete oder unsinnige Plattformen
-// ergeben 404, nicht 503 — das Gate ist ja offen.
-func TestDownloadUnbekannteArch(t *testing.T) {
+// TestDownloadUnknownArch: non-embedded or nonsensical platforms yield
+// 404, not 503 — the gate is open after all.
+func TestDownloadUnknownArch(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
 	mux := rolloutMux(t, deps)
 
 	for _, path := range []string{"/v1/agents/linux/riscv64", "/v1/agents/windows/amd64"} {
 		if code := get(t, mux, path).Code; code != http.StatusNotFound {
-			t.Errorf("%s: status = %d, erwartet 404", path, code)
+			t.Errorf("%s: status = %d, expected 404", path, code)
 		}
 	}
 }
 
-// TestGateSchliesstDownloadUndScript: fehlt eine Bedingung, antworten Download
-// und install.sh mit 503 und nennen sie.
-func TestGateSchliesstDownloadUndScript(t *testing.T) {
+// TestGateClosesDownloadAndScript: if a condition is missing, download
+// and install.sh respond with 503 and name it.
+func TestGateClosesDownloadAndScript(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
-	deps.Pins = nil // kein Pin ermittelbar
+	deps.Pins = nil // no pin determinable
 	mux := rolloutMux(t, deps)
 
 	for _, path := range []string{"/v1/agents/linux/amd64", "/install.sh"} {
 		recorder := get(t, mux, path)
 		if recorder.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%s: status = %d, erwartet 503", path, recorder.Code)
+			t.Fatalf("%s: status = %d, expected 503", path, recorder.Code)
 		}
 		var body rolloutUnavailable
 		if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
-			t.Fatalf("%s: antwort dekodieren: %v", path, err)
+			t.Fatalf("%s: decoding response: %v", path, err)
 		}
 		if !slices.Equal(body.Missing, []string{rolloutMissingPin}) {
-			t.Errorf("%s: missing = %v, erwartet [pin]", path, body.Missing)
+			t.Errorf("%s: missing = %v, expected [pin]", path, body.Missing)
 		}
 	}
 }
 
-// TestInstallScriptInhalt: das ausgelieferte Script trägt Pin, Hashes, URLs und
-// die systemd-Unit bereits in sich; veränderlich bleibt nur das Token.
-func TestInstallScriptInhalt(t *testing.T) {
+// TestInstallScriptContent: the served script already carries the pin,
+// hashes, URLs, and the systemd unit within it; only the token stays
+// variable.
+func TestInstallScriptContent(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
 	recorder := get(t, rolloutMux(t, deps), "/install.sh")
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, erwartet 200 (body %q)", recorder.Code, recorder.Body.String())
+		t.Fatalf("status = %d, expected 200 (body %q)", recorder.Code, recorder.Body.String())
 	}
 	if got := recorder.Header().Get("Content-Type"); got != "text/x-shellscript; charset=utf-8" {
-		t.Errorf("Content-Type = %q, erwartet text/x-shellscript", got)
+		t.Errorf("Content-Type = %q, expected text/x-shellscript", got)
 	}
 	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
-		t.Errorf("Cache-Control = %q, erwartet no-store", got)
+		t.Errorf("Cache-Control = %q, expected no-store", got)
 	}
 
 	script := recorder.Body.String()
@@ -216,30 +217,30 @@ func TestInstallScriptInhalt(t *testing.T) {
 		"amd64) echo '" + strings.Repeat("a1", 32) + "'",
 		"arm64) echo '" + strings.Repeat("b2", 32) + "'",
 		"--require-pin",
-		"ExecStart=/usr/bin/gssh-agentd run", // Unit-Inhalt aus agentdist
-		"\nmain \"$@\"\n",                    // Aufruf erst in der letzten Zeile
+		"ExecStart=/usr/bin/gssh-agentd run", // unit content from agentdist
+		"\nmain \"$@\"\n",                    // call only on the last line
 	} {
 		if !strings.Contains(script, want) {
-			t.Errorf("script enthält %q nicht", want)
+			t.Errorf("script does not contain %q", want)
 		}
 	}
-	// Regel 5: kein pipefail, kein bash.
+	// Rule 5: no pipefail, no bash.
 	if strings.Contains(script, "set -o pipefail") {
-		t.Error("script nutzt set -o pipefail (in dash/busybox nicht verlässlich)")
+		t.Error("script uses set -o pipefail (not reliable in dash/busybox)")
 	}
-	// Der Here-Doc-Terminator muss am Zeilenanfang stehen, sonst schluckt cat
-	// den Rest des Scripts.
+	// The here-doc terminator must be at the start of a line, otherwise
+	// cat swallows the rest of the script.
 	if !strings.Contains(script, "\nUNIT_EOF\n") {
-		t.Error("here-doc-terminator UNIT_EOF steht nicht am zeilenanfang")
+		t.Error("here-doc terminator UNIT_EOF is not at the start of a line")
 	}
 }
 
-// TestInstallScriptSyntax lässt `sh -n` über das gerenderte Script laufen — ein
-// Template-Fehler soll hier auffallen, nicht auf dem Host.
+// TestInstallScriptSyntax runs `sh -n` over the rendered script — a
+// template error should surface here, not on the host.
 func TestInstallScriptSyntax(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {
-		t.Skipf("keine sh im PATH: %v", err)
+		t.Skipf("no sh in PATH: %v", err)
 	}
 
 	script, err := renderInstallScript(installScriptData{
@@ -251,19 +252,19 @@ func TestInstallScriptSyntax(t *testing.T) {
 		Unit:     agentdist.UnitFile,
 	})
 	if err != nil {
-		t.Fatalf("script rendern: %v", err)
+		t.Fatalf("rendering script: %v", err)
 	}
 
 	cmd := exec.CommandContext(t.Context(), shell, "-n")
 	cmd.Stdin = strings.NewReader(string(script))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("sh -n meldet einen syntaxfehler: %v\n%s", err, out)
+		t.Fatalf("sh -n reports a syntax error: %v\n%s", err, out)
 	}
 }
 
-// TestInstallScriptQuotingFailClosed: jeder getemplatete Wert, der das Script
-// sprengen könnte, bricht das Rendern ab, statt ein kaputtes Script an N Hosts
-// auszuliefern.
+// TestInstallScriptQuotingFailClosed: every templated value that could
+// break the script aborts rendering instead of shipping a broken script
+// to N hosts.
 func TestInstallScriptQuotingFailClosed(t *testing.T) {
 	valid := installScriptData{
 		BaseURL:  "https://gssh.example.com",
@@ -275,34 +276,34 @@ func TestInstallScriptQuotingFailClosed(t *testing.T) {
 	}
 
 	for name, mutate := range map[string]func(d *installScriptData){
-		"anführungszeichen in der url": func(d *installScriptData) {
+		"quote in the url": func(d *installScriptData) {
 			d.BaseURL = "https://gssh.example.com/'; rm -rf /; '"
 		},
-		"arch sprengt das case-pattern": func(d *installScriptData) {
+		"arch breaks the case pattern": func(d *installScriptData) {
 			d.Agents = []agentManifestItem{{OS: "linux", Arch: "amd64) echo pwned ;;", SHA256: strings.Repeat("a1", 32)}}
 		},
-		"sha ist kein hex": func(d *installScriptData) {
-			d.Agents = []agentManifestItem{{OS: "linux", Arch: "amd64", SHA256: "nicht-hex"}}
+		"sha is not hex": func(d *installScriptData) {
+			d.Agents = []agentManifestItem{{OS: "linux", Arch: "amd64", SHA256: "not-hex"}}
 		},
-		"terminator in der ersten unit-zeile": func(d *installScriptData) {
+		"terminator in the first unit line": func(d *installScriptData) {
 			d.Unit = "UNIT_EOF\nrm -rf /\n"
 		},
 	} {
 		data := valid
 		mutate(&data)
 		if _, err := renderInstallScript(data); err == nil {
-			t.Errorf("%s: rendern lieferte keinen fehler", name)
+			t.Errorf("%s: rendering returned no error", name)
 		}
 	}
 
 	if _, err := renderInstallScript(valid); err != nil {
-		t.Fatalf("gültige daten: %v", err)
+		t.Fatalf("valid data: %v", err)
 	}
 }
 
-// TestRolloutRoutenImVollenMux: die Routen müssen auch im vollständigen
-// Public-Mux greifen — /install.sh darf nicht im SPA-Fallback ("/") landen.
-func TestRolloutRoutenImVollenMux(t *testing.T) {
+// TestRolloutRoutesInFullMux: the routes must also work in the full
+// public mux — /install.sh must not end up in the SPA fallback ("/").
+func TestRolloutRoutesInFullMux(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
 	deps.Logger, _ = testLogger()
@@ -317,17 +318,17 @@ func TestRolloutRoutenImVollenMux(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusOK {
-			t.Errorf("%s: status = %d, erwartet 200", path, recorder.Code)
+			t.Errorf("%s: status = %d, expected 200", path, recorder.Code)
 			continue
 		}
 		if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, wantType) {
-			t.Errorf("%s: Content-Type = %q, erwartet %q", path, got, wantType)
+			t.Errorf("%s: Content-Type = %q, expected %q", path, got, wantType)
 		}
 	}
 }
 
-// TestDownloadRateLimit: der Download hängt am eigenen, engeren Limiter — nicht
-// am regulären der Sign-/Enroll-Endpunkte.
+// TestDownloadRateLimit: the download hangs off its own, tighter limiter —
+// not the regular one of the sign/enroll endpoints.
 func TestDownloadRateLimit(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = twoAgents
@@ -336,14 +337,14 @@ func TestDownloadRateLimit(t *testing.T) {
 
 	for i := range 2 {
 		if code := get(t, mux, "/v1/agents/linux/amd64").Code; code != http.StatusOK {
-			t.Fatalf("request %d: status = %d, erwartet 200", i, code)
+			t.Fatalf("request %d: status = %d, expected 200", i, code)
 		}
 	}
 	if code := get(t, mux, "/v1/agents/linux/amd64").Code; code != http.StatusTooManyRequests {
-		t.Errorf("nach aufgebrauchtem burst: status = %d, erwartet 429", code)
+		t.Errorf("after burst exhausted: status = %d, expected 429", code)
 	}
-	// Manifest und Script laufen auf dem regulären Limiter und bleiben frei.
+	// Manifest and script run on the regular limiter and stay free.
 	if code := get(t, mux, "/v1/agents").Code; code != http.StatusOK {
-		t.Errorf("manifest: status = %d, erwartet 200 (eigener limiter)", code)
+		t.Errorf("manifest: status = %d, expected 200 (own limiter)", code)
 	}
 }

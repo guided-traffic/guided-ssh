@@ -1,12 +1,13 @@
 //go:build integration
 
-// Phase-E-Smoke des One-Command-Host-Installs: Token minten (Admin-API) →
-// getemplatetes install.sh per curl im Container ziehen → Binary-Download +
-// SHA-256-Prüfung → Enrollment mit Pflicht-Pin → laufender Agent.
+// Phase E smoke test of the one-command host install: mint a token (admin
+// API) → pull the templated install.sh via curl in the container → binary
+// download + SHA-256 check → enrollment with a required pin → running agent.
 //
-// Der systemctl-Zweig bleibt bewusst ungetestet (--no-systemd): die Fixture hat
-// kein systemd, ein systemd-Container im CI wäre privilegiert und flaky, ein
-// systemctl-Stub würde Verhalten nur vortäuschen (siehe README-Sicherheitsteil).
+// The systemctl branch is deliberately left untested (--no-systemd): the
+// fixture has no systemd, a systemd container in CI would be privileged and
+// flaky, and a systemctl stub would only fake the behavior (see the README
+// security section).
 package agentd_test
 
 import (
@@ -45,19 +46,19 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// adminGroup ist die IdP-Gruppe, die der Testverifier dem Mint-Aufrufer gibt.
+// adminGroup is the IdP group the test verifier grants to the mint caller.
 const adminGroup = "gssh-admins"
 
-// adminBearer ist das Bearer-Token, das staticVerifier auf Admin-Claims abbildet.
+// adminBearer is the bearer token that staticVerifier maps to admin claims.
 const adminBearer = "e2e-admin-token"
 
-// staticVerifier bildet genau ein Bearer-Token auf Admin-Claims ab; die
-// OIDC-Verifikation selbst ist nicht Gegenstand dieses Tests.
+// staticVerifier maps exactly one bearer token to admin claims; the OIDC
+// verification itself is not the subject of this test.
 type staticVerifier struct{}
 
 func (staticVerifier) Verify(_ context.Context, rawToken string) (*auth.Claims, error) {
 	if rawToken != adminBearer {
-		return nil, fmt.Errorf("%w: token unbekannt", auth.ErrInvalidToken)
+		return nil, fmt.Errorf("%w: unknown token", auth.ErrInvalidToken)
 	}
 	return &auth.Claims{
 		Issuer: "https://idp.test/realms/gssh", Subject: "e2e-admin",
@@ -69,7 +70,7 @@ func (staticVerifier) Verify(_ context.Context, rawToken string) (*auth.Claims, 
 func TestInstallScriptEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
-	// ── Postgres + Store + CA ────────────────────────────────────────────
+	// ── Postgres + store + CA ────────────────────────────────────────────
 	pgCtr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("guidedssh"),
 		tcpostgres.WithUsername("guidedssh"),
@@ -80,14 +81,14 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(pgCtr) })
 	}
 	if err != nil {
-		t.Fatalf("postgres-container: %v", err)
+		t.Fatalf("postgres container: %v", err)
 	}
 	dsn, err := pgCtr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Migrate(ctx, dsn); err != nil {
-		t.Fatalf("migrationen: %v", err)
+		t.Fatalf("migrations: %v", err)
 	}
 	st, err := store.New(ctx, dsn)
 	if err != nil {
@@ -111,15 +112,15 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 
-	// ── Agent-Binary unter dem Embed-Namen bereitstellen ─────────────────
-	// Das Embed ist zur Testzeit leer (bin/ enthält nur .gitkeep) — genau
-	// dafür existiert agentdist.NewFromFS.
+	// ── Provide the agent binary under the embed name ────────────────────
+	// The embed is empty at test time (bin/ only contains .gitkeep) — that
+	// is exactly what agentdist.NewFromFS exists for.
 	distDir := t.TempDir()
 	if err := os.Link(buildAgentBinary(t), filepath.Join(distDir, "gssh-agentd-linux-"+runtime.GOARCH)); err != nil {
-		t.Fatalf("agent-binary bereitstellen: %v", err)
+		t.Fatalf("providing agent binary: %v", err)
 	}
 
-	// ── Öffentliche API über TLS (der Pin gilt für /v1/enroll) ───────────
+	// ── Public API over TLS (the pin applies to /v1/enroll) ───────────────
 	publicListener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
@@ -128,8 +129,8 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 	publicBaseURL := fmt.Sprintf("https://%s:%d", hostInternal, publicPort)
 
 	tlsCert, leaf := selfSignedCert(t, hostInternal)
-	// Statische Pin-Quelle aus demselben Zertifikat, das der Listener
-	// präsentiert — dogfoodet pintls.FromCertificate (P1).
+	// Static pin source from the same certificate the listener presents —
+	// dogfoods pintls.FromCertificate (P1).
 	pin := pintls.FromCertificate(leaf)
 
 	agentListener, err := net.Listen("tcp", "0.0.0.0:0")
@@ -157,7 +158,7 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 	go func() { _ = publicServer.ServeTLS(publicListener, "", "") }()
 	t.Cleanup(func() { _ = publicServer.Close() })
 
-	// ── Agent-API (mTLS) — Ziel der enrollten config.yaml ────────────────
+	// ── Agent API (mTLS) — target of the enrolled config.yaml ────────────
 	serverCert, err := certAuthority.IssueServerCert(ctx, []string{hostInternal, "localhost", "127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
@@ -179,15 +180,15 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 	go func() { _ = agentServer.ServeTLS(agentListener, "", "") }()
 	t.Cleanup(func() { _ = agentServer.Close() })
 
-	// ── Token über die Admin-API minten (C2) ─────────────────────────────
+	// ── Mint a token via the admin API (C2) ───────────────────────────────
 	token, installCommand := mintEnrollToken(t, publicPort, pin, map[string]any{
 		"tags": map[string]string{"env": "prod"}, "ttl_seconds": 600,
 	})
 	if !strings.Contains(installCommand, publicBaseURL+"/install.sh") || !strings.Contains(installCommand, token) {
-		t.Fatalf("install_command unerwartet: %q", installCommand)
+		t.Fatalf("unexpected install_command: %q", installCommand)
 	}
 
-	// ── sshd-Fixture: Script ziehen und ausführen ────────────────────────
+	// ── sshd fixture: pull and run the script ─────────────────────────────
 	req := testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			FromDockerfile: testcontainers.FromDockerfile{Context: "testdata/sshd"},
@@ -204,7 +205,7 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 		t.Cleanup(func() { _ = testcontainers.TerminateContainer(ctr) })
 	}
 	if err != nil {
-		t.Fatalf("sshd-container: %v", err)
+		t.Fatalf("sshd container: %v", err)
 	}
 	t.Cleanup(func() {
 		if !t.Failed() {
@@ -212,26 +213,26 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 		}
 		if logs, logErr := ctr.Logs(context.Background()); logErr == nil {
 			raw, _ := io.ReadAll(logs)
-			t.Logf("container-logs:\n%s", raw)
+			t.Logf("container logs:\n%s", raw)
 		}
 	})
 
-	// Das Test-Zertifikat in den Trust-Store: curl im Script prüft TLS regulär
-	// (der Pin gilt nur für den Enroll-Call des Agenten).
+	// Add the test certificate to the trust store: curl in the script checks
+	// TLS normally (the pin only applies to the agent's enroll call).
 	certPath := filepath.Join(t.TempDir(), "gssh-test-ca.crt")
 	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := ctr.CopyFileToContainer(ctx, certPath, "/usr/local/share/ca-certificates/gssh-test-ca.crt", 0o644); err != nil {
-		t.Fatalf("test-ca kopieren: %v", err)
+		t.Fatalf("copying test ca: %v", err)
 	}
 	if code, output, err := ctr.Exec(ctx, []string{"update-ca-certificates"}); err != nil || code != 0 {
 		raw, _ := io.ReadAll(output)
 		t.Fatalf("update-ca-certificates: exit %d, %v: %s", code, err, raw)
 	}
 
-	// Exakt der UI-Befehl, nur ohne sudo (im Container ist root aktiv) und mit
-	// --no-systemd (die Fixture hat kein systemd).
+	// Exactly the UI command, just without sudo (root is active in the
+	// container) and with --no-systemd (the fixture has no systemd).
 	script := fmt.Sprintf("curl -fsSL %s/install.sh | sh -s -- --token %s --no-systemd", publicBaseURL, token)
 	code, output, err := ctr.Exec(ctx, []string{"sh", "-c", script})
 	if err != nil {
@@ -243,43 +244,43 @@ func TestInstallScriptEndToEnd(t *testing.T) {
 	}
 	t.Logf("install.sh:\n%s", raw)
 
-	// ── Ergebnis auf dem Host ────────────────────────────────────────────
-	// Binary installiert, config.yaml geschrieben; der Fixture-Entrypoint
-	// startet daraufhin den Agenten — der Socket ist dasselbe Readiness-Signal,
-	// auf das der systemd-Zweig des Scripts wartet.
-	assertContainerCmd(t, ctr, []string{"test", "-x", "/usr/bin/gssh-agentd"}, "binary nicht installiert")
-	assertContainerCmd(t, ctr, []string{"test", "-f", "/var/lib/guided-ssh/config.yaml"}, "config.yaml fehlt")
+	// ── Result on the host ─────────────────────────────────────────────────
+	// Binary installed, config.yaml written; the fixture entrypoint then
+	// starts the agent — the socket is the same readiness signal the
+	// systemd branch of the script waits for.
+	assertContainerCmd(t, ctr, []string{"test", "-x", "/usr/bin/gssh-agentd"}, "binary not installed")
+	assertContainerCmd(t, ctr, []string{"test", "-f", "/var/lib/guided-ssh/config.yaml"}, "config.yaml missing")
 	waitForContainerCmd(t, ctr, []string{"test", "-S", "/var/lib/guided-ssh/agentd.sock"}, 30*time.Second,
-		"agentd.sock erschien nicht — agent nicht gestartet")
+		"agentd.sock did not appear — agent did not start")
 
-	// ── Host in der Datenbank ────────────────────────────────────────────
+	// ── Host in the database ──────────────────────────────────────────────
 	hostname := containerHostname(t, ctr)
 	host, err := st.GetHostByName(ctx, hostname)
 	if err != nil {
-		t.Fatalf("host %q nicht registriert: %v", hostname, err)
+		t.Fatalf("host %q not registered: %v", hostname, err)
 	}
 	tags, err := st.GetHostTags(ctx, host.ID)
 	if err != nil || tags["env"] != "prod" {
-		t.Fatalf("host-tags: %v %v", tags, err)
+		t.Fatalf("host tags: %v %v", tags, err)
 	}
 
-	// Einmalverbrauch: dieselbe Zeile ein zweites Mal scheitert beim Enroll —
-	// mit vorhandener config.yaml läuft das Script bewusst degradiert weiter.
+	// Single use: the same line a second time fails at enroll — with an
+	// existing config.yaml the script deliberately continues in degraded mode.
 	code, output, err = ctr.Exec(ctx, []string{"sh", "-c", script})
 	if err != nil {
 		t.Fatalf("install.sh re-run exec: %v", err)
 	}
 	raw, _ = io.ReadAll(output)
 	if code != 0 {
-		t.Fatalf("install.sh re-run exit %d (erwartet degradierter erfolg):\n%s", code, raw)
+		t.Fatalf("install.sh re-run exit %d (expected degraded success):\n%s", code, raw)
 	}
-	if !strings.Contains(string(raw), "bestehendes enrollment") {
-		t.Errorf("re-run ohne degradations-warnung:\n%s", raw)
+	if !strings.Contains(string(raw), "previous enrollment") {
+		t.Errorf("re-run without degradation warning:\n%s", raw)
 	}
 }
 
-// mintEnrollToken ruft POST /v1/admin/enroll-tokens über den gepinnten
-// TLS-Listener (127.0.0.1, der Test läuft außerhalb des Containers).
+// mintEnrollToken calls POST /v1/admin/enroll-tokens over the pinned TLS
+// listener (127.0.0.1, the test runs outside the container).
 func mintEnrollToken(t *testing.T, port int, pin string, payload map[string]any) (token, installCommand string) {
 	t.Helper()
 	decoded, err := pintls.DecodePin(pin)
@@ -301,7 +302,7 @@ func mintEnrollToken(t *testing.T, port int, pin string, payload map[string]any)
 	req.Header.Set("Authorization", "Bearer "+adminBearer)
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("mint-request: %v", err)
+		t.Fatalf("mint request: %v", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -313,16 +314,16 @@ func mintEnrollToken(t *testing.T, port int, pin string, payload map[string]any)
 		InstallCommand string `json:"install_command"`
 	}
 	if err := json.Unmarshal(raw, &minted); err != nil {
-		t.Fatalf("mint-antwort parsen: %v", err)
+		t.Fatalf("parsing mint response: %v", err)
 	}
 	if minted.Token == "" {
-		t.Fatal("mint-antwort ohne token")
+		t.Fatal("mint response without token")
 	}
 	return minted.Token, minted.InstallCommand
 }
 
-// selfSignedCert baut ein selbstsigniertes Zertifikat für den Public-Listener.
-// IsCA, damit dasselbe Zertifikat im Container-Trust-Store curl genügt.
+// selfSignedCert builds a self-signed certificate for the public listener.
+// IsCA so the same certificate is sufficient for curl in the container trust store.
 func selfSignedCert(t *testing.T, dnsName string) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -352,7 +353,7 @@ func selfSignedCert(t *testing.T, dnsName string) (tls.Certificate, *x509.Certif
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, leaf
 }
 
-// assertContainerCmd führt ein Kommando im Container aus und erwartet Exit 0.
+// assertContainerCmd runs a command in the container and expects exit 0.
 func assertContainerCmd(t *testing.T, ctr testcontainers.Container, cmd []string, msg string) {
 	t.Helper()
 	code, output, err := ctr.Exec(context.Background(), cmd)
@@ -365,7 +366,7 @@ func assertContainerCmd(t *testing.T, ctr testcontainers.Container, cmd []string
 	}
 }
 
-// waitForContainerCmd wiederholt ein Kommando bis Exit 0 oder Timeout.
+// waitForContainerCmd repeats a command until exit 0 or timeout.
 func waitForContainerCmd(t *testing.T, ctr testcontainers.Container, cmd []string, timeout time.Duration, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -379,17 +380,17 @@ func waitForContainerCmd(t *testing.T, ctr testcontainers.Container, cmd []strin
 	t.Fatal(msg)
 }
 
-// containerHostname liefert den Hostnamen, unter dem sich der Agent registriert
-// hat (das Script übergibt keinen — der Agent nimmt os.Hostname).
+// containerHostname returns the hostname under which the agent registered
+// (the script passes none — the agent uses os.Hostname).
 func containerHostname(t *testing.T, ctr testcontainers.Container) string {
 	t.Helper()
 	code, output, err := ctr.Exec(context.Background(), []string{"hostname"})
 	if err != nil || code != 0 {
-		t.Fatalf("hostname ermitteln: exit %d, %v", code, err)
+		t.Fatalf("determining hostname: exit %d, %v", code, err)
 	}
 	raw, _ := io.ReadAll(output)
-	// Der Exec-Stream ist gemultiplext; die 8-Byte-Header enthalten keine
-	// druckbaren Zeichen, deshalb reicht das Trimmen des Rests.
+	// The exec stream is multiplexed; the 8-byte headers contain no
+	// printable characters, so trimming the rest is sufficient.
 	return strings.TrimSpace(strings.Map(func(r rune) rune {
 		if r < 0x20 {
 			return -1

@@ -1,12 +1,12 @@
-# Deklarative Grants via GitOps: grants.yaml liegt versioniert im Repo
-# (Overlay, configMapGenerator) und wird periodisch mit `gssh-admin apply`
-# abgeglichen — die Datei ist der Zielzustand, Änderungen laufen als
-# reviewbarer Merge-Request.
+# Declarative grants via GitOps: grants.yaml lives versioned in the repo
+# (overlay, configMapGenerator) and is periodically reconciled with
+# `gssh-admin apply` — the file is the target state, changes to it run as a
+# reviewable merge request.
 #
-# Authentifizierung: Client-Credentials-Flow (GSSH_CLIENT_ID/-SECRET) gegen
-# den IdP — ein Service-Account-Client, dessen Tokens die Audience des
-# Servers (GSSH_OIDC_CLIENT_ID) und die Admin-Gruppe im groups-Claim tragen;
-# Einrichtung siehe README (Abschnitt Grants-Sync).
+# Authentication: client-credentials flow (GSSH_CLIENT_ID/-SECRET) against
+# the IdP — a service account client whose tokens carry the server's
+# audience (GSSH_OIDC_CLIENT_ID) and the admin group in the groups claim;
+# see README (Grants sync section) for setup.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -33,8 +33,8 @@ spec:
               type: RuntimeDefault
           containers:
             - name: gssh-admin
-              # gssh-admin liegt im Server-Image (distroless, kein Shell) —
-              # Tag zur ausgerollten appVersion passend halten.
+              # gssh-admin lives in the server image (distroless, no shell) —
+              # keep the tag matching the rolled-out appVersion.
               image: docker.io/guidedtraffic/guided-ssh:0.1.0
               command:
                 - /usr/local/bin/gssh-admin
@@ -68,10 +68,10 @@ spec:
                   mountPath: /etc/guided-ssh
                   readOnly: true
           volumes:
-            # Ein Verzeichnis aus beiden ConfigMaps: config.yaml (base,
-            # von Overlays gepatcht) + grants.yaml (configMapGenerator im
-            # Overlay). Jobs starten frische Pods und lesen damit immer den
-            # aktuellen Stand.
+            # A directory built from both ConfigMaps: config.yaml (base,
+            # patched by overlays) + grants.yaml (configMapGenerator in the
+            # overlay). Jobs start fresh pods and therefore always read the
+            # current state.
             - name: config
               projected:
                 sources:

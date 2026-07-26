@@ -15,32 +15,32 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 )
 
-// ErrNoIDToken: Token-Antwort des IdP enthielt kein id_token.
-var ErrNoIDToken = errors.New("auth: token-antwort enthält kein id_token")
+// ErrNoIDToken: the IdP's token response contained no id_token.
+var ErrNoIDToken = errors.New("auth: token response contains no id_token")
 
-// FlowConfig konfiguriert die CLI-Login-Flows.
+// FlowConfig configures the CLI login flows.
 type FlowConfig struct {
-	// IssuerURL ist die OIDC-Issuer-URL (für Discovery).
+	// IssuerURL is the OIDC issuer URL (for discovery).
 	IssuerURL string
-	// ClientID ist der öffentliche OIDC-Client der CLI.
+	// ClientID is the CLI's public OIDC client.
 	ClientID string
-	// Scopes; Default: openid, profile, email.
+	// Scopes; default: openid, profile, email.
 	Scopes []string
 }
 
-// Flow führt die OIDC-Login-Flows der CLI aus: Authorization Code + PKCE
-// (Default) und Device-Flow (Fallback ohne Browser/Localhost, z. B. via SSH
-// auf einer entfernten Maschine).
+// Flow runs the CLI's OIDC login flows: Authorization Code + PKCE
+// (default) and the Device Flow (fallback without a browser/localhost, e.g.
+// via SSH on a remote machine).
 type Flow struct {
 	cfg      FlowConfig
 	endpoint oauth2.Endpoint
 }
 
-// NewFlow lädt die Discovery des Issuers und baut den Flow.
+// NewFlow loads the issuer's discovery document and builds the Flow.
 func NewFlow(ctx context.Context, cfg FlowConfig) (*Flow, error) {
 	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
 	if err != nil {
-		return nil, fmt.Errorf("auth: oidc-discovery für %s: %w", cfg.IssuerURL, err)
+		return nil, fmt.Errorf("auth: oidc discovery for %s: %w", cfg.IssuerURL, err)
 	}
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = []string{oidc.ScopeOpenID, "profile", "email"}
@@ -48,14 +48,14 @@ func NewFlow(ctx context.Context, cfg FlowConfig) (*Flow, error) {
 	return &Flow{cfg: cfg, endpoint: provider.Endpoint()}, nil
 }
 
-// AuthCodePKCE führt den Authorization-Code-Flow mit PKCE aus: startet einen
-// Callback-Listener auf 127.0.0.1 (zufälliger Port), übergibt die
-// Authorize-URL an openURL (öffnet den Browser) und tauscht den Code gegen
-// Tokens. Rückgabe ist das rohe ID-Token für POST /v1/sign/user.
+// AuthCodePKCE runs the Authorization Code flow with PKCE: starts a
+// callback listener on 127.0.0.1 (random port), hands the authorize URL to
+// openURL (opens the browser), and exchanges the code for tokens. Returns
+// the raw ID token for POST /v1/sign/user.
 func (f *Flow) AuthCodePKCE(ctx context.Context, openURL func(url string) error) (string, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return "", fmt.Errorf("auth: callback-listener starten: %w", err)
+		return "", fmt.Errorf("auth: starting callback listener: %w", err)
 	}
 	defer listener.Close()
 
@@ -87,17 +87,17 @@ func (f *Flow) AuthCodePKCE(ctx context.Context, openURL func(url string) error)
 			result := callback{code: query.Get("code")}
 			switch {
 			case query.Get("state") != state:
-				result.err = errors.New("auth: state-mismatch im callback")
+				result.err = errors.New("auth: state mismatch in callback")
 			case query.Get("error") != "":
-				result.err = fmt.Errorf("auth: idp-fehler: %s (%s)",
+				result.err = fmt.Errorf("auth: idp error: %s (%s)",
 					query.Get("error"), query.Get("error_description"))
 			case result.code == "":
-				result.err = errors.New("auth: callback ohne code")
+				result.err = errors.New("auth: callback without code")
 			}
 			if result.err != nil {
-				http.Error(w, "Login fehlgeschlagen — Details im Terminal.", http.StatusBadRequest)
+				http.Error(w, "Login failed — see terminal for details.", http.StatusBadRequest)
 			} else {
-				fmt.Fprintln(w, "Login erfolgreich — dieses Fenster kann geschlossen werden.")
+				fmt.Fprintln(w, "Login successful — you can close this window.")
 			}
 			select {
 			case callbackCh <- result:
@@ -110,7 +110,7 @@ func (f *Flow) AuthCodePKCE(ctx context.Context, openURL func(url string) error)
 
 	authURL := oauthCfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
 	if err := openURL(authURL); err != nil {
-		return "", fmt.Errorf("auth: browser öffnen: %w", err)
+		return "", fmt.Errorf("auth: opening browser: %w", err)
 	}
 
 	select {
@@ -122,15 +122,15 @@ func (f *Flow) AuthCodePKCE(ctx context.Context, openURL func(url string) error)
 		}
 		token, err := oauthCfg.Exchange(ctx, result.code, oauth2.VerifierOption(verifier))
 		if err != nil {
-			return "", fmt.Errorf("auth: code-exchange: %w", err)
+			return "", fmt.Errorf("auth: code exchange: %w", err)
 		}
 		return idTokenFrom(token)
 	}
 }
 
-// DeviceFlow führt den Device-Authorization-Flow aus: prompt bekommt
-// Verification-URI und User-Code zur Anzeige, danach wird bis zur Bestätigung
-// (oder Ablauf) gepollt.
+// DeviceFlow runs the Device Authorization flow: prompt receives the
+// verification URI and user code to display, then polling continues until
+// confirmation (or expiry).
 func (f *Flow) DeviceFlow(ctx context.Context, prompt func(verificationURI, userCode string)) (string, error) {
 	oauthCfg := oauth2.Config{
 		ClientID: f.cfg.ClientID,
@@ -139,7 +139,7 @@ func (f *Flow) DeviceFlow(ctx context.Context, prompt func(verificationURI, user
 	}
 	response, err := oauthCfg.DeviceAuth(ctx)
 	if err != nil {
-		return "", fmt.Errorf("auth: device-authorization: %w", err)
+		return "", fmt.Errorf("auth: device authorization: %w", err)
 	}
 	uri := response.VerificationURIComplete
 	if uri == "" {
@@ -148,15 +148,15 @@ func (f *Flow) DeviceFlow(ctx context.Context, prompt func(verificationURI, user
 	prompt(uri, response.UserCode)
 	token, err := oauthCfg.DeviceAccessToken(ctx, response)
 	if err != nil {
-		return "", fmt.Errorf("auth: device-token: %w", err)
+		return "", fmt.Errorf("auth: device token: %w", err)
 	}
 	return idTokenFrom(token)
 }
 
-// ClientCredentials führt den Client-Credentials-Flow aus (Service-Account
-// ohne Benutzer, z. B. der GitOps-Grants-Sync): Token-Request mit
-// Client-Secret am Token-Endpoint. Rückgabe ist das rohe id_token — der IdP
-// muss dem Client dafür den Scope openid ausstellen.
+// ClientCredentials runs the Client Credentials flow (a service account
+// without a user, e.g. the GitOps grants sync): a token request with the
+// client secret against the token endpoint. Returns the raw id_token — the
+// IdP must issue the openid scope to the client for this to work.
 func (f *Flow) ClientCredentials(ctx context.Context, clientSecret string) (string, error) {
 	oauthCfg := clientcredentials.Config{
 		ClientID:     f.cfg.ClientID,
@@ -166,12 +166,12 @@ func (f *Flow) ClientCredentials(ctx context.Context, clientSecret string) (stri
 	}
 	token, err := oauthCfg.Token(ctx)
 	if err != nil {
-		return "", fmt.Errorf("auth: client-credentials-token: %w", err)
+		return "", fmt.Errorf("auth: client-credentials token: %w", err)
 	}
 	return idTokenFrom(token)
 }
 
-// idTokenFrom extrahiert das rohe id_token aus der Token-Antwort.
+// idTokenFrom extracts the raw id_token from the token response.
 func idTokenFrom(token *oauth2.Token) (string, error) {
 	raw, ok := token.Extra("id_token").(string)
 	if !ok || raw == "" {
@@ -180,7 +180,7 @@ func idTokenFrom(token *oauth2.Token) (string, error) {
 	return raw, nil
 }
 
-// randomToken erzeugt einen URL-sicheren Zufallswert (state-Parameter).
+// randomToken generates a URL-safe random value (state parameter).
 func randomToken() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {

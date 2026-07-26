@@ -6,7 +6,7 @@ export interface AuditList {
   events: Array<AuditEvent>;
 
   /**
-   * Gesamtzahl zum Filter (für Pagination)
+   * Total count for the filter (for pagination)
    */
   total: number;
 }

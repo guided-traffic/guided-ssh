@@ -1,22 +1,29 @@
 # guided-ssh
 
-## Orientierung im Projekt
+## Project orientation
 
-Ich (Claude) nutze graphify selbst, um mich schnell im Projekt zurechtzufinden — nicht
-nur auf Zuruf. Vorgehen:
+I (Claude) use graphify myself to get oriented in the project quickly — not just
+on request. Approach:
 
-- **Zu Session-Beginn / bei unbekanntem Code**: zuerst den vorhandenen Knowledge-Graph
-  in `graphify-out/` konsultieren (`GRAPH_REPORT.md` für God-Nodes/Communities,
-  `graph.json` für Details) statt blind Dateien zu durchsuchen. Gezielt fragen:
-  `/graphify query "<frage>"`, `/graphify path "<A>" "<B>"`, `/graphify explain "<node>"`.
-- **Graph fehlt oder ist veraltet**: `/graphify .` (voller Aufbau) bzw. `/graphify . --update`
-  (nur geänderte Dateien; bei reinen Code-Änderungen ohne LLM). Nach größeren Änderungen
-  aktuell halten.
-- `graphify-out/` ist Arbeitsartefakt (nicht committen, sofern nicht anders gewünscht).
+- **At session start / for unfamiliar code**: check the existing knowledge graph
+  in `graphify-out/` first (`GRAPH_REPORT.md` for god nodes/communities,
+  `graph.json` for details) instead of blindly searching files. Ask targeted
+  questions: `/graphify query "<question>"`, `/graphify path "<A>" "<B>"`,
+  `/graphify explain "<node>"`.
+- **Graph missing or stale**: `/graphify .` (full build) or `/graphify . --update`
+  (changed files only; no LLM for pure code changes). Keep it current after
+  larger changes.
+- `graphify-out/` is a working artifact (don't commit it unless told otherwise).
 
-GRAPHIFY ERSTMAL NICHT AKTUALISIEREN, DAUERT ZU LANGE.
+DON'T UPDATE GRAPHIFY FOR NOW, TAKES TOO LONG.
 
-## Projektkontext
+## Project context
 
-- Plan und Fortschritt: `INITIAL_PROJECT_PLAN.md` (Phasen mit abhakbaren Steps — dort abhaken, was erledigt ist)
-- Wenn du einen Task abgeschlossen hast, gib zusätzlich eine kurzen conventional commit message aus
+- Plan and progress: `INITIAL_PROJECT_PLAN.md` (phases with checkable steps — check off what's done)
+- When you finish a task, also print a short conventional commit message
+
+## Language policy
+
+- The entire project is written in English: code, comments, docs, UI, everything.
+- If you find German text anywhere, don't translate it on the spot — flag it and
+  ask how to proceed first, then translate to English once confirmed.

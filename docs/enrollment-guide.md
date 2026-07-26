@@ -1,68 +1,68 @@
-# Host-Enrollment — Schritt für Schritt
+# Host Enrollment — Step by Step
 
-Registriert einen Linux-Host bei der Plattform: der Host erhält ein
-SSH-Host-Zertifikat und ein mTLS-Client-Zertifikat, sshd wird für
-Zertifikats-Authentifizierung konfiguriert, der Agent `gssh-agentd` hält
-alles aktuell (ADR-017). Betriebssicht: [betriebshandbuch.md](betriebshandbuch.md);
-Fehlerbilder: [troubleshooting.md](troubleshooting.md).
+Registers a Linux host with the platform: the host receives an SSH host
+certificate and an mTLS client certificate, sshd is configured for
+certificate authentication, and the `gssh-agentd` agent keeps everything
+up to date (ADR-017). Operations view: [operations-manual.md](operations-manual.md);
+failure modes: [troubleshooting.md](troubleshooting.md).
 
-## 1. Voraussetzungen
+## 1. Prerequisites
 
-- Laufender **sshd** mit vorhandenen Host-Keys — fehlen sie:
-  `ssh-keygen -A`. Der Agent nutzt standardmäßig
-  `/etc/ssh/ssh_host_ed25519_key.pub` (Override: `--ssh-key`).
-- Die Haupt-`sshd_config` muss das Konfigurationsverzeichnis einbinden:
+- A running **sshd** with existing host keys — if missing:
+  `ssh-keygen -A`. The agent uses
+  `/etc/ssh/ssh_host_ed25519_key.pub` by default (override: `--ssh-key`).
+- The main `sshd_config` must include the configuration directory:
 
   ```
   Include /etc/ssh/sshd_config.d/*.conf
   ```
 
-  (bei den meisten Distributionen Standard; ohne das Include bleibt der
-  generierte Schnipsel wirkungslos).
-- Netzzugang zum gssh-server: öffentliche API (`POST /v1/enroll`) und
-  Agent-API (mTLS, Port 8443 — TLS-Passthrough/LoadBalancer, siehe
-  Chart-README).
-- root-Rechte auf dem Host (schreibt nach `/etc/ssh` und `/var/lib/guided-ssh`).
+  (the default on most distributions; without the include, the
+  generated snippet has no effect).
+- Network access to the gssh server: the public API (`POST /v1/enroll`) and
+  the agent API (mTLS, port 8443 — TLS passthrough/LoadBalancer, see the
+  chart README).
+- Root privileges on the host (writes to `/etc/ssh` and `/var/lib/guided-ssh`).
 
-## 2. Paket installieren
+## 2. Install the package
 
-**deb/rpm** (gebaut mit nfpm, `make packages`; Inhalt: Binary
-`/usr/bin/gssh-agentd`, systemd-Unit `/lib/systemd/system/gssh-agentd.service`):
+**deb/rpm** (built with nfpm, `make packages`; contents: binary
+`/usr/bin/gssh-agentd`, systemd unit `/lib/systemd/system/gssh-agentd.service`):
 
 ```sh
-dpkg -i gssh-agentd_<version>_amd64.deb     # bzw. rpm -i …
+dpkg -i gssh-agentd_<version>_amd64.deb     # or rpm -i …
 ```
 
-Das postinstall-Skript legt `/var/lib/guided-ssh` (0700) an und lädt systemd
-neu; der Dienst wird bewusst **nicht** gestartet — erst nach dem Enrollment.
+The postinstall script creates `/var/lib/guided-ssh` (0700) and reloads systemd;
+the service is deliberately **not** started — only after enrollment.
 
-**Ohne Paketmanager** — Install-Skript lädt das Binary aus dem
-GitHub-Release:
+**Without a package manager** — the install script downloads the binary from the
+GitHub release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/guided-traffic/guided-ssh/main/deploy/packaging/install.sh \
   | sh -s -- v0.3.0
 ```
 
-## 3. Enrollment-Token erzeugen (auf dem Server)
+## 3. Generate an enrollment token (on the server)
 
 ```sh
 gssh-server enroll-token -name web01.example.com -tags env=prod,role=web -ttl 24h
 ```
 
-| Flag | Default | Bedeutung |
+| Flag | Default | Meaning |
 |---|---|---|
-| `-name` | leer | Token an genau diesen Hostnamen binden (empfohlen); anderer Hostname beim Enroll ⇒ 403 |
-| `-tags` | leer | Host-Tags (`k=v,…`); Token-Tags haben Vorrang vor `--tags` beim Enroll |
-| `-ttl` | `24h` | Gültigkeitsdauer des Tokens |
+| `-name` | empty | Bind the token to exactly this hostname (recommended); a different hostname at enroll time ⇒ 403 |
+| `-tags` | empty | Host tags (`k=v,…`); token tags take precedence over `--tags` at enroll time |
+| `-ttl` | `24h` | Token validity period |
 
-Der Klartext (`gssh-et-…`, 256 bit Zufall) geht einmalig nach stdout — in
-der Datenbank liegt nur der SHA-256-Hash. Das Token ist **Single-Use**: der
-Verbrauch ist transaktional, ein zweiter Versuch liefert 403. Das Kommando
-braucht die `GSSH_DB_*`-Verbindungsdaten (z. B. via `kubectl exec` im
-Server-Pod ausführen).
+The plaintext value (`gssh-et-…`, 256 bits of randomness) is printed to stdout
+once — only its SHA-256 hash is stored in the database. The token is
+**single-use**: consumption is transactional, a second attempt returns 403.
+The command needs the `GSSH_DB_*` connection settings (e.g. run it via
+`kubectl exec` in the server pod).
 
-## 4. Host registrieren
+## 4. Register the host
 
 ```sh
 gssh-agentd enroll \
@@ -71,43 +71,43 @@ gssh-agentd enroll \
   --token gssh-et-…
 ```
 
-Alle Flags:
+All flags:
 
-| Flag | Default | Bedeutung |
+| Flag | Default | Meaning |
 |---|---|---|
-| `--server` | — (Pflicht) | öffentliche API des gssh-servers (`POST /v1/enroll`) |
-| `--agent-url` | — (Pflicht) | mTLS-Agent-API für den späteren Betrieb |
-| `--token` | — (Pflicht) | einmaliges Enrollment-Token |
-| `--hostname` | `os.Hostname()` | Name, unter dem sich der Host registriert |
-| `--tags` | leer | Host-Tags `k=v,…` (Token-Tags gewinnen serverseitig) |
-| `--pin` | leer | SPKI-SHA-256-Pin (Base64) des Enroll-Endpoints — für selbstsignierte Deployments |
-| `--state-dir` | `/var/lib/guided-ssh` | State-Verzeichnis des Agenten |
-| `--ssh-dir` | `/etc/ssh` | sshd-Konfigurationsverzeichnis |
-| `--ssh-key` | `<ssh-dir>/ssh_host_ed25519_key.pub` | SSH-Host-Public-Key, dessen Zertifikat gepflegt wird |
-| `--session-audit` | aus | Host-Session-/sudo-Audit aktivieren (pam_exec-Hooks, Opt-in, ADR-021) |
+| `--server` | — (required) | public API of the gssh server (`POST /v1/enroll`) |
+| `--agent-url` | — (required) | mTLS agent API for subsequent operation |
+| `--token` | — (required) | one-time enrollment token |
+| `--hostname` | `os.Hostname()` | name under which the host registers |
+| `--tags` | empty | host tags `k=v,…` (token tags win server-side) |
+| `--pin` | empty | SPKI SHA-256 pin (base64) of the enroll endpoint — for self-signed deployments |
+| `--state-dir` | `/var/lib/guided-ssh` | agent state directory |
+| `--ssh-dir` | `/etc/ssh` | sshd configuration directory |
+| `--ssh-key` | `<ssh-dir>/ssh_host_ed25519_key.pub` | SSH host public key whose certificate is maintained |
+| `--session-audit` | off | enable host session/sudo audit (pam_exec hooks, opt-in, ADR-021) |
 
-Was das Enrollment schreibt (idempotent; ein Re-Enrollment mit neuem Token
-überschreibt):
+What enrollment writes (idempotent; a re-enrollment with a new token
+overwrites it):
 
-**State-Verzeichnis** (`/var/lib/guided-ssh`, 0700):
+**State directory** (`/var/lib/guided-ssh`, 0700):
 
-| Datei | Inhalt |
+| File | Content |
 |---|---|
-| `agent.key` (0600) | privater mTLS-Schlüssel (Ed25519, frisch erzeugt) |
-| `agent.crt` | mTLS-Client-Zertifikat (CN = Host-UUID, vom Server vergeben) |
-| `server-ca.pem` | mTLS-CA zum Verifizieren der Agent-API |
-| `config.yaml` (0600) | Agent-Konfiguration (unten) |
-| `socket-token` (0600) | nur bei `--session-audit`: Token der schreibenden Socket-Endpunkte |
+| `agent.key` (0600) | private mTLS key (Ed25519, freshly generated) |
+| `agent.crt` | mTLS client certificate (CN = host UUID, assigned by the server) |
+| `server-ca.pem` | mTLS CA for verifying the agent API |
+| `config.yaml` (0600) | agent configuration (below) |
+| `socket-token` (0600) | only with `--session-audit`: token for the socket write endpoints |
 
 **sshd** (`/etc/ssh`):
 
-| Datei | Inhalt |
+| File | Content |
 |---|---|
-| `ssh_host_ed25519_key-cert.pub` | Host-Zertifikat (Pfad = Public-Key-Pfad mit `-cert.pub`) |
-| `guided-ssh-user-ca.pub` | `TrustedUserCAKeys`-Bundle der Benutzer-CA |
-| `sshd_config.d/guided-ssh.conf` | generierter Schnipsel (nicht manuell editieren) |
+| `ssh_host_ed25519_key-cert.pub` | host certificate (path = public key path with `-cert.pub`) |
+| `guided-ssh-user-ca.pub` | `TrustedUserCAKeys` bundle of the user CA |
+| `sshd_config.d/guided-ssh.conf` | generated snippet (do not edit manually) |
 
-Der Schnipsel:
+The snippet:
 
 ```
 TrustedUserCAKeys /etc/ssh/guided-ssh-user-ca.pub
@@ -116,114 +116,114 @@ AuthorizedPrincipalsCommand /usr/bin/gssh-agentd principals -state-dir /var/lib/
 AuthorizedPrincipalsCommandUser root
 ```
 
-Mit `--session-audit` zusätzlich `LogLevel VERBOSE`, und der Helper bekommt
-`-serial %s -keyid %i` (Korrelation Session ↔ Zertifikat); außerdem wird an
-`/etc/pam.d/sshd` und `/etc/pam.d/sudo` idempotent ein Hook angehängt
-(Marker `# guided-ssh session audit (managed)`):
+With `--session-audit`, `LogLevel VERBOSE` is added, the helper additionally
+receives `-serial %s -keyid %i` (correlating session ↔ certificate), and a
+hook is idempotently appended to `/etc/pam.d/sshd` and `/etc/pam.d/sudo`
+(marker `# guided-ssh session audit (managed)`):
 
 ```
 session optional pam_exec.so quiet /usr/bin/gssh-agentd pam-session -state-dir /var/lib/guided-ssh
 ```
 
-`optional` + Helper-Exit 0 ⇒ fail-open: der Hook blockiert niemals Login
-oder sudo.
+`optional` + helper exit code 0 ⇒ fail-open: the hook never blocks login
+or sudo.
 
-## 5. Dienst starten und verifizieren
+## 5. Start the service and verify
 
 ```sh
-sshd -t                              # Konfiguration prüfen
-systemctl reload sshd                # sshd liest HostCertificate nur beim Start/Reload
+sshd -t                              # check configuration
+systemctl reload sshd                # sshd reads HostCertificate only at start/reload
 systemctl enable --now gssh-agentd
 ```
 
-Verifikation:
+Verification:
 
 ```sh
-# Daemon läuft und beantwortet Principals-Anfragen?
+# Is the daemon running and answering principals requests?
 gssh-agentd principals -user deploy
-# → eine Zeile pro autorisiertem Principal; Fehler ⇒ Dienst/Grants prüfen
+# → one line per authorized principal; error ⇒ check service/grants
 
-journalctl -u gssh-agentd            # JSON-Logs des Agenten
+journalctl -u gssh-agentd            # agent's JSON logs
 
-# Login-Test von einem Client mit gültigem Zertifikat:
+# Login test from a client with a valid certificate:
 gssh login && gssh ssh deploy@web01.example.com true
 ```
 
-Erscheint beim Login-Test ein Host-Key-Prompt, fehlt dem Client das
-Host-CA-Vertrauen — `@cert-authority`-Zeile aus `GET /v1/ca/bundle/host` in
-die `known_hosts` aufnehmen.
+If a host-key prompt appears during the login test, the client is missing
+trust in the host CA — add the `@cert-authority` line from
+`GET /v1/ca/bundle/host` to `known_hosts`.
 
-## 6. Betrieb des Agenten
+## 6. Agent operation
 
-Systemd-Unit (`internal/agentdist/gssh-agentd.service`): `gssh-agentd run`,
-`Restart=on-failure`, `ProtectSystem=full` mit `ReadWritePaths=/var/lib/guided-ssh /etc/ssh`,
+Systemd unit (`internal/agentdist/gssh-agentd.service`): `gssh-agentd run`,
+`Restart=on-failure`, `ProtectSystem=full` with `ReadWritePaths=/var/lib/guided-ssh /etc/ssh`,
 `NoNewPrivileges`.
 
-Der Daemon übernimmt:
+The daemon handles:
 
-- **Host-Zertifikat erneuern** bei 2/3 der Laufzeit (Laufzeit 30 Tage;
-  Prüfintervall `renew_interval`, Default 5 m) über `POST /v1/agent/renew`.
-  Danach läuft `reload_command`, falls konfiguriert — sshd liest das
-  `HostCertificate` nur beim Start.
-- **mTLS-Client-Zertifikat rotieren** bei 2/3 der Laufzeit (1 Jahr): frisches
-  Schlüsselpaar + CSR über den noch gültigen mTLS-Kanal
-  (`POST /v1/agent/renew-mtls`), atomarer Dateitausch, Umschalten ohne
-  Neustart. Fehlversuche sind unkritisch, solange das alte Zertifikat gültig
-  ist.
-- **CA-Bundle pflegen** (`TrustedUserCAKeys`-Datei): Abruf alle
-  `bundle_interval` (Default 1 h), geschrieben nur bei Änderung — so kommen
-  CA-Rotationen auf die Hosts.
-- **Principals-Cache + Unix-Socket** (`agentd.sock`) für den sshd-Helper:
-  Antworten jünger als 10 s kommen direkt aus dem Cache; sonst API-Abfrage
-  mit 5-s-Timeout; bei nicht erreichbarer API trägt der (über Neustarts
-  persistierte) Cache bis `cache_ttl` — **danach fail-closed**, Logins
-  werden verweigert.
-- Bei `--session-audit`: Session-/sudo-Events aus dem lokalen Spool
-  (`sessions-spool.jsonl`, verlust-tolerant) alle 15 s per mTLS an
-  `POST /v1/agent/sessions` flushen.
+- **Renewing the host certificate** at 2/3 of its lifetime (30-day validity;
+  check interval `renew_interval`, default 5 m) via `POST /v1/agent/renew`.
+  Afterwards `reload_command` runs, if configured — sshd reads the
+  `HostCertificate` only at start.
+- **Rotating the mTLS client certificate** at 2/3 of its lifetime (1 year): a
+  fresh key pair + CSR over the still-valid mTLS channel
+  (`POST /v1/agent/renew-mtls`), atomic file swap, switchover without
+  a restart. Failed attempts are non-critical as long as the old certificate
+  remains valid.
+- **Maintaining the CA bundle** (`TrustedUserCAKeys` file): fetched every
+  `bundle_interval` (default 1 h), written only on change — this is how
+  CA rotations reach the hosts.
+- **Principals cache + Unix socket** (`agentd.sock`) for the sshd helper:
+  responses younger than 10 s are served directly from the cache; otherwise
+  an API query with a 5 s timeout; if the API is unreachable, the cache
+  (persisted across restarts) carries on until `cache_ttl` —
+  **after that, fail-closed**, logins are denied.
+- With `--session-audit`: session/sudo events from the local spool
+  (`sessions-spool.jsonl`, loss-tolerant) are flushed via mTLS to
+  `POST /v1/agent/sessions` every 15 s.
 
-`config.yaml` im State-Verzeichnis (beim Enrollment geschrieben, manuell
-anpassbar; danach `systemctl restart gssh-agentd`):
+`config.yaml` in the state directory (written during enrollment, manually
+adjustable; requires `systemctl restart gssh-agentd` afterwards):
 
-| Feld | Default | Bedeutung |
+| Field | Default | Meaning |
 |---|---|---|
-| `agent_url` | aus Enrollment | mTLS-Agent-API des Servers |
-| `host_id` | aus Enrollment | vergebene Host-UUID |
-| `host_name` | aus Enrollment | registrierter Hostname |
-| `ssh_key_path` | aus Enrollment | Host-Public-Key, dessen Zertifikat gepflegt wird |
-| `ssh_dir` | `/etc/ssh` | Ziel für Bundle/Zertifikat/Schnipsel |
-| `socket_path` | `<state-dir>/agentd.sock` | Unix-Socket des Principals-Helpers |
-| `cache_ttl` | `5m` | wie lange gecachte Principals bei API-Ausfall noch gelten (danach fail-closed) |
-| `bundle_interval` | `1h` | Aktualisierungsintervall des CA-Bundles |
-| `renew_interval` | `5m` | Prüfintervall Zertifikats-/mTLS-Erneuerung |
-| `reload_command` | leer | Kommando nach neuem Host-Zertifikat, z. B. `systemctl reload sshd` |
-| `session_audit` | `false` | Session-/sudo-Audit (nur via `enroll --session-audit` sinnvoll setzbar) |
+| `agent_url` | from enrollment | server's mTLS agent API |
+| `host_id` | from enrollment | assigned host UUID |
+| `host_name` | from enrollment | registered hostname |
+| `ssh_key_path` | from enrollment | host public key whose certificate is maintained |
+| `ssh_dir` | `/etc/ssh` | target for bundle/certificate/snippet |
+| `socket_path` | `<state-dir>/agentd.sock` | Unix socket of the principals helper |
+| `cache_ttl` | `5m` | how long cached principals remain valid during an API outage (fail-closed afterwards) |
+| `bundle_interval` | `1h` | refresh interval of the CA bundle |
+| `renew_interval` | `5m` | check interval for certificate/mTLS renewal |
+| `reload_command` | empty | command to run after a new host certificate, e.g. `systemctl reload sshd` |
+| `session_audit` | `false` | session/sudo audit (only meaningfully set via `enroll --session-audit`) |
 
-Hinweis zur `cache_ttl`: höhere Werte überbrücken längere API-Ausfälle,
-verlängern aber auch das Fenster, in dem entzogene Berechtigungen auf diesem
-Host noch wirken (ADR-022).
+Note on `cache_ttl`: higher values bridge longer API outages, but also
+extend the window in which revoked permissions still apply on this
+host (ADR-022).
 
-## 7. Re-Enrollment
+## 7. Re-enrollment
 
-Neues Token erzeugen und `gssh-agentd enroll` erneut ausführen — alle
-Dateien werden überschrieben (neues mTLS-Schlüsselpaar, neues
-Host-Zertifikat, frische Konfiguration); ein vorhandenes `socket-token`
-bleibt erhalten. Nötig z. B. bei abgelaufenem mTLS-Zertifikat (Agent war
-lange aus) oder Wechsel der Server-URL. Danach `systemctl restart
-gssh-agentd` und `systemctl reload sshd`.
+Generate a new token and run `gssh-agentd enroll` again — all files are
+overwritten (new mTLS key pair, new host certificate, fresh configuration);
+an existing `socket-token` is preserved. Needed e.g. when the mTLS
+certificate has expired (the agent was down for a long time) or the server
+URL changes. Afterwards run `systemctl restart gssh-agentd` and
+`systemctl reload sshd`.
 
-## 8. Deinstallation
+## 8. Uninstallation
 
 1. `systemctl disable --now gssh-agentd`
-2. Paket entfernen (`apt remove gssh-agentd` / `rpm -e gssh-agentd`).
-3. sshd zurückbauen: `/etc/ssh/sshd_config.d/guided-ssh.conf`,
-   `/etc/ssh/guided-ssh-user-ca.pub` und
-   `/etc/ssh/ssh_host_ed25519_key-cert.pub` löschen, `systemctl reload sshd`
-   — der Host akzeptiert dann keine Zertifikats-Logins mehr.
-4. Bei aktivem Session-Audit: die von guided-ssh markierten Zeilen
+2. Remove the package (`apt remove gssh-agentd` / `rpm -e gssh-agentd`).
+3. Roll back sshd: delete `/etc/ssh/sshd_config.d/guided-ssh.conf`,
+   `/etc/ssh/guided-ssh-user-ca.pub`, and
+   `/etc/ssh/ssh_host_ed25519_key-cert.pub`, then `systemctl reload sshd`
+   — the host will no longer accept certificate logins.
+4. If session audit is active: remove the lines marked by guided-ssh
    (`# guided-ssh session audit (managed)` + `session optional pam_exec.so …`)
-   aus `/etc/pam.d/sshd` und `/etc/pam.d/sudo` entfernen.
-5. State löschen: `rm -rf /var/lib/guided-ssh`.
-6. Serverseitig den Host-Datensatz entfernen (macht das mTLS-Zertifikat
-   sofort wirkungslos, ADR-022); ein API-/CLI-Endpunkt dafür existiert noch
-   nicht — Eingriff auf DB-Ebene (`hosts`).
+   from `/etc/pam.d/sshd` and `/etc/pam.d/sudo`.
+5. Delete the state: `rm -rf /var/lib/guided-ssh`.
+6. Remove the host record on the server side (this immediately invalidates
+   the mTLS certificate, ADR-022); no API/CLI endpoint for this exists
+   yet — requires a DB-level intervention (`hosts`).

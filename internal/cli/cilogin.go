@@ -15,19 +15,19 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Umgebungsvariablen für gssh ci-login (Phase 7): in CI-Jobs gibt es keine
-// Konfigurationsdatei, alles kommt aus Flags bzw. Environment.
+// Environment variables for gssh ci-login (phase 7): CI jobs have no
+// configuration file, everything comes from flags or environment.
 const (
-	// envCIToken ist der Default-Name der Variable mit dem GitLab-Job-Token
-	// (id_tokens-Feature; --token-env übersteuert den Namen).
-	envCIToken = "GSSH_CI_TOKEN" //nolint:gosec // Name der Env-Variable, kein Secret
-	// envAPIURL ist die Basis-URL des gssh-servers.
+	// envCIToken is the default name of the variable holding the GitLab job
+	// token (id_tokens feature; --token-env overrides the name).
+	envCIToken = "GSSH_CI_TOKEN" //nolint:gosec // name of the env variable, not a secret
+	// envAPIURL is the base URL of the gssh server.
 	envAPIURL = "GSSH_API_URL"
-	// envPin ist der optionale SPKI-SHA-256-Pin des Server-Zertifikats.
+	// envPin is the optional SPKI SHA-256 pin of the server certificate.
 	envPin = "GSSH_PIN_SHA256"
 )
 
-// ciLoginOptions steuern gssh ci-login.
+// ciLoginOptions control gssh ci-login.
 type ciLoginOptions struct {
 	apiURL   string
 	tokenEnv string
@@ -35,50 +35,50 @@ type ciLoginOptions struct {
 	validity time.Duration
 }
 
-// runCILoginCmd behandelt gssh ci-login.
+// runCILoginCmd handles gssh ci-login.
 func runCILoginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gssh ci-login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	apiURL := fs.String("api-url", os.Getenv(envAPIURL), "basis-url des gssh-servers (oder GSSH_API_URL)")
-	tokenEnv := fs.String("token-env", envCIToken, "name der env-variable mit dem gitlab-job-token")
-	pin := fs.String("pin-sha256", os.Getenv(envPin), "spki-sha-256-pin des server-zertifikats (oder GSSH_PIN_SHA256)")
-	validity := fs.Duration("validity", 0, "gewünschte laufzeit (0 = server-default, max. 1h)")
+	apiURL := fs.String("api-url", os.Getenv(envAPIURL), "base URL of the gssh server (or GSSH_API_URL)")
+	tokenEnv := fs.String("token-env", envCIToken, "name of the env variable holding the gitlab job token")
+	pin := fs.String("pin-sha256", os.Getenv(envPin), "spki-sha-256 pin of the server certificate (or GSSH_PIN_SHA256)")
+	validity := fs.Duration("validity", 0, "desired validity (0 = server default, max. 1h)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	opts := ciLoginOptions{apiURL: *apiURL, tokenEnv: *tokenEnv, pin: *pin, validity: *validity}
 	if err := ciLogin(ctx, opts, stdout); err != nil {
-		fmt.Fprintf(stderr, "gssh: ci-login fehlgeschlagen: %v\n", err)
+		fmt.Fprintf(stderr, "gssh: ci-login failed: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-// ciLogin tauscht das GitLab-Job-Token gegen ein kurzlebiges CI-Zertifikat
-// und lädt Schlüsselpaar und Zertifikat ausschließlich in den ssh-agent des
-// Jobs (wie gssh login, nur ohne Browser-Flow und Konfigurationsdatei).
+// ciLogin exchanges the GitLab job token for a short-lived CI certificate
+// and loads the key pair and certificate exclusively into the job's
+// ssh-agent (like gssh login, but without the browser flow or config file).
 func ciLogin(ctx context.Context, opts ciLoginOptions, stdout io.Writer) error {
 	if opts.apiURL == "" {
-		return fmt.Errorf("--api-url fehlt (oder %s setzen)", envAPIURL)
+		return fmt.Errorf("--api-url missing (or set %s)", envAPIURL)
 	}
 	token := os.Getenv(opts.tokenEnv)
 	if token == "" {
-		return fmt.Errorf("job-token fehlt: env-variable %s ist leer — id_tokens im job definieren (aud: guided-ssh)", opts.tokenEnv)
+		return fmt.Errorf("job token missing: env variable %s is empty — define id_tokens in the job (aud: guided-ssh)", opts.tokenEnv)
 	}
 
 	ag, conn, err := connectAgent()
 	if err != nil {
-		return errors.Join(err, errors.New("im job vorher starten: eval $(ssh-agent -s)"))
+		return errors.Join(err, errors.New("start it in the job first: eval $(ssh-agent -s)"))
 	}
 	defer conn.Close()
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return fmt.Errorf("schlüsselpaar erzeugen: %w", err)
+		return fmt.Errorf("generating key pair: %w", err)
 	}
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
-		return fmt.Errorf("public key konvertieren: %w", err)
+		return fmt.Errorf("converting public key: %w", err)
 	}
 
 	client, err := newAPIClient(&Config{APIURL: opts.apiURL, PinSHA256: opts.pin})
@@ -92,7 +92,7 @@ func ciLogin(ctx context.Context, opts ciLoginOptions, stdout io.Writer) error {
 	if err := loadIntoAgent(ag, priv, cert); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "ci-login: %s — principals %s, gültig bis %s\n",
+	fmt.Fprintf(stdout, "ci-login: %s — principals %s, valid until %s\n",
 		cert.KeyId, strings.Join(cert.ValidPrincipals, ", "),
 		certTime(cert.ValidBefore).Format(time.RFC3339))
 	return nil

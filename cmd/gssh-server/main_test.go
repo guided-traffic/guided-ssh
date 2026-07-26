@@ -10,32 +10,32 @@ import (
 func TestRunVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"-version"}); got != 0 {
-		t.Fatalf("run(-version) = %d, erwartet 0 (stderr: %s)", got, stderr.String())
+		t.Fatalf("run(-version) = %d, want 0 (stderr: %s)", got, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "guided-ssh") {
-		t.Errorf("Versionsausgabe %q enthält nicht %q", stdout.String(), "guided-ssh")
+		t.Errorf("version output %q does not contain %q", stdout.String(), "guided-ssh")
 	}
 }
 
-func TestRunOhneListen(t *testing.T) {
+func TestRunWithoutListen(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, nil); got != 2 {
-		t.Fatalf("run() = %d, erwartet 2 (Konfigurationsfehler)", got)
+		t.Fatalf("run() = %d, want 2 (configuration error)", got)
 	}
 	if !strings.Contains(stderr.String(), "-listen") {
-		t.Errorf("stderr %q enthält keinen Hinweis auf -listen", stderr.String())
+		t.Errorf("stderr %q does not mention -listen", stderr.String())
 	}
 }
 
-func TestRunUnbekanntesFlag(t *testing.T) {
+func TestRunUnknownFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := run(&stdout, &stderr, []string{"-gibt-es-nicht"}); got != 2 {
-		t.Fatalf("run(-gibt-es-nicht) = %d, erwartet 2", got)
+	if got := run(&stdout, &stderr, []string{"-does-not-exist"}); got != 2 {
+		t.Fatalf("run(-does-not-exist) = %d, want 2", got)
 	}
 }
 
-// clearDBEnv leert alle GSSH_DB_*-Variablen, damit Tests unabhängig von der
-// Umgebung des Entwicklers laufen.
+// clearDBEnv clears all GSSH_DB_* variables, so tests run independently of
+// the developer's environment.
 func clearDBEnv(t *testing.T) {
 	t.Helper()
 	for _, v := range []string{envDBHost, envDBPort, envDBUser, envDBPassword, envDBName, envDBSSLMode} {
@@ -43,50 +43,50 @@ func clearDBEnv(t *testing.T) {
 	}
 }
 
-func TestRunListenOhneDBKonfig(t *testing.T) {
+func TestRunListenWithoutDBConfig(t *testing.T) {
 	clearDBEnv(t)
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"-listen", "127.0.0.1:0"}); got != 1 {
-		t.Fatalf("run(-listen) ohne DB-Konfiguration = %d, erwartet 1", got)
+		t.Fatalf("run(-listen) without db configuration = %d, want 1", got)
 	}
 	if !strings.Contains(stdout.String(), "GSSH_DB_HOST") {
-		t.Errorf("Log %q enthält keinen Hinweis auf GSSH_DB_HOST", stdout.String())
+		t.Errorf("log %q does not mention GSSH_DB_HOST", stdout.String())
 	}
 }
 
-func TestRunMigrateOhneDBKonfig(t *testing.T) {
+func TestRunMigrateWithoutDBConfig(t *testing.T) {
 	clearDBEnv(t)
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"migrate"}); got != 2 {
-		t.Fatalf("migrate ohne DB-Konfiguration = %d, erwartet 2 (Konfigurationsfehler)", got)
+		t.Fatalf("migrate without db configuration = %d, want 2 (configuration error)", got)
 	}
 	if !strings.Contains(stderr.String(), "GSSH_DB_HOST") {
-		t.Errorf("stderr %q ohne Hinweis auf GSSH_DB_HOST", stderr.String())
+		t.Errorf("stderr %q without a mention of GSSH_DB_HOST", stderr.String())
 	}
 }
 
-func TestRunEnrollTokenOhneDBKonfig(t *testing.T) {
+func TestRunEnrollTokenWithoutDBConfig(t *testing.T) {
 	clearDBEnv(t)
 	var stdout, stderr bytes.Buffer
 	if got := run(&stdout, &stderr, []string{"enroll-token"}); got != 1 {
-		t.Fatalf("enroll-token ohne DB-Konfiguration = %d, erwartet 1", got)
+		t.Fatalf("enroll-token without db configuration = %d, want 1", got)
 	}
 	if !strings.Contains(stderr.String(), "GSSH_DB_HOST") {
-		t.Errorf("stderr %q ohne Hinweis auf GSSH_DB_HOST", stderr.String())
+		t.Errorf("stderr %q without a mention of GSSH_DB_HOST", stderr.String())
 	}
 }
 
-func TestRunEnrollTokenFlagFehler(t *testing.T) {
+func TestRunEnrollTokenFlagError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := run(&stdout, &stderr, []string{"enroll-token", "-gibt-es-nicht"}); got != 2 {
-		t.Fatalf("run = %d, erwartet 2", got)
+	if got := run(&stdout, &stderr, []string{"enroll-token", "-does-not-exist"}); got != 2 {
+		t.Fatalf("run = %d, want 2", got)
 	}
 }
 
-func TestRunEnrollTokenKaputteTags(t *testing.T) {
+func TestRunEnrollTokenBrokenTags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if got := run(&stdout, &stderr, []string{"enroll-token", "-tags", "ohne-gleichheitszeichen"}); got != 2 {
-		t.Fatalf("run = %d, erwartet 2", got)
+	if got := run(&stdout, &stderr, []string{"enroll-token", "-tags", "without-equals-sign"}); got != 2 {
+		t.Fatalf("run = %d, want 2", got)
 	}
 	if !strings.Contains(stderr.String(), "tag") {
 		t.Errorf("stderr: %q", stderr.String())
@@ -94,25 +94,25 @@ func TestRunEnrollTokenKaputteTags(t *testing.T) {
 }
 
 func TestParseTags(t *testing.T) {
-	tags, err := parseTags("env=prod,role=web,leer=")
+	tags, err := parseTags("env=prod,role=web,empty=")
 	if err != nil {
 		t.Fatalf("parseTags: %v", err)
 	}
-	if tags["env"] != "prod" || tags["role"] != "web" || tags["leer"] != "" {
+	if tags["env"] != "prod" || tags["role"] != "web" || tags["empty"] != "" {
 		t.Errorf("tags = %v", tags)
 	}
 	if got, err := parseTags(""); err != nil || len(got) != 0 {
-		t.Errorf("leer: %v, %v", got, err)
+		t.Errorf("empty: %v, %v", got, err)
 	}
-	if _, err := parseTags("=wert"); err == nil {
-		t.Error("fehler erwartet (leerer key)")
+	if _, err := parseTags("=value"); err == nil {
+		t.Error("expected an error (empty key)")
 	}
 }
 
-func TestSetupUngueltigerMasterKey(t *testing.T) {
-	// Der Master-Key wird vor der DB-Konfiguration geprüft — DB-Env irrelevant.
-	t.Setenv("GSSH_CA_MASTER_KEY", "kein-base64!")
+func TestSetupInvalidMasterKey(t *testing.T) {
+	// The master key is checked before the DB configuration — DB env is irrelevant.
+	t.Setenv("GSSH_CA_MASTER_KEY", "not-base64!")
 	if _, _, err := setup(context.Background()); err == nil {
-		t.Fatal("Fehler erwartet (Master-Key kein Base64)")
+		t.Fatal("expected an error (master key not base64)")
 	}
 }

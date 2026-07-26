@@ -1,6 +1,6 @@
-# CLI-Konfiguration für den Grants-Sync-CronJob (gssh-admin). api_url zeigt
-# auf den in-cluster Service des Charts; issuer/client_id patchen die
-# Overlays passend zur Umgebung.
+# CLI configuration for the grants-sync CronJob (gssh-admin). api_url points
+# to the chart's in-cluster service; issuer/client_id are patched by the
+# overlays to match the environment.
 apiVersion: v1
 kind: ConfigMap
 metadata:

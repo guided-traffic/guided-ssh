@@ -1,78 +1,80 @@
-# Web-UI & Auditing-Oberfläche (Phase 8)
+# Web UI & auditing interface (Phase 8)
 
-Die Web-UI ist eine Angular-SPA (`web/`), die als statische Assets via
-`go:embed` ins `gssh-server`-Binary eingebettet wird und unter `/` läuft —
-ein Image, kein CORS, kein separates Deployment (ADR-003, ADR-020).
+The web UI is an Angular SPA (`web/`) that is embedded into the `gssh-server`
+binary as static assets via `go:embed` and served under `/` — one image, no
+CORS, no separate deployment (ADR-003, ADR-020).
 
-## Architektur
+## Architecture
 
-- **API-Client**: generiert aus `api/openapi.yaml` (Single Source of Truth)
-  mit `ng-openapi-gen` nach `web/src/app/api/` — Regenerieren mit `make web-api`,
-  der generierte Code ist eingecheckt.
+- **API client**: generated from `api/openapi.yaml` (single source of truth)
+  with `ng-openapi-gen` into `web/src/app/api/` — regenerate with `make web-api`;
+  the generated code is checked in.
 - **Login**: OIDC Authorization Code + PKCE (`angular-auth-oidc-client`).
-  Die SPA lädt Issuer und Client-ID zur Laufzeit von `GET /v1/ui/config`
-  (öffentlich) — kein Build-time-Environment nötig. Der Server validiert
-  ID-Tokens als Bearer-Token (konsistent zu `gssh-admin`).
-- **Rollen** aus Token-Claims (Gruppen), fail-closed:
+  The SPA loads the issuer and client ID at runtime from `GET /v1/ui/config`
+  (public) — no build-time environment needed. The server validates ID
+  tokens as bearer tokens (consistent with `gssh-admin`).
+- **Roles** from token claims (groups), fail-closed:
 
-  | Rolle | IdP-Gruppe (Env) | Rechte |
+  | Role | IdP group (env) | Permissions |
   |---|---|---|
-  | Admin | `GSSH_ADMIN_GROUP` | alles inkl. Mutationen (Grants, CI-Grants, Service-Account-Not-Aus) |
-  | Auditor | `GSSH_AUDITOR_GROUP` | Audit-Ansicht + Export, alle Read-Ansichten |
-  | Read-only | `GSSH_READONLY_GROUP` | Read-Ansichten (Hosts, Grants, CI, Benutzer) |
+  | Admin | `GSSH_ADMIN_GROUP` | everything, including mutations (grants, CI grants, service-account kill switch) |
+  | Auditor | `GSSH_AUDITOR_GROUP` | audit view + export, all read views |
+  | Read-only | `GSSH_READONLY_GROUP` | read views (hosts, grants, CI, users) |
 
-  Höhere Rollen schließen niedrigere ein (admin ⊃ auditor ⊃ readonly). Die
-  UI blendet nur aus — durchgesetzt werden Rollen serverseitig pro Request.
-  Sind alle drei Gruppen leer, bleibt die gesamte Admin-API deaktiviert (503).
+  Higher roles include lower ones (admin ⊃ auditor ⊃ readonly). The UI only
+  hides elements — roles are enforced server-side on every request. If all
+  three groups are empty, the entire admin API stays disabled (503).
 
-- **OIDC-Client der UI**: `GSSH_UI_OIDC_CLIENT_ID` (Default: `GSSH_OIDC_CLIENT_ID`).
-  Im IdP als Public Client mit Redirect-URI auf den UI-Origin anlegen.
+- **UI's OIDC client**: `GSSH_UI_OIDC_CLIENT_ID` (default: `GSSH_OIDC_CLIENT_ID`).
+  Set it up in the IdP as a public client with a redirect URI pointing at the
+  UI origin.
 
-## Ansichten
+## Views
 
-- **Hosts**: Status (zuletzt gesehen), Tags, Ablauf des Host-Zertifikats.
-- **Zugriffsregeln**: Grants inkl. Anlegen/Bearbeiten/Löschen (Admin);
-  Mutationen erzeugen serverseitig Audit-Events mit Actor.
-- **CI & Service-Accounts**: CI-Grants (CRUD, Admin) und Service-Accounts
-  mit Aktiv-Schalter (Not-Aus pro Projekt; auditiert als
+- **Hosts**: status (last seen), tags, host certificate expiry.
+- **Access rules**: grants including create/edit/delete (admin); mutations
+  generate server-side audit events with an actor.
+- **CI & service accounts**: CI grants (CRUD, admin) and service accounts
+  with an active toggle (per-project kill switch; audited as
   `service_account.updated`).
-- **Benutzer & Gruppen**: aus dem IdP synchronisierter Bestand (read-only).
-- **Audit** (Rolle Auditor): filterbar nach Ereignistyp, Actor, Zeitraum und
-  Volltext (`q` matcht Actor und Payload — deckt Host- und Pipeline-Filter ab);
-  Export als CSV/JSON-Download (max. 100 000 Zeilen).
+- **Users & groups**: inventory synced from the IdP (read-only).
+- **Audit** (auditor role): filterable by event type, actor, time range, and
+  full text (`q` matches actor and payload — covers host and pipeline
+  filters); export as CSV/JSON download (max. 100,000 rows).
 
-## Audit-Streaming (SIEM)
+## Audit streaming (SIEM)
 
-Committete Audit-Events können fortlaufend emittiert werden (Poller, nur
-neue Events ab Serverstart; best-effort, die Audit-Tabelle bleibt Source of
-Truth):
+Committed audit events can be emitted continuously (poller, only new events
+since server start; best-effort — the audit table remains the source of
+truth):
 
-| Env | Wirkung |
+| Env | Effect |
 |---|---|
-| `GSSH_AUDIT_STREAM=true` | jedes Event als strukturierter JSON-Log auf stdout (msg `audit-event`) |
-| `GSSH_AUDIT_WEBHOOK_URL` | POST der Events als JSON-Array an den Webhook |
-| `GSSH_AUDIT_STREAM_INTERVAL` | Poll-Intervall (Go-Duration, Default `10s`) |
+| `GSSH_AUDIT_STREAM=true` | every event as a structured JSON log line on stdout (msg `audit-event`) |
+| `GSSH_AUDIT_WEBHOOK_URL` | POST the events as a JSON array to the webhook |
+| `GSSH_AUDIT_STREAM_INTERVAL` | poll interval (Go duration, default `10s`) |
 
 ## Build
 
-- `make web` — `npm ci` + Angular-Build nach `web/dist` (wird eingebettet).
-- `make web-test` — Frontend-Unit-Tests (vitest, headless).
-- `make web-api` — API-Client aus `api/openapi.yaml` regenerieren.
-- Ohne Web-Build funktioniert das Go-Binary vollständig; `/` antwortet dann
-  mit 503 („web-ui nicht gebaut“). In `web/dist/` ist nur `.gitkeep`
-  versioniert, damit `go:embed` immer baut.
-- Docker: eigene Node-Stage im `Dockerfile` baut die UI; das Release-Image
-  enthält sie damit immer.
-- CI: Job `web-build` (Install, vitest, Produktions-Build) läuft auf PR und
-  `main`; Frontend ist vom Go-Coverage-Gate ausgenommen (Plan Phase 0).
+- `make web` — `npm ci` + Angular build into `web/dist` (gets embedded).
+- `make web-test` — frontend unit tests (vitest, headless).
+- `make web-api` — regenerate the API client from `api/openapi.yaml`.
+- Without a web build, the Go binary works fully; `/` then responds with
+  503 ("web-ui not built"). Only `.gitkeep` is versioned in `web/dist/`, so
+  `go:embed` always builds.
+- Docker: a dedicated Node stage in the `Dockerfile` builds the UI, so the
+  release image always includes it.
+- CI: the `web-build` job (install, vitest, production build) runs on PRs and
+  `main`; the frontend is excluded from the Go coverage gate (Plan Phase 0).
 
-## Entwicklung
+## Development
 
 ```sh
 cd web
 npm ci
-npx ng serve --proxy-config proxy.conf.json   # API-Proxy auf laufenden gssh-server
+npx ng serve --proxy-config proxy.conf.json   # API proxy to a running gssh-server
 ```
 
-`proxy.conf.json` leitet `/v1` an `http://localhost:8080` weiter, damit
-Login und API-Calls gegen einen lokal laufenden `gssh-server` funktionieren.
+`proxy.conf.json` forwards `/v1` to `http://localhost:8080`, so login and API
+calls work against a locally running `gssh-server`.
+</content>

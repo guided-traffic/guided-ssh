@@ -1,23 +1,24 @@
-# ADR-003: Angular-SPA, eingebettet ins Go-Binary
+# ADR-003: Angular SPA, embedded into the Go binary
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Web-UI (Hosts, Grants, Audit) ist gefordert, Angular gesetzt. Zu klären war die
-Auslieferung: eigenes Frontend-Deployment vs. Auslieferung durch den API-Server.
+A web UI (hosts, grants, audit) is required, and Angular has been chosen. What
+remained to be decided was delivery: a separate frontend deployment vs.
+delivery through the API server.
 
-## Entscheidung
+## Decision
 
-Angular-SPA (Standalone Components, Angular Material) mit OIDC via Authorization
-Code + PKCE. Der Produktions-Build wird per `embed.FS` in das Go-Binary eingebettet
-und vom API-Server ausgeliefert.
+Angular SPA (standalone components, Angular Material) with OIDC via
+Authorization Code + PKCE. The production build is embedded into the Go
+binary via `embed.FS` and served by the API server.
 
-## Konsequenzen
+## Consequences
 
-- Ein Container-Image, ein Deployment, kein CORS, gleiche Origin für API und UI.
-- CI baut erst Angular, dann Go (Assets müssen beim `go build` vorliegen).
-- UI-Version ist immer konsistent zur API-Version.
-- Frontend bleibt read-mostly; Logik lebt im Backend und ist dort testbar —
-  Frontend ist vom Coverage-Gate ausgenommen.
+- One container image, one deployment, no CORS, same origin for API and UI.
+- CI builds Angular first, then Go (assets must be present at `go build` time).
+- The UI version is always consistent with the API version.
+- The frontend stays read-mostly; logic lives in the backend and is testable
+  there — the frontend is exempt from the coverage gate.

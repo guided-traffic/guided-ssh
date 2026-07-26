@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// agentAPI abstrahiert die Agent-Endpunkte des Servers (Tests nutzen einen Fake).
+// agentAPI abstracts the agent endpoints of the server (tests use a fake).
 type agentAPI interface {
 	Renew(ctx context.Context, publicKey string) (string, error)
 	RenewMTLS(ctx context.Context, csrPEM string) (string, error)
@@ -24,10 +24,10 @@ type agentAPI interface {
 	SendSessions(ctx context.Context, events []sessionEventWire) error
 }
 
-// apiClient spricht die mTLS-Agent-API mit dem beim Enrollment erhaltenen
-// Client-Zertifikat; das Serverzertifikat wird gegen die mitgelieferte CA
-// verifiziert. Das Client-Zertifikat ist austauschbar (Rotation, Phase 10)
-// und wird pro TLS-Handshake über GetClientCertificate gelesen.
+// apiClient talks to the mTLS agent API with the client certificate obtained
+// during enrollment; the server certificate is verified against the bundled
+// CA. The client certificate is swappable (rotation, phase 10) and read per
+// TLS handshake via GetClientCertificate.
 type apiClient struct {
 	baseURL   string
 	http      *http.Client
@@ -37,19 +37,19 @@ type apiClient struct {
 	clientCert tls.Certificate
 }
 
-// newAPIClient lädt mTLS-Material aus dem State-Verzeichnis.
+// newAPIClient loads the mTLS material from the state directory.
 func newAPIClient(cfg *Config, paths Paths) (*apiClient, error) {
 	clientCert, err := tls.LoadX509KeyPair(paths.AgentCertFile(), paths.AgentKeyFile())
 	if err != nil {
-		return nil, fmt.Errorf("mtls-client-zertifikat laden: %w", err)
+		return nil, fmt.Errorf("loading mtls client certificate: %w", err)
 	}
 	caPEM, err := os.ReadFile(paths.ServerCAFile())
 	if err != nil {
-		return nil, fmt.Errorf("server-ca laden: %w", err)
+		return nil, fmt.Errorf("loading server ca: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("server-ca %s: kein gültiges pem", paths.ServerCAFile())
+		return nil, fmt.Errorf("server ca %s: not a valid pem", paths.ServerCAFile())
 	}
 	c := &apiClient{
 		baseURL:    strings.TrimRight(cfg.AgentURL, "/"),
@@ -69,8 +69,8 @@ func newAPIClient(cfg *Config, paths Paths) (*apiClient, error) {
 	return c, nil
 }
 
-// setClientCert tauscht das Client-Zertifikat nach einer Rotation aus; offene
-// Verbindungen mit dem alten Zertifikat werden geschlossen.
+// setClientCert swaps in the client certificate after a rotation; open
+// connections using the old certificate are closed.
 func (c *apiClient) setClientCert(cert tls.Certificate) {
 	c.mu.Lock()
 	c.clientCert = cert
@@ -78,7 +78,7 @@ func (c *apiClient) setClientCert(cert tls.Certificate) {
 	c.transport.CloseIdleConnections()
 }
 
-// Renew tauscht den Host-Public-Key gegen ein frisches Host-Zertifikat.
+// Renew exchanges the host public key for a fresh host certificate.
 func (c *apiClient) Renew(ctx context.Context, publicKey string) (string, error) {
 	body, err := json.Marshal(map[string]string{"public_key": publicKey})
 	if err != nil {
@@ -97,13 +97,13 @@ func (c *apiClient) Renew(ctx context.Context, publicKey string) (string, error)
 		return "", err
 	}
 	if resp.Certificate == "" {
-		return "", fmt.Errorf("renew-antwort ohne zertifikat")
+		return "", fmt.Errorf("renew response without certificate")
 	}
 	return resp.Certificate, nil
 }
 
-// RenewMTLS tauscht einen CSR gegen ein frisches mTLS-Client-Zertifikat
-// (authentifiziert über das noch gültige alte Zertifikat).
+// RenewMTLS exchanges a CSR for a fresh mTLS client certificate
+// (authenticated via the still-valid old certificate).
 func (c *apiClient) RenewMTLS(ctx context.Context, csrPEM string) (string, error) {
 	body, err := json.Marshal(map[string]string{"csr": csrPEM})
 	if err != nil {
@@ -122,12 +122,12 @@ func (c *apiClient) RenewMTLS(ctx context.Context, csrPEM string) (string, error
 		return "", err
 	}
 	if resp.Certificate == "" {
-		return "", fmt.Errorf("renew-mtls-antwort ohne zertifikat")
+		return "", fmt.Errorf("renew-mtls response without certificate")
 	}
 	return resp.Certificate, nil
 }
 
-// Principals fragt die autorisierten Principals für einen lokalen Benutzer ab.
+// Principals fetches the authorized principals for a local user.
 func (c *apiClient) Principals(ctx context.Context, user string) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/v1/agent/principals?user="+url.QueryEscape(user), nil)
@@ -143,7 +143,7 @@ func (c *apiClient) Principals(ctx context.Context, user string) ([]string, erro
 	return resp.Principals, nil
 }
 
-// Bundle liefert das aktuelle User-CA-Bundle (TrustedUserCAKeys-Inhalt).
+// Bundle returns the current user CA bundle (TrustedUserCAKeys content).
 func (c *apiClient) Bundle(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/agent/bundle/user", nil)
 	if err != nil {
@@ -151,11 +151,11 @@ func (c *apiClient) Bundle(ctx context.Context) (string, error) {
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("agent-api erreichen: %w", err)
+		return "", fmt.Errorf("reaching agent api: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("agent-api: %s", resp.Status)
+		return "", fmt.Errorf("agent api: %s", resp.Status)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -164,7 +164,7 @@ func (c *apiClient) Bundle(ctx context.Context) (string, error) {
 	return string(raw), nil
 }
 
-// SendSessions liefert einen Batch Session-/sudo-Events an den Server (mTLS).
+// SendSessions delivers a batch of session/sudo events to the server (mTLS).
 func (c *apiClient) SendSessions(ctx context.Context, events []sessionEventWire) error {
 	body, err := json.Marshal(map[string]any{"events": events})
 	if err != nil {
@@ -178,26 +178,26 @@ func (c *apiClient) SendSessions(ctx context.Context, events []sessionEventWire)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("agent-api erreichen: %w", err)
+		return fmt.Errorf("reaching agent api: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("agent-api: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return fmt.Errorf("agent api: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	return nil
 }
 
-// doJSON führt den Request aus und dekodiert die JSON-Antwort.
+// doJSON executes the request and decodes the JSON response.
 func (c *apiClient) doJSON(req *http.Request, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("agent-api erreichen: %w", err)
+		return fmt.Errorf("reaching agent api: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("agent-api: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return fmt.Errorf("agent api: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

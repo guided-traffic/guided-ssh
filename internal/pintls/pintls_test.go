@@ -15,7 +15,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
-// testCert baut ein selbstsigniertes Zertifikat für die Pin-Berechnung.
+// testCert builds a self-signed certificate for pin computation.
 func testCert(t *testing.T) *x509.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -39,9 +39,9 @@ func testCert(t *testing.T) *x509.Certificate {
 	return cert
 }
 
-// TestFromCertificate belegt, dass der Helper den Base64-SHA-256 des
-// SubjectPublicKeyInfo liefert und sein Ergebnis von DecodePin/Verifier
-// akzeptiert wird (eine Quelle für alle drei Wege).
+// TestFromCertificate verifies that the helper returns the base64 SHA-256
+// of the SubjectPublicKeyInfo and that its result is accepted by
+// DecodePin/Verifier (one source for all three paths).
 func TestFromCertificate(t *testing.T) {
 	cert := testCert(t)
 
@@ -50,7 +50,7 @@ func TestFromCertificate(t *testing.T) {
 
 	got := pintls.FromCertificate(cert)
 	if got != want {
-		t.Fatalf("pin = %q, erwartet %q", got, want)
+		t.Fatalf("pin = %q, expected %q", got, want)
 	}
 
 	pin, err := pintls.DecodePin(got)
@@ -58,11 +58,11 @@ func TestFromCertificate(t *testing.T) {
 		t.Fatalf("DecodePin: %v", err)
 	}
 	if len(pin) != sha256.Size {
-		t.Fatalf("dekodierte länge = %d, erwartet %d", len(pin), sha256.Size)
+		t.Fatalf("decoded length = %d, expected %d", len(pin), sha256.Size)
 	}
 
-	// Ein anderes Zertifikat muss einen anderen Pin liefern.
+	// Two different certificates must produce different pins.
 	if other := pintls.FromCertificate(testCert(t)); other == got {
-		t.Error("zwei zertifikate liefern denselben pin")
+		t.Error("two certificates produced the same pin")
 	}
 }

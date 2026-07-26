@@ -1,10 +1,10 @@
-// Package auditstream streamt committete Audit-Events fortlaufend als
-// strukturierte JSON-Logs (stdout, SIEM-Anbindung) und optional an einen
-// Webhook (Phase 8). Der Streamer pollt die Audit-Tabelle ab dem beim Start
-// höchsten Event — so werden nur committete Events emittiert und ein Neustart
-// wiederholt keine Historie. Die Audit-Tabelle bleibt Source of Truth; das
-// Streaming ist best-effort (ein fehlgeschlagener Webhook-Versand wird
-// geloggt, aber nicht wiederholt).
+// Package auditstream continuously streams committed audit events as
+// structured JSON logs (stdout, SIEM integration) and optionally to a
+// webhook (Phase 8). The streamer polls the audit table starting from the
+// highest event ID seen at startup — so only committed events are emitted
+// and a restart never replays history. The audit table remains the source
+// of truth; streaming is best-effort (a failed webhook delivery is logged
+// but not retried).
 package auditstream
 
 import (
@@ -19,40 +19,40 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// Store sind die vom Streamer benötigten Store-Methoden
-// (*store.Store erfüllt sie; Tests nutzen einen Fake).
+// Store is the set of store methods the streamer needs
+// (*store.Store satisfies it; tests use a fake).
 type Store interface {
 	MaxAuditEventID(ctx context.Context) (int64, error)
 	ListAuditEventsAfter(ctx context.Context, afterID int64, limit int) ([]store.AuditEvent, error)
 }
 
-// Config konfiguriert den Streamer.
+// Config configures the streamer.
 type Config struct {
-	// Logger erhält Streamer-Fehler und — bei LogEvents — jedes Event als
-	// strukturierten Log-Eintrag (msg "audit-event").
+	// Logger receives streamer errors and — when LogEvents is set — every
+	// event as a structured log entry (msg "audit-event").
 	Logger *slog.Logger
-	// LogEvents aktiviert das Event-Streaming ins Log (SIEM via stdout).
+	// LogEvents enables streaming events to the log (SIEM via stdout).
 	LogEvents bool
-	// WebhookURL erhält jede Batch als JSON-Array per POST; leer = deaktiviert.
+	// WebhookURL receives each batch as a JSON array via POST; empty disables it.
 	WebhookURL string
-	// Interval ist das Poll-Intervall (Default 10 s).
+	// Interval is the poll interval (default 10s).
 	Interval time.Duration
-	// HTTPClient für den Webhook (Default: Timeout 10 s).
+	// HTTPClient for the webhook (default: 10s timeout).
 	HTTPClient *http.Client
 }
 
-// batchSize begrenzt die Events pro Abfrage; volle Batches werden sofort
-// weitergepollt, bis der Rückstand aufgeholt ist.
+// batchSize limits the events per query; full batches are polled again
+// immediately until the backlog is caught up.
 const batchSize = 500
 
-// Streamer pollt Audit-Events und emittiert sie an Log und Webhook.
+// Streamer polls audit events and emits them to the log and webhook.
 type Streamer struct {
 	store  Store
 	cfg    Config
 	lastID int64
 }
 
-// New baut einen Streamer; Defaults werden hier gesetzt.
+// New builds a Streamer; defaults are applied here.
 func New(st Store, cfg Config) *Streamer {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 10 * time.Second
@@ -63,7 +63,7 @@ func New(st Store, cfg Config) *Streamer {
 	return &Streamer{store: st, cfg: cfg}
 }
 
-// eventJSON ist die Webhook-Repräsentation eines Audit-Events.
+// eventJSON is the webhook representation of an audit event.
 type eventJSON struct {
 	ID         int64           `json:"id"`
 	OccurredAt time.Time       `json:"occurred_at"`
@@ -72,12 +72,12 @@ type eventJSON struct {
 	Payload    json.RawMessage `json:"payload"`
 }
 
-// Run pollt bis der Kontext endet; blockiert (Aufruf als Goroutine).
+// Run polls until the context ends; blocks (call it as a goroutine).
 func (s *Streamer) Run(ctx context.Context) {
 	maxID, err := s.store.MaxAuditEventID(ctx)
 	if err != nil {
 		if s.cfg.Logger != nil {
-			s.cfg.Logger.Error("audit-stream: startpunkt bestimmen fehlgeschlagen", "error", err)
+			s.cfg.Logger.Error("audit-stream: failed to determine start point", "error", err)
 		}
 		return
 	}
@@ -95,13 +95,13 @@ func (s *Streamer) Run(ctx context.Context) {
 	}
 }
 
-// drain holt alle neuen Events in Batches ab und emittiert sie.
+// drain fetches all new events in batches and emits them.
 func (s *Streamer) drain(ctx context.Context) {
 	for {
 		events, err := s.store.ListAuditEventsAfter(ctx, s.lastID, batchSize)
 		if err != nil {
 			if s.cfg.Logger != nil {
-				s.cfg.Logger.Error("audit-stream: events laden fehlgeschlagen", "error", err)
+				s.cfg.Logger.Error("audit-stream: failed to load events", "error", err)
 			}
 			return
 		}
@@ -116,7 +116,7 @@ func (s *Streamer) drain(ctx context.Context) {
 	}
 }
 
-// emit schreibt die Events als strukturierte Logs und an den Webhook.
+// emit writes the events as structured logs and to the webhook.
 func (s *Streamer) emit(ctx context.Context, events []store.AuditEvent) {
 	if s.cfg.LogEvents && s.cfg.Logger != nil {
 		for i := range events {
@@ -134,11 +134,11 @@ func (s *Streamer) emit(ctx context.Context, events []store.AuditEvent) {
 		return
 	}
 	if err := s.postWebhook(ctx, events); err != nil && s.cfg.Logger != nil {
-		s.cfg.Logger.Warn("audit-stream: webhook fehlgeschlagen", "error", err, "events", len(events))
+		s.cfg.Logger.Warn("audit-stream: webhook failed", "error", err, "events", len(events))
 	}
 }
 
-// postWebhook sendet die Batch als JSON-Array an die konfigurierte URL.
+// postWebhook sends the batch as a JSON array to the configured URL.
 func (s *Streamer) postWebhook(ctx context.Context, events []store.AuditEvent) error {
 	out := make([]eventJSON, 0, len(events))
 	for i := range events {
@@ -163,7 +163,7 @@ func (s *Streamer) postWebhook(ctx context.Context, events []store.AuditEvent) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook-status %d", resp.StatusCode)
+		return fmt.Errorf("webhook status %d", resp.StatusCode)
 	}
 	return nil
 }

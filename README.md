@@ -307,13 +307,13 @@ Reference pipeline and server-side CI grants:
 
 | Topic | Document |
 |---|---|
-| Operations manual (config, secrets, backup, CA rotation) | [docs/betriebshandbuch.md](docs/betriebshandbuch.md) |
+| Operations manual (config, secrets, backup, CA rotation) | [docs/operations-manual.md](docs/operations-manual.md) |
 | Self-managed CA keys (GitOps/SOPS) | [docs/self-managed-ca.md](docs/self-managed-ca.md) |
 | Access rules (grants) | [docs/grants.md](docs/grants.md) |
 | Host enrollment guide | [docs/enrollment-guide.md](docs/enrollment-guide.md) |
 | GitLab CI integration | [docs/gitlab-ci.md](docs/gitlab-ci.md) |
 | Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| Threat model | [docs/bedrohungsmodell.md](docs/bedrohungsmodell.md) |
+| Threat model | [docs/threat-model.md](docs/threat-model.md) |
 | Architecture decisions (ADRs) | [docs/adr/README.md](docs/adr/README.md) |
 
 Contributing, building from source, repository layout:

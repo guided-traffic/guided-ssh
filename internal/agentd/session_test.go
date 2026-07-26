@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// enableAudit versetzt einen Test-Daemon in den Session-Audit-Modus.
+// enableAudit puts a test daemon into session audit mode.
 func enableAudit(d *Daemon) {
 	d.cfg.SessionAudit = true
 	d.token = "test-token"
@@ -32,7 +32,7 @@ func TestPamEvent(t *testing.T) {
 	}), now)
 	if !ok || sshd.Phase != "open" || sshd.Service != "sshd" || sshd.LocalUser != "deploy" ||
 		sshd.RemoteAddr != "10.0.0.9" || !sshd.OccurredAt.Equal(fixed) {
-		t.Fatalf("sshd-open falsch: %+v (ok=%v)", sshd, ok)
+		t.Fatalf("sshd-open wrong: %+v (ok=%v)", sshd, ok)
 	}
 
 	sudo, ok := pamEvent(envFrom(map[string]string{
@@ -41,15 +41,15 @@ func TestPamEvent(t *testing.T) {
 	}), now)
 	if !ok || sudo.Phase != "close" || sudo.LocalUser != "root" ||
 		sudo.RemoteUser != "deploy" || sudo.Command != "/usr/bin/id" {
-		t.Fatalf("sudo falsch: %+v (ok=%v)", sudo, ok)
+		t.Fatalf("sudo wrong: %+v (ok=%v)", sudo, ok)
 	}
 
-	// Pflichtfelder fehlen bzw. unbekannter Typ ⇒ nicht gesendet.
+	// Missing required fields or an unknown type ⇒ not sent.
 	if _, ok := pamEvent(envFrom(map[string]string{"PAM_SERVICE": "sshd", "PAM_USER": "x"}), now); ok {
-		t.Error("fehlendes PAM_TYPE muss ok=false liefern")
+		t.Error("missing PAM_TYPE must yield ok=false")
 	}
 	if _, ok := pamEvent(envFrom(map[string]string{"PAM_TYPE": "auth", "PAM_SERVICE": "sshd", "PAM_USER": "x"}), now); ok {
-		t.Error("PAM_TYPE=auth muss ok=false liefern")
+		t.Error("PAM_TYPE=auth must yield ok=false")
 	}
 }
 
@@ -58,26 +58,26 @@ func TestDaemonSessionCorrelationAndSpool(t *testing.T) {
 	d := newTestDaemon(t, api)
 	enableAudit(d)
 
-	// 1. Login meldet Serial 42 für deploy.
+	// 1. Login reports serial 42 for deploy.
 	postJSON(t, d.handleAuth, "/auth", d.token, authRecord{User: "deploy", Serial: 42, KeyID: "u@host"})
 
-	// 2. sshd-Session-Open ohne Serial ⇒ Daemon reichert 42 an und spoolt.
+	// 2. sshd session open without a serial ⇒ daemon enriches with 42 and spools.
 	postJSON(t, d.handleSessionEvent, "/session-event", d.token, sessionEventWire{
 		Phase: "open", Service: "sshd", LocalUser: "deploy", OccurredAt: time.Now(),
 	})
 
-	// 3. Flush an den Server.
+	// 3. Flush to the server.
 	d.flushSpool(context.Background())
 	sent := api.sentSessions()
 	if len(sent) != 1 {
-		t.Fatalf("flush: %d events (1 erwartet)", len(sent))
+		t.Fatalf("flush: %d events (expected 1)", len(sent))
 	}
 	if sent[0].Serial != 42 || sent[0].KeyID != "u@host" {
-		t.Errorf("korrelation fehlt: serial=%d keyid=%q", sent[0].Serial, sent[0].KeyID)
+		t.Errorf("missing correlation: serial=%d keyid=%q", sent[0].Serial, sent[0].KeyID)
 	}
-	// Spool ist geleert.
+	// Spool is cleared.
 	if raw, _ := os.ReadFile(d.paths.SpoolFile()); len(strings.TrimSpace(string(raw))) != 0 {
-		t.Errorf("spool nicht geleert: %q", raw)
+		t.Errorf("spool not cleared: %q", raw)
 	}
 }
 
@@ -88,10 +88,10 @@ func TestDaemonSessionTokenRequired(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body, _ := json.Marshal(authRecord{User: "deploy", Serial: 1})
 	req := httptest.NewRequest(http.MethodPost, "/auth", strings.NewReader(string(body)))
-	// Kein Token-Header.
+	// No token header.
 	d.handleAuth(rec, req)
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("ohne token: status = %d (403 erwartet)", rec.Code)
+		t.Fatalf("without token: status = %d (expected 403)", rec.Code)
 	}
 }
 
@@ -106,16 +106,16 @@ func TestFlushRequeueOnError(t *testing.T) {
 	d.flushSpool(context.Background())
 
 	if api.sessionCalls.Load() != 1 {
-		t.Errorf("SendSessions-calls = %d", api.sessionCalls.Load())
+		t.Errorf("SendSessions calls = %d", api.sessionCalls.Load())
 	}
-	// Bei Fehler bleiben die Events im Spool (verlust-tolerant).
+	// On error the events stay in the spool (loss-tolerant).
 	raw, _ := os.ReadFile(d.paths.SpoolFile())
 	if !strings.Contains(string(raw), "deploy") {
-		t.Errorf("spool muss nach fehler erhalten bleiben: %q", raw)
+		t.Errorf("spool must survive an error: %q", raw)
 	}
 }
 
-// postJSON ruft einen Daemon-Handler mit Token-Header auf und verlangt 2xx.
+// postJSON calls a daemon handler with a token header and requires 2xx.
 func postJSON(t *testing.T, handler http.HandlerFunc, path, token string, body any) {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -142,27 +142,27 @@ func TestWriteSSHDFilesSessionAudit(t *testing.T) {
 
 	snippet := readFile(t, SnippetPath(opts.SSHDir))
 	if !strings.Contains(snippet, "-serial %s -keyid %i") {
-		t.Errorf("snippet ohne serial-tokens:\n%s", snippet)
+		t.Errorf("snippet missing serial tokens:\n%s", snippet)
 	}
 	if !strings.Contains(snippet, "LogLevel VERBOSE") {
-		t.Errorf("snippet ohne LogLevel VERBOSE:\n%s", snippet)
+		t.Errorf("snippet missing LogLevel VERBOSE:\n%s", snippet)
 	}
 	for _, svc := range []string{"sshd", "sudo"} {
 		pam := readFile(t, filepath.Join(pamDir, svc))
 		if strings.Count(pam, pamManagedMarker) != 1 {
-			t.Errorf("%s: marker-anzahl != 1:\n%s", svc, pam)
+			t.Errorf("%s: marker count != 1:\n%s", svc, pam)
 		}
 		if !strings.Contains(pam, "pam_exec.so quiet") {
-			t.Errorf("%s: pam_exec-zeile fehlt:\n%s", svc, pam)
+			t.Errorf("%s: pam_exec line missing:\n%s", svc, pam)
 		}
 	}
 
-	// Idempotenz: zweiter Lauf hängt nichts an.
+	// Idempotence: a second run appends nothing.
 	if err := writeSSHDFiles(opts, resp); err != nil {
-		t.Fatalf("zweiter writeSSHDFiles: %v", err)
+		t.Fatalf("second writeSSHDFiles: %v", err)
 	}
 	if got := strings.Count(readFile(t, filepath.Join(pamDir, "sshd")), pamManagedMarker); got != 1 {
-		t.Errorf("nicht idempotent: marker-anzahl = %d", got)
+		t.Errorf("not idempotent: marker count = %d", got)
 	}
 }
 
@@ -176,10 +176,10 @@ func TestWriteSSHDFilesDefaultNoAudit(t *testing.T) {
 	}
 	snippet := readFile(t, SnippetPath(opts.SSHDir))
 	if strings.Contains(snippet, "-serial") || strings.Contains(snippet, "LogLevel") {
-		t.Errorf("default-snippet darf keine audit-tokens enthalten:\n%s", snippet)
+		t.Errorf("default snippet must not contain audit tokens:\n%s", snippet)
 	}
 	if pam := readFile(t, filepath.Join(pamDir, "sshd")); strings.Contains(pam, pamManagedMarker) {
-		t.Errorf("default darf pam nicht anfassen:\n%s", pam)
+		t.Errorf("default must not touch pam:\n%s", pam)
 	}
 }
 
@@ -190,13 +190,13 @@ func TestWriteSocketTokenIdempotent(t *testing.T) {
 	}
 	first := readFile(t, paths.SocketTokenFile())
 	if len(strings.TrimSpace(first)) != 64 { // 32 bytes hex
-		t.Errorf("token-länge = %d", len(strings.TrimSpace(first)))
+		t.Errorf("token length = %d", len(strings.TrimSpace(first)))
 	}
 	if err := writeSocketToken(paths); err != nil {
 		t.Fatal(err)
 	}
 	if second := readFile(t, paths.SocketTokenFile()); second != first {
-		t.Error("token darf beim re-enrollment nicht rotieren")
+		t.Error("token must not rotate on re-enrollment")
 	}
 }
 

@@ -31,7 +31,7 @@ func (s *FileSigner) Sign(_ context.Context, req CertRequest) (*ssh.Certificate,
 		return nil, err
 	}
 	if err := cert.SignCert(rand.Reader, s.signer); err != nil {
-		return nil, fmt.Errorf("ca: signieren: %w", err)
+		return nil, fmt.Errorf("ca: sign: %w", err)
 	}
 	return cert, nil
 }

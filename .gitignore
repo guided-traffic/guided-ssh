@@ -1,24 +1,24 @@
-# Build-Artefakte
+# Build artifacts
 /bin/
 coverage.out
 /coverage/
 
-# Web-UI (Phase 8): Build-Ausgabe wird ins Go-Binary eingebettet; nur der
-# Platzhalter .gitkeep ist versioniert, damit go:embed ohne Node-Build baut.
+# Web UI (Phase 8): build output is embedded into the Go binary; only the
+# .gitkeep placeholder is versioned, so go:embed builds without a Node build.
 web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 web/.angular/
 
-# Agent-Binaries für den One-Command-Install: entstehen im Docker-Build (bzw.
-# lokal via `make cross`) und werden per go:embed eingebettet — nie committen.
+# Agent binaries for the one-command install: produced by the Docker build
+# (or locally via `make cross`) and embedded via go:embed — never commit them.
 internal/agentdist/bin/*
 !internal/agentdist/bin/.gitkeep
 
-# Helm: heruntergeladene Subchart-Archive (Chart.lock bleibt versioniert)
+# Helm: downloaded subchart archives (Chart.lock stays versioned)
 deploy/helm/guided-ssh/charts/
 
-# Tooling-Ausgaben
+# Tooling outputs
 graphify-out/cost.json
 graphify-out/.graphify_python
 graphify-out/cache/

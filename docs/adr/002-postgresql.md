@@ -1,21 +1,21 @@
-# ADR-002: PostgreSQL als Datenbank
+# ADR-002: PostgreSQL as the database
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Benötigt werden: transaktionssicheres Audit-Log (Ausstellung + Audit-Event atomar),
-flexible Zertifikats-Metadaten, Grants/ACLs, Betrieb in Kubernetes.
+Requirements: a transaction-safe audit log (issuance + audit event atomically),
+flexible certificate metadata, grants/ACLs, operation in Kubernetes.
 
-## Entscheidung
+## Decision
 
-PostgreSQL als einzige Datenbank.
+PostgreSQL as the sole database.
 
-## Konsequenzen
+## Consequences
 
-- ACID: Zertifikatsausstellung und `audit_events`-Eintrag in einer Transaktion.
-- JSONB für Zertifikats-Metadaten und variable Claim-Kontexte.
-- Append-only-Schutz über DB-Grants (kein UPDATE/DELETE) plus Trigger möglich.
-- Partitionierung nach Monat für Audit-Retention.
-- Betrieb: extern oder CloudNativePG; Tests via Testcontainer.
+- ACID: certificate issuance and the `audit_events` entry in a single transaction.
+- JSONB for certificate metadata and variable claim contexts.
+- Append-only protection via DB grants (no UPDATE/DELETE), plus optional triggers.
+- Partitioning by month for audit retention.
+- Operations: external or CloudNativePG; tests via Testcontainers.

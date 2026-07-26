@@ -14,8 +14,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fuzzHandler baut den kompletten API-Handler mit echter CA (fakeStore) für
-// die Sign-Fuzzing-Ziele.
+// fuzzHandler builds the complete API handler with a real CA (fakeStore)
+// for the sign fuzzing targets.
 func fuzzHandler(f *testing.F, deps func(*ca.CA, *slog.Logger) api.Deps) http.Handler {
 	f.Helper()
 	fs := newFakeAuthStore()
@@ -38,8 +38,8 @@ func fuzzHandler(f *testing.F, deps func(*ca.CA, *slog.Logger) api.Deps) http.Ha
 	return api.New(d)
 }
 
-// FuzzSignUser beschießt POST /v1/sign/user mit beliebigen Bodies und Tokens:
-// niemals Panic, niemals 500 (Fehleingaben sind immer Client-Fehler).
+// FuzzSignUser bombards POST /v1/sign/user with arbitrary bodies and
+// tokens: never panic, never 500 (bad inputs are always client errors).
 func FuzzSignUser(f *testing.F) {
 	handler := fuzzHandler(f, func(certAuthority *ca.CA, logger *slog.Logger) api.Deps {
 		return api.Deps{
@@ -51,7 +51,7 @@ func FuzzSignUser(f *testing.F) {
 
 	f.Add(`{"public_key":"ssh-ed25519 AAAA"}`, testToken)
 	f.Add(`{"public_key":"ssh-ed25519 AAAA","validity_seconds":-1}`, testToken)
-	f.Add(`kein json`, "falsches-token")
+	f.Add(`not json`, "wrong-token")
 	f.Add(`{"public_key":null}`, "")
 	f.Add(`{}`, testToken)
 
@@ -63,12 +63,12 @@ func FuzzSignUser(f *testing.F) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code == http.StatusInternalServerError {
-			t.Fatalf("500 auf fuzz-input body=%q token=%q: %s", body, token, rec.Body.String())
+			t.Fatalf("500 on fuzz input body=%q token=%q: %s", body, token, rec.Body.String())
 		}
 	})
 }
 
-// FuzzSignCI beschießt POST /v1/sign/ci analog.
+// FuzzSignCI bombards POST /v1/sign/ci analogously.
 func FuzzSignCI(f *testing.F) {
 	handler := fuzzHandler(f, func(certAuthority *ca.CA, logger *slog.Logger) api.Deps {
 		return api.Deps{
@@ -81,7 +81,7 @@ func FuzzSignCI(f *testing.F) {
 
 	f.Add(`{"public_key":"ssh-ed25519 AAAA"}`, ciTestToken)
 	f.Add(`{"public_key":"","validity_seconds":999999999}`, ciTestToken)
-	f.Add(`kein json`, "falsches-token")
+	f.Add(`not json`, "wrong-token")
 	f.Add(`{"public_key":"ssh-rsa AAAA"}`, "")
 
 	f.Fuzz(func(t *testing.T, body, token string) {
@@ -92,7 +92,7 @@ func FuzzSignCI(f *testing.F) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code == http.StatusInternalServerError {
-			t.Fatalf("500 auf fuzz-input body=%q token=%q: %s", body, token, rec.Body.String())
+			t.Fatalf("500 on fuzz input body=%q token=%q: %s", body, token, rec.Body.String())
 		}
 	})
 }

@@ -15,8 +15,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// writeTestHostKey legt einen ssh-Host-Public-Key ab und liefert den Pfad;
-// ohne ihn bräche das Enrollment schon vor dem Request ab.
+// writeTestHostKey writes an ssh host public key and returns the path;
+// without it enrollment would fail before the request is even made.
 func writeTestHostKey(t *testing.T) string {
 	t.Helper()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -34,14 +34,14 @@ func writeTestHostKey(t *testing.T) string {
 	return path
 }
 
-// TestEnrollRequirePin: --require-pin (bzw. GSSH_ENROLL_REQUIRE_PIN) bricht
-// ohne --pin ab, bevor ein Request rausgeht — das Token bleibt unverbraucht.
-// Ohne das Flag bleibt der bisherige (manuelle, deb/rpm-) Pfad unverändert.
+// TestEnrollRequirePin: --require-pin (or GSSH_ENROLL_REQUIRE_PIN) aborts
+// without --pin before any request goes out — the token stays unused.
+// Without the flag, the existing (manual, deb/rpm) path stays unchanged.
 func TestEnrollRequirePin(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
-		http.Error(w, "token unbekannt", http.StatusUnauthorized)
+		http.Error(w, "unknown token", http.StatusUnauthorized)
 	}))
 	defer server.Close()
 
@@ -54,27 +54,27 @@ func TestEnrollRequirePin(t *testing.T) {
 		wantCode     int
 		wantRequests int64
 	}{
-		"require-pin ohne pin bricht ab": {
+		"require-pin without pin aborts": {
 			args:         []string{"--require-pin"},
 			wantCode:     2,
 			wantRequests: 0,
 		},
-		"env wirkt wie flag": {
+		"env acts like flag": {
 			env:          "1",
 			wantCode:     2,
 			wantRequests: 0,
 		},
-		"env false ändert nichts": {
+		"env false changes nothing": {
 			env:          "false",
 			wantCode:     1,
 			wantRequests: 1,
 		},
-		"require-pin mit pin läuft": {
+		"require-pin with pin runs": {
 			args:         []string{"--require-pin", "--pin", validPin},
 			wantCode:     1,
 			wantRequests: 1,
 		},
-		"ohne require-pin läuft es ungepinnt": {
+		"without require-pin it runs unpinned": {
 			wantCode:     1,
 			wantRequests: 1,
 		},
@@ -98,13 +98,13 @@ func TestEnrollRequirePin(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			if code := Run(&stdout, &stderr, args); code != tc.wantCode {
-				t.Fatalf("exit-code = %d, erwartet %d (stderr: %s)", code, tc.wantCode, stderr.String())
+				t.Fatalf("exit code = %d, want %d (stderr: %s)", code, tc.wantCode, stderr.String())
 			}
 			if got := requests.Load(); got != tc.wantRequests {
-				t.Fatalf("requests = %d, erwartet %d", got, tc.wantRequests)
+				t.Fatalf("requests = %d, want %d", got, tc.wantRequests)
 			}
 			if tc.wantRequests == 0 && !strings.Contains(stderr.String(), "--pin") {
-				t.Errorf("stderr nennt den grund nicht: %q", stderr.String())
+				t.Errorf("stderr does not mention the reason: %q", stderr.String())
 			}
 		})
 	}

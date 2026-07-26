@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// RenewMTLS signiert den eingereichten CSR mit einer Wegwerf-CA (die Rotation
-// prüft nur Schlüssel-Zertifikat-Paarung, keine Kette).
+// RenewMTLS signs the submitted CSR with a throwaway CA (the rotation only
+// checks key-certificate pairing, no chain).
 func (f *fakeAPI) RenewMTLS(_ context.Context, csrPEM string) (string, error) {
 	f.mtlsCalls.Add(1)
 	if f.mtlsErr != nil {
@@ -24,7 +24,7 @@ func (f *fakeAPI) RenewMTLS(_ context.Context, csrPEM string) (string, error) {
 	}
 	block, _ := pem.Decode([]byte(csrPEM))
 	if block == nil {
-		return "", errors.New("kein pem-csr")
+		return "", errors.New("not a pem csr")
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
@@ -33,12 +33,12 @@ func (f *fakeAPI) RenewMTLS(_ context.Context, csrPEM string) (string, error) {
 	return testClientCertPEM(csr.PublicKey, 0)
 }
 
-// clientCertValidity ist die Laufzeit der Test-Client-Zertifikate (wie
-// ca.AgentCertValidity: 1 Jahr).
+// clientCertValidity is the validity period of test client certificates
+// (like ca.AgentCertValidity: 1 year).
 const clientCertValidity = 365 * 24 * time.Hour
 
-// testClientCertPEM stellt ein Client-Zertifikat für pub aus, dessen Laufzeit
-// bereits um elapsed fortgeschritten ist.
+// testClientCertPEM issues a client certificate for pub whose validity has
+// already advanced by elapsed.
 func testClientCertPEM(pub crypto.PublicKey, elapsed time.Duration) (string, error) {
 	_, caPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -59,8 +59,8 @@ func testClientCertPEM(pub crypto.PublicKey, elapsed time.Duration) (string, err
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), nil
 }
 
-// writeAgentCert legt ein Client-Zertifikat mit fortgeschrittener Laufzeit
-// in das State-Verzeichnis des Daemons.
+// writeAgentCert places a client certificate with advanced validity into
+// the daemon's state directory.
 func writeAgentCert(t *testing.T, d *Daemon, elapsed time.Duration) {
 	t.Helper()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -80,19 +80,19 @@ func TestMTLSNeedsRotation(t *testing.T) {
 	api := &fakeAPI{}
 	d := newTestDaemon(t, api)
 
-	// Keine Datei ⇒ Rotation versuchen (Selbstheilung über das geladene Paar).
+	// No file ⇒ attempt rotation (self-heal via the loaded pair).
 	if !mtlsNeedsRotation(d.paths.AgentCertFile(), time.Now()) {
-		t.Error("fehlende zertifikatsdatei muss rotation auslösen")
+		t.Error("missing certificate file must trigger rotation")
 	}
-	// Frisch (10 % verstrichen) ⇒ keine Rotation.
+	// Fresh (10% elapsed) ⇒ no rotation.
 	writeAgentCert(t, d, clientCertValidity/10)
 	if mtlsNeedsRotation(d.paths.AgentCertFile(), time.Now()) {
-		t.Error("frisches zertifikat darf nicht rotiert werden")
+		t.Error("fresh certificate must not be rotated")
 	}
-	// 80 % verstrichen ⇒ Rotation.
+	// 80% elapsed ⇒ rotation.
 	writeAgentCert(t, d, clientCertValidity*8/10)
 	if !mtlsNeedsRotation(d.paths.AgentCertFile(), time.Now()) {
-		t.Error("2/3 laufzeit überschritten muss rotation auslösen")
+		t.Error("2/3 of validity exceeded must trigger rotation")
 	}
 }
 
@@ -105,24 +105,24 @@ func TestRotateMTLSIfNeeded(t *testing.T) {
 	if api.mtlsCalls.Load() != 1 {
 		t.Fatalf("mtlsCalls = %d", api.mtlsCalls.Load())
 	}
-	// Neues Paar liegt auf Platte und ist konsistent (Schlüssel passt zum
-	// Zertifikat) — und das neue Zertifikat ist frisch.
+	// The new pair is on disk and consistent (key matches the certificate)
+	// — and the new certificate is fresh.
 	if _, err := os.Stat(d.paths.AgentKeyFile()); err != nil {
-		t.Fatalf("agent.key fehlt: %v", err)
+		t.Fatalf("agent.key missing: %v", err)
 	}
 	if mtlsNeedsRotation(d.paths.AgentCertFile(), time.Now()) {
-		t.Error("nach rotation muss das zertifikat frisch sein")
+		t.Error("certificate must be fresh after rotation")
 	}
 
-	// Zweiter Lauf: frisch ⇒ kein weiterer API-Call.
+	// Second run: fresh ⇒ no further API call.
 	d.rotateMTLSIfNeeded(context.Background())
 	if api.mtlsCalls.Load() != 1 {
-		t.Errorf("frisches zertifikat erneut rotiert (calls=%d)", api.mtlsCalls.Load())
+		t.Errorf("fresh certificate rotated again (calls=%d)", api.mtlsCalls.Load())
 	}
 }
 
-func TestRotateMTLSFehlerLaesstAltesPaarStehen(t *testing.T) {
-	api := &fakeAPI{mtlsErr: errors.New("server nicht erreichbar")}
+func TestRotateMTLSErrorKeepsOldPair(t *testing.T) {
+	api := &fakeAPI{mtlsErr: errors.New("server unreachable")}
 	d := newTestDaemon(t, api)
 	writeAgentCert(t, d, clientCertValidity*8/10)
 	before, err := os.ReadFile(d.paths.AgentCertFile())
@@ -133,6 +133,6 @@ func TestRotateMTLSFehlerLaesstAltesPaarStehen(t *testing.T) {
 	d.rotateMTLSIfNeeded(context.Background())
 	after, err := os.ReadFile(d.paths.AgentCertFile())
 	if err != nil || string(after) != string(before) {
-		t.Fatalf("fehlgeschlagene rotation darf das zertifikat nicht anfassen: %v", err)
+		t.Fatalf("a failed rotation must not touch the certificate: %v", err)
 	}
 }

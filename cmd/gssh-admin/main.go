@@ -1,5 +1,5 @@
-// gssh-admin ist das Admin-CLI von guided-ssh (Phase 6): Zugriffsregeln
-// (Grants) verwalten — CRUD und deklarativer YAML-Abgleich über die Admin-API.
+// gssh-admin is the admin CLI of guided-ssh (Phase 6): manages access rules
+// (grants) — CRUD and declarative YAML reconciliation via the admin API.
 package main
 
 import (

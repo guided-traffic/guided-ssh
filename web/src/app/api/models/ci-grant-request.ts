@@ -7,7 +7,7 @@ export interface CiGrantRequest {
   principals: Array<string>;
 
   /**
-   * Pflicht bei POST
+   * Required on POST
    */
   project?: string;
   protected_only?: boolean;

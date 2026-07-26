@@ -1,6 +1,7 @@
-# Flux-Kustomization des Clusters staging: synct das staging-Overlay aus dem
-# GitOps-Repo (GitRepository flux-system legt `flux bootstrap` an) und
-# entschlüsselt SOPS-Secrets mit dem age-Key im Secret sops-age.
+# Flux Kustomization for the staging cluster: syncs the staging overlay
+# from the GitOps repo (GitRepository flux-system is created by
+# `flux bootstrap`) and decrypts SOPS secrets with the age key in the
+# sops-age secret.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

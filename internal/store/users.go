@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CreateUser legt einen Benutzer an und füllt ID und Zeitstempel.
+// CreateUser creates a user and fills in the ID and timestamp.
 func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	created, err := queryOne[User](ctx, s.pool, `
 		INSERT INTO users (issuer, subject, username, email, uid, gid, active)
@@ -21,30 +21,29 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	return nil
 }
 
-// GetUser liefert einen Benutzer per ID.
+// GetUser returns a user by ID.
 func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 	return queryOne[User](ctx, s.pool, `SELECT * FROM users WHERE id = $1`, id)
 }
 
-// GetUserBySubject liefert einen Benutzer per IdP-Identität (issuer, sub).
+// GetUserBySubject returns a user by IdP identity (issuer, sub).
 func (s *Store) GetUserBySubject(ctx context.Context, issuer, subject string) (*User, error) {
 	return queryOne[User](ctx, s.pool,
 		`SELECT * FROM users WHERE issuer = $1 AND subject = $2`, issuer, subject)
 }
 
-// ListUsers liefert alle Benutzer.
+// ListUsers returns all users.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return queryAll[User](ctx, s.pool, `SELECT * FROM users ORDER BY username, id`)
 }
 
-// UserDetailed ist ein Benutzer inklusive seiner Gruppennamen (für die
-// Web-UI, Phase 8).
+// UserDetailed is a user including its group names (for the web UI, phase 8).
 type UserDetailed struct {
 	User
 	Groups []string `db:"groups"`
 }
 
-// ListUsersDetailed liefert alle Benutzer inklusive ihrer Gruppennamen.
+// ListUsersDetailed returns all users including their group names.
 func (s *Store) ListUsersDetailed(ctx context.Context) ([]UserDetailed, error) {
 	return queryAll[UserDetailed](ctx, s.pool, `
 		SELECT u.*,
@@ -56,7 +55,7 @@ func (s *Store) ListUsersDetailed(ctx context.Context) ([]UserDetailed, error) {
 		ORDER BY u.username, u.id`)
 }
 
-// UpdateUser aktualisiert die veränderlichen Felder eines Benutzers.
+// UpdateUser updates the mutable fields of a user.
 func (s *Store) UpdateUser(ctx context.Context, u *User) error {
 	updated, err := queryOne[User](ctx, s.pool, `
 		UPDATE users
@@ -71,13 +70,13 @@ func (s *Store) UpdateUser(ctx context.Context, u *User) error {
 	return nil
 }
 
-// DeleteUser entfernt einen Benutzer (Gruppenzuordnungen kaskadieren).
+// DeleteUser removes a user (group memberships cascade).
 func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return s.execAffectingOne(ctx, `DELETE FROM users WHERE id = $1`, id)
 }
 
-// SetUserGroups ersetzt die Gruppenzugehörigkeiten eines Benutzers atomar
-// (Zielzustand aus dem IdP-Sync).
+// SetUserGroups atomically replaces the group memberships of a user
+// (target state from the IdP sync).
 func (s *Store) SetUserGroups(ctx context.Context, userID uuid.UUID, groupIDs []uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM user_groups WHERE user_id = $1`, userID); err != nil {
@@ -90,7 +89,7 @@ func (s *Store) SetUserGroups(ctx context.Context, userID uuid.UUID, groupIDs []
 	})
 }
 
-// ListUserGroups liefert die Gruppen eines Benutzers.
+// ListUserGroups returns the groups of a user.
 func (s *Store) ListUserGroups(ctx context.Context, userID uuid.UUID) ([]Group, error) {
 	return queryAll[Group](ctx, s.pool, `
 		SELECT g.*

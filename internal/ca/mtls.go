@@ -19,20 +19,20 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// EventAgentCertIssued ist das Audit-Event einer mTLS-Client-Zertifikat-Ausstellung.
+// EventAgentCertIssued is the audit event of an mTLS client certificate issuance.
 const EventAgentCertIssued = "ca.agent_cert_issued"
 
-// Laufzeiten der mTLS-PKI: CA langlebig, Client-Zertifikate bis zur Rotation
-// (Phase 10), Server-Zertifikat wird bei jedem Start neu ausgestellt.
+// Lifetimes of the mTLS PKI: the CA is long-lived, client certificates last
+// until rotation (Phase 10), the server certificate is reissued on every start.
 const (
 	mtlsCAValidity     = 10 * 365 * 24 * time.Hour
 	AgentCertValidity  = 365 * 24 * time.Hour
 	ServerCertValidity = 90 * 24 * time.Hour
 )
 
-// EnsureMTLSCA legt die X.509-CA für Agent-mTLS an, falls noch keine existiert
-// (Bootstrap, analog EnsureCAKeys). Der CA-Key liegt AES-GCM-verschlüsselt in
-// ca_keys (purpose "mtls"), public_key enthält das CA-Zertifikat als PEM.
+// EnsureMTLSCA creates the X.509 CA for agent mTLS if none exists yet
+// (bootstrap, analogous to EnsureCAKeys). The CA key is stored AES-GCM
+// encrypted in ca_keys (purpose "mtls"), public_key holds the CA certificate as PEM.
 // In self-managed mode this bootstrap is refused; use AdoptExternalKeys.
 func (ca *CA) EnsureMTLSCA(ctx context.Context) error {
 	if ca.selfManaged() {
@@ -62,7 +62,7 @@ func (ca *CA) EnsureMTLSCA(ctx context.Context) error {
 		State:               store.CAKeyStateActive,
 	}
 	if err := ca.store.CreateCAKey(ctx, key); err != nil {
-		return fmt.Errorf("ca: mtls-ca persistieren: %w", err)
+		return fmt.Errorf("ca: persist mtls ca: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{"ca_key_id": key.ID, "purpose": store.CAPurposeMTLS})
 	if err != nil {
@@ -78,7 +78,7 @@ func (ca *CA) EnsureMTLSCA(ctx context.Context) error {
 func GenerateMTLSCA() (certPEM, keyPEM []byte, err error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ca: mtls-key erzeugen: %w", err)
+		return nil, nil, fmt.Errorf("ca: generate mtls key: %w", err)
 	}
 	serial, err := randomSerial()
 	if err != nil {
@@ -96,17 +96,17 @@ func GenerateMTLSCA() (certPEM, keyPEM []byte, err error) {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ca: mtls-ca-zertifikat erstellen: %w", err)
+		return nil, nil, fmt.Errorf("ca: create mtls ca certificate: %w", err)
 	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ca: mtls-key serialisieren: %w", err)
+		return nil, nil, fmt.Errorf("ca: marshal mtls key: %w", err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), nil
 }
 
-// mtlsCA lädt CA-Zertifikat und Private Key der aktiven mTLS-CA.
+// mtlsCA loads the CA certificate and private key of the active mTLS CA.
 // In self-managed mode the material comes straight from the mounted files; the
 // ca_keys row is derived state and carries no private key to decrypt.
 func (ca *CA) mtlsCA(ctx context.Context) (*x509.Certificate, ed25519.PrivateKey, string, error) {
@@ -123,41 +123,41 @@ func (ca *CA) mtlsCA(ctx context.Context) (*x509.Certificate, ed25519.PrivateKey
 		}
 		block, _ := pem.Decode([]byte(keys[i].PublicKey))
 		if block == nil {
-			return nil, nil, "", fmt.Errorf("ca: mtls-ca %s: kein pem-zertifikat", keys[i].ID)
+			return nil, nil, "", fmt.Errorf("ca: mtls ca %s: no pem certificate", keys[i].ID)
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return nil, nil, "", fmt.Errorf("ca: mtls-ca %s parsen: %w", keys[i].ID, err)
+			return nil, nil, "", fmt.Errorf("ca: parse mtls ca %s: %w", keys[i].ID, err)
 		}
 		keyPEM, err := decryptPrivateKey(ca.masterKey, keys[i].EncryptedPrivateKey)
 		if err != nil {
-			return nil, nil, "", fmt.Errorf("ca: mtls-ca %s: %w", keys[i].ID, err)
+			return nil, nil, "", fmt.Errorf("ca: mtls ca %s: %w", keys[i].ID, err)
 		}
 		keyBlock, _ := pem.Decode(keyPEM)
 		if keyBlock == nil {
-			return nil, nil, "", fmt.Errorf("ca: mtls-ca %s: kein pem-key", keys[i].ID)
+			return nil, nil, "", fmt.Errorf("ca: mtls ca %s: no pem key", keys[i].ID)
 		}
 		parsed, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
 		if err != nil {
-			return nil, nil, "", fmt.Errorf("ca: mtls-key %s parsen: %w", keys[i].ID, err)
+			return nil, nil, "", fmt.Errorf("ca: parse mtls key %s: %w", keys[i].ID, err)
 		}
 		priv, ok := parsed.(ed25519.PrivateKey)
 		if !ok {
-			return nil, nil, "", fmt.Errorf("ca: mtls-key %s: unerwarteter typ %T", keys[i].ID, parsed)
+			return nil, nil, "", fmt.Errorf("ca: mtls key %s: unexpected type %T", keys[i].ID, parsed)
 		}
 		return cert, priv, keys[i].PublicKey, nil
 	}
-	return nil, nil, "", fmt.Errorf("ca: keine aktive mtls-ca (EnsureMTLSCA fehlt?)")
+	return nil, nil, "", fmt.Errorf("ca: no active mtls ca (EnsureMTLSCA missing?)")
 }
 
-// MTLSCAPEM liefert das CA-Zertifikat als PEM (Vertrauensanker für Agenten
-// und ClientCAs des Servers).
+// MTLSCAPEM returns the CA certificate as PEM (trust anchor for agents
+// and the server's ClientCAs).
 func (ca *CA) MTLSCAPEM(ctx context.Context) (string, error) {
 	_, _, pemStr, err := ca.mtlsCA(ctx)
 	return pemStr, err
 }
 
-// MTLSCAPool liefert die mTLS-CA als CertPool (für tls.Config.ClientCAs).
+// MTLSCAPool returns the mTLS CA as a CertPool (for tls.Config.ClientCAs).
 func (ca *CA) MTLSCAPool(ctx context.Context) (*x509.CertPool, error) {
 	cert, _, _, err := ca.mtlsCA(ctx)
 	if err != nil {
@@ -168,20 +168,20 @@ func (ca *CA) MTLSCAPool(ctx context.Context) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// IssueAgentCert signiert den CSR eines Host-Agenten als mTLS-Client-Zertifikat.
-// Der CommonName wird serverseitig auf die Host-ID gesetzt — die Identität
-// kommt aus dem Enrollment, nie aus dem CSR.
+// IssueAgentCert signs a host agent's CSR as an mTLS client certificate.
+// The CommonName is set server-side to the host ID — the identity comes
+// from the enrollment, never from the CSR.
 func (ca *CA) IssueAgentCert(ctx context.Context, hostID uuid.UUID, csrPEM []byte) (string, error) {
 	block, _ := pem.Decode(csrPEM)
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
-		return "", fmt.Errorf("ca: kein pem-csr")
+		return "", fmt.Errorf("ca: not a pem csr")
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf("ca: csr parsen: %w", err)
+		return "", fmt.Errorf("ca: parse csr: %w", err)
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return "", fmt.Errorf("ca: csr-signatur ungültig: %w", err)
+		return "", fmt.Errorf("ca: invalid csr signature: %w", err)
 	}
 	caCert, caPriv, _, err := ca.mtlsCA(ctx)
 	if err != nil {
@@ -201,7 +201,7 @@ func (ca *CA) IssueAgentCert(ctx context.Context, hostID uuid.UUID, csrPEM []byt
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, caCert, csr.PublicKey, caPriv)
 	if err != nil {
-		return "", fmt.Errorf("ca: agent-zertifikat erstellen: %w", err)
+		return "", fmt.Errorf("ca: create agent certificate: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"host_id": hostID, "serial": serial.String(), "not_after": template.NotAfter,
@@ -216,9 +216,9 @@ func (ca *CA) IssueAgentCert(ctx context.Context, hostID uuid.UUID, csrPEM []byt
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), nil
 }
 
-// IssueServerCert stellt das TLS-Server-Zertifikat des Agent-Listeners aus
-// (bei jedem Start neu, nur im Speicher). Namen dürfen DNS-Namen oder
-// IP-Adressen sein.
+// IssueServerCert issues the TLS server certificate of the agent listener
+// (freshly on every start, in memory only). Names may be DNS names or
+// IP addresses.
 func (ca *CA) IssueServerCert(ctx context.Context, names []string) (tls.Certificate, error) {
 	caCert, caPriv, _, err := ca.mtlsCA(ctx)
 	if err != nil {
@@ -249,17 +249,17 @@ func (ca *CA) IssueServerCert(ctx context.Context, names []string) (tls.Certific
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, caCert, pub, caPriv)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("ca: server-zertifikat erstellen: %w", err)
+		return tls.Certificate{}, fmt.Errorf("ca: create server certificate: %w", err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv}, nil
 }
 
-// randomSerial erzeugt eine zufällige X.509-Seriennummer (Kollisions- und
-// Vorhersagefreiheit; SSH-Serials kommen weiterhin aus der DB-Sequence).
+// randomSerial generates a random X.509 serial number (collision- and
+// prediction-resistant; SSH serials still come from the DB sequence).
 func randomSerial() (*big.Int, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return nil, fmt.Errorf("ca: seriennummer erzeugen: %w", err)
+		return nil, fmt.Errorf("ca: generate serial number: %w", err)
 	}
 	return serial, nil
 }

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Erzwingt die minimale Gesamt-Testabdeckung über allen Go-Code (Coverage-Gate).
-# Aufruf: hack/coverage.sh [coverage-profil] [minimum-prozent]
+# Enforces the minimum overall test coverage across all Go code (coverage gate).
+# Usage: hack/coverage.sh [coverage-profile] [minimum-percent]
 set -euo pipefail
 
 profile="${1:-coverage.out}"
 min="${2:-80}"
 
 if [[ ! -f "$profile" ]]; then
-  echo "FEHLER: Coverage-Profil '$profile' nicht gefunden (erst 'make cover' bzw. 'go test -coverprofile' laufen lassen)" >&2
+  echo "ERROR: coverage profile '$profile' not found (run 'make cover' or 'go test -coverprofile' first)" >&2
   exit 1
 fi
 
 total="$(go tool cover -func="$profile" | awk '/^total:/ { sub(/%/, "", $3); print $3 }')"
 
-echo "Gesamtabdeckung: ${total}% (Minimum: ${min}%)"
+echo "Total coverage: ${total}% (minimum: ${min}%)"
 if awk -v t="$total" -v m="$min" 'BEGIN { exit !(t + 0 < m + 0) }'; then
-  echo "FEHLER: Testabdeckung ${total}% unterschreitet das Gate von ${min}%" >&2
+  echo "ERROR: test coverage ${total}% is below the ${min}% gate" >&2
   exit 1
 fi

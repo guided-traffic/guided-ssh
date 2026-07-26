@@ -10,14 +10,13 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// Audit-Event-Typen des Gruppen-Syncs.
+// Audit event types of the group sync.
 const (
 	EventUserDeactivated = "auth.user_deactivated"
 	EventUserReactivated = "auth.user_reactivated"
 )
 
-// DirectoryUser ist der IdP-Zustand eines Benutzers aus Sicht der
-// Directory-API.
+// DirectoryUser is a user's IdP state as seen by the directory API.
 type DirectoryUser struct {
 	Subject  string
 	Username string
@@ -26,39 +25,40 @@ type DirectoryUser struct {
 	Active   bool
 }
 
-// DirectorySource liefert den aktuellen Benutzer- und Gruppenzustand des IdP
-// (z. B. via Keycloak-Admin-API). Der Sync gleicht die Datenbank dagegen ab.
+// DirectorySource provides the IdP's current user and group state (e.g. via
+// the Keycloak Admin API). The sync reconciles the database against it.
 type DirectorySource interface {
-	// Issuer ist die Issuer-URL, deren Benutzer diese Source verwaltet.
+	// Issuer is the issuer URL whose users this source manages.
 	Issuer() string
-	// Users liefert alle Benutzer des IdP inkl. Gruppen.
+	// Users returns all IdP users including groups.
 	Users(ctx context.Context) ([]DirectoryUser, error)
 }
 
-// Syncer gleicht in festen Intervallen die lokalen Benutzer/Gruppen mit dem IdP ab.
-// Aus dem IdP entfernte oder deaktivierte Benutzer werden deaktiviert und
-// verlieren ihre Gruppen — das wirkt sofort auf Neuausstellung
-// (Mapper.EnsureUser weist deaktivierte Benutzer ab) und auf Host-ACLs
-// (die aus denselben Tabellen gespeist werden, Phase 5/6).
+// Syncer reconciles the local users/groups with the IdP at fixed intervals.
+// Users removed from or deactivated in the IdP are deactivated and lose
+// their groups — this immediately affects reissuance (Mapper.EnsureUser
+// rejects deactivated users) and host ACLs (fed from the same tables,
+// Phase 5/6).
 type Syncer struct {
 	store  Store
 	source DirectorySource
 	logger *slog.Logger
 }
 
-// NewSyncer baut einen Syncer über Store und Directory-Source.
+// NewSyncer builds a Syncer over the store and directory source.
 func NewSyncer(st Store, source DirectorySource, logger *slog.Logger) *Syncer {
 	return &Syncer{store: st, source: source, logger: logger}
 }
 
-// Run synchronisiert sofort und dann in jedem Intervall, bis der Kontext
-// endet. Fehler einzelner Läufe werden geloggt, brechen den Loop aber nicht ab.
+// Run synchronizes immediately and then at every interval until the
+// context ends. Errors from individual runs are logged but don't break the
+// loop.
 func (s *Syncer) Run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		if err := s.SyncOnce(ctx); err != nil && ctx.Err() == nil {
-			s.logger.Error("gruppen-sync fehlgeschlagen", "error", err)
+			s.logger.Error("group sync failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -68,13 +68,13 @@ func (s *Syncer) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// SyncOnce führt einen einzelnen Abgleich durch. Nur bereits bekannte
-// Benutzer werden abgeglichen — neue IdP-Benutzer entstehen erst beim ersten
-// Login (Mapper.EnsureUser).
+// SyncOnce performs a single reconciliation pass. Only already-known users
+// are reconciled — new IdP users are created only on their first login
+// (Mapper.EnsureUser).
 func (s *Syncer) SyncOnce(ctx context.Context) error {
 	directory, err := s.source.Users(ctx)
 	if err != nil {
-		return fmt.Errorf("auth: idp-benutzer laden: %w", err)
+		return fmt.Errorf("auth: loading idp users: %w", err)
 	}
 	bySubject := make(map[string]DirectoryUser, len(directory))
 	for _, du := range directory {
@@ -83,7 +83,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 
 	users, err := s.store.ListUsers(ctx)
 	if err != nil {
-		return fmt.Errorf("auth: lokale benutzer laden: %w", err)
+		return fmt.Errorf("auth: loading local users: %w", err)
 	}
 	issuer := s.source.Issuer()
 	for i := range users {
@@ -105,23 +105,23 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	return nil
 }
 
-// deactivate setzt den Benutzer inaktiv und entzieht alle Gruppen.
+// deactivate marks the user inactive and revokes all groups.
 func (s *Syncer) deactivate(ctx context.Context, user *store.User) error {
 	if !user.Active {
 		return nil
 	}
 	user.Active = false
 	if err := s.store.UpdateUser(ctx, user); err != nil {
-		return fmt.Errorf("auth: benutzer %s deaktivieren: %w", user.Subject, err)
+		return fmt.Errorf("auth: deactivating user %s: %w", user.Subject, err)
 	}
 	if err := s.store.SetUserGroups(ctx, user.ID, nil); err != nil {
-		return fmt.Errorf("auth: gruppen von %s entziehen: %w", user.Subject, err)
+		return fmt.Errorf("auth: revoking groups from %s: %w", user.Subject, err)
 	}
 	return s.audit(ctx, EventUserDeactivated, user)
 }
 
-// reconcile gleicht Stammdaten, Aktiv-Status und Gruppen eines Benutzers mit
-// dem IdP-Zustand ab.
+// reconcile reconciles a user's profile data, active status, and groups
+// with the IdP state.
 func (s *Syncer) reconcile(ctx context.Context, user *store.User, du DirectoryUser) error {
 	reactivated := !user.Active
 	username := user.Username
@@ -137,7 +137,7 @@ func (s *Syncer) reconcile(ctx context.Context, user *store.User, du DirectoryUs
 		user.Username = username
 		user.Email = email
 		if err := s.store.UpdateUser(ctx, user); err != nil {
-			return fmt.Errorf("auth: benutzer %s aktualisieren: %w", user.Subject, err)
+			return fmt.Errorf("auth: updating user %s: %w", user.Subject, err)
 		}
 	}
 
@@ -146,7 +146,7 @@ func (s *Syncer) reconcile(ctx context.Context, user *store.User, du DirectoryUs
 		return err
 	}
 	if err := s.store.SetUserGroups(ctx, user.ID, groupIDs); err != nil {
-		return fmt.Errorf("auth: gruppen von %s setzen: %w", user.Subject, err)
+		return fmt.Errorf("auth: setting groups for %s: %w", user.Subject, err)
 	}
 	if reactivated {
 		return s.audit(ctx, EventUserReactivated, user)
@@ -154,7 +154,7 @@ func (s *Syncer) reconcile(ctx context.Context, user *store.User, du DirectoryUs
 	return nil
 }
 
-// audit schreibt ein Sync-Audit-Event für den Benutzer.
+// audit writes a sync audit event for the user.
 func (s *Syncer) audit(ctx context.Context, eventType string, user *store.User) error {
 	payload, err := json.Marshal(map[string]any{
 		"user_id": user.ID,

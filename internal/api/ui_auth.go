@@ -16,44 +16,44 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/auth"
 )
 
-// UIAuthConfig konfiguriert den server-seitigen OIDC-Login der Web-UI
-// (BFF-Muster): der Server führt Authorization Code + PKCE mit Client-Secret
-// aus, Tokens verlassen den Server nie — der Browser bekommt nur ein
-// verschlüsseltes, HttpOnly-Session-Cookie. Kein CORS gegen den IdP.
+// UIAuthConfig configures the web UI's server-side OIDC login (BFF
+// pattern): the server performs authorization code + PKCE with a client
+// secret, tokens never leave the server — the browser only gets an
+// encrypted, HttpOnly session cookie. No CORS against the IdP.
 type UIAuthConfig struct {
-	// OAuth trägt Client, Secret, Endpoint und Scopes; RedirectURL bleibt
-	// leer und wird pro Request abgeleitet (BaseURL bzw. Host-Header).
+	// OAuth carries client, secret, endpoint, and scopes; RedirectURL
+	// stays empty and is derived per request (BaseURL or the Host header).
 	OAuth *oauth2.Config
-	// Verifier prüft die ID-Tokens des Code-Exchange (Audience = UI-Client).
+	// Verifier checks the ID tokens of the code exchange (audience = UI client).
 	Verifier TokenVerifier
-	// Codec ver-/entschlüsselt Session- und State-Cookies.
+	// Codec encrypts/decrypts session and state cookies.
 	Codec *auth.SessionCodec
-	// BaseURL ist die externe Basis-URL der UI (https://gssh.example.com);
-	// leer ⇒ Ableitung aus Request (X-Forwarded-Proto + Host).
+	// BaseURL is the UI's external base URL (https://gssh.example.com);
+	// empty ⇒ derived from the request (X-Forwarded-Proto + Host).
 	BaseURL string
-	// SessionTTL ist die Lebensdauer der UI-Session; innerhalb dieser Zeit
-	// bleiben die Gruppen-Claims des Logins wirksam (wie zuvor die Laufzeit
-	// des ID-Tokens). Deaktivierte Benutzer blockt EnsureUser pro Request.
+	// SessionTTL is the lifetime of the UI session; within this time the
+	// login's group claims stay in effect (like the ID token's lifetime
+	// before). EnsureUser blocks disabled users on every request.
 	SessionTTL time.Duration
 }
 
-// Cookie-Namen der UI-Session und des Login-Zustands (State + PKCE-Verifier
-// zwischen /login und /callback).
+// Cookie names of the UI session and the login state (state + PKCE
+// verifier between /login and /callback).
 const (
 	sessionCookieName = "gssh_session"
 	stateCookieName   = "gssh_auth_state"
 )
 
-// stateCookieTTL begrenzt die Dauer eines Login-Versuchs.
+// stateCookieTTL bounds the duration of a login attempt.
 const stateCookieTTL = 10 * time.Minute
 
-// uiSession ist der verschlüsselte Inhalt des Session-Cookies.
+// uiSession is the encrypted content of the session cookie.
 type uiSession struct {
 	Claims    auth.Claims `json:"claims"`
 	ExpiresAt time.Time   `json:"exp"`
 }
 
-// uiAuthState ist der verschlüsselte Inhalt des State-Cookies.
+// uiAuthState is the encrypted content of the state cookie.
 type uiAuthState struct {
 	State     string    `json:"state"`
 	Verifier  string    `json:"verifier"`
@@ -61,9 +61,9 @@ type uiAuthState struct {
 	ExpiresAt time.Time `json:"exp"`
 }
 
-// sessionFromRequest liest die UI-Session aus dem Cookie; nil, wenn keines
-// da, ungültig oder abgelaufen ist (Aufrufer behandelt das als "nicht
-// angemeldet", nie als Serverfehler).
+// sessionFromRequest reads the UI session from the cookie; nil if there is
+// none, it is invalid, or it has expired (the caller treats this as "not
+// logged in", never as a server error).
 func (c *UIAuthConfig) sessionFromRequest(r *http.Request) *auth.Claims {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
@@ -80,7 +80,7 @@ func (c *UIAuthConfig) sessionFromRequest(r *http.Request) *auth.Claims {
 	return &session.Claims
 }
 
-// uiAuthContext bündelt die Abhängigkeiten der /v1/auth-Handler.
+// uiAuthContext bundles the dependencies of the /v1/auth handlers.
 type uiAuthContext struct {
 	cfg           *UIAuthConfig
 	mapper        *auth.Mapper
@@ -90,12 +90,12 @@ type uiAuthContext struct {
 	logger        *slog.Logger
 }
 
-// registerUIAuthRoutes hängt die Login-Endpunkte der Web-UI an den Mux.
-// Ohne UIAuth-Konfiguration antwortet /v1/auth mit 503 (diagnostizierbar).
+// registerUIAuthRoutes attaches the web UI's login endpoints to the mux.
+// Without a UIAuth configuration, /v1/auth responds with 503 (diagnosable).
 func registerUIAuthRoutes(mux *http.ServeMux, deps Deps) {
 	if deps.UIAuth == nil || deps.Store == nil {
 		mux.HandleFunc("/v1/auth/", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "ui-login nicht konfiguriert (server-seitiges oidc erforderlich)", http.StatusServiceUnavailable)
+			http.Error(w, "ui login not configured (server-side oidc required)", http.StatusServiceUnavailable)
 		})
 		return
 	}
@@ -113,8 +113,8 @@ func registerUIAuthRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("GET /v1/auth/me", ui.handleMe)
 }
 
-// oauthConfig liefert die OAuth-Konfiguration mit der Redirect-URL dieses
-// Requests (Kopie — die geteilte Config bleibt unverändert).
+// oauthConfig returns the OAuth configuration with this request's redirect
+// URL (a copy — the shared config stays unchanged).
 func (u *uiAuthContext) oauthConfig(r *http.Request) *oauth2.Config {
 	cfg := *u.cfg.OAuth
 	base := u.cfg.BaseURL
@@ -129,13 +129,13 @@ func (u *uiAuthContext) oauthConfig(r *http.Request) *oauth2.Config {
 	return &cfg
 }
 
-// isSecureRequest erkennt HTTPS auch hinter dem Ingress (X-Forwarded-Proto).
+// isSecureRequest detects HTTPS even behind the ingress (X-Forwarded-Proto).
 func isSecureRequest(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// sanitizeRedirect erlaubt nur lokale Pfade als Rücksprung-Ziel (kein Open
-// Redirect: keine absoluten URLs, keine protokoll-relativen "//…").
+// sanitizeRedirect allows only local paths as the return target (no open
+// redirect: no absolute URLs, no protocol-relative "//…").
 func sanitizeRedirect(target string) string {
 	if !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") {
 		return "/"
@@ -143,12 +143,12 @@ func sanitizeRedirect(target string) string {
 	return target
 }
 
-// handleLogin startet den Code-Flow: State + PKCE-Verifier wandern
-// verschlüsselt in ein kurzlebiges Cookie, der Browser zum IdP.
+// handleLogin starts the code flow: state + PKCE verifier travel encrypted
+// in a short-lived cookie, the browser goes to the IdP.
 func (u *uiAuthContext) handleLogin(w http.ResponseWriter, r *http.Request) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
-		u.logger.Error("ui-auth: state erzeugen fehlgeschlagen", "error", err)
+		u.logger.Error("ui-auth: generating state failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -167,11 +167,11 @@ func (u *uiAuthContext) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	sealed, err := u.cfg.Codec.Seal(payload)
 	if err != nil {
-		u.logger.Error("ui-auth: state-cookie versiegeln fehlgeschlagen", "error", err)
+		u.logger.Error("ui-auth: sealing state cookie failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure bewusst dynamisch (isSecureRequest ⇒ hinter TLS/Ingress true, lokal http false); HttpOnly und SameSite sind gesetzt
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure deliberately dynamic (isSecureRequest ⇒ true behind TLS/ingress, false for local http); HttpOnly and SameSite are set
 		Name: stateCookieName, Value: sealed,
 		Path: "/v1/auth", MaxAge: int(stateCookieTTL.Seconds()),
 		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
@@ -179,40 +179,40 @@ func (u *uiAuthContext) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, u.oauthConfig(r).AuthCodeURL(state, oauth2.S256ChallengeOption(verifier)), http.StatusFound)
 }
 
-// callbackState validiert den Login-Zustand des Callbacks (State-Cookie
-// vorhanden, entschlüsselbar, nicht abgelaufen, State-Parameter passt);
-// false ⇒ Fehlerantwort wurde geschrieben.
+// callbackState validates the callback's login state (state cookie
+// present, decryptable, not expired, state parameter matches); false ⇒ an
+// error response was written.
 func (u *uiAuthContext) callbackState(w http.ResponseWriter, r *http.Request) (*uiAuthState, bool) {
 	cookie, err := r.Cookie(stateCookieName)
 	if err != nil {
-		http.Error(w, "login-state fehlt (login neu starten)", http.StatusBadRequest)
+		http.Error(w, "login state missing (restart the login)", http.StatusBadRequest)
 		return nil, false
 	}
 	u.clearCookie(w, r, stateCookieName, "/v1/auth")
 	plaintext, err := u.cfg.Codec.Open(cookie.Value)
 	if err != nil {
-		http.Error(w, "login-state ungültig (login neu starten)", http.StatusBadRequest)
+		http.Error(w, "login state invalid (restart the login)", http.StatusBadRequest)
 		return nil, false
 	}
 	var state uiAuthState
 	if err := json.Unmarshal(plaintext, &state); err != nil || time.Now().After(state.ExpiresAt) {
-		http.Error(w, "login-state abgelaufen (login neu starten)", http.StatusBadRequest)
+		http.Error(w, "login state expired (restart the login)", http.StatusBadRequest)
 		return nil, false
 	}
 	if stateParam := r.URL.Query().Get("state"); stateParam == "" || stateParam != state.State {
-		http.Error(w, "state stimmt nicht überein (login neu starten)", http.StatusBadRequest)
+		http.Error(w, "state does not match (restart the login)", http.StatusBadRequest)
 		return nil, false
 	}
 	return &state, true
 }
 
-// handleCallback tauscht den Code server-seitig (Client-Secret + PKCE) gegen
-// Tokens, prüft das ID-Token und setzt das Session-Cookie.
+// handleCallback exchanges the code server-side (client secret + PKCE) for
+// tokens, checks the ID token, and sets the session cookie.
 func (u *uiAuthContext) handleCallback(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	if errCode := query.Get("error"); errCode != "" {
-		u.logger.Info("ui-auth: idp meldet fehler", "error", errCode, "description", query.Get("error_description"))
-		http.Error(w, "login fehlgeschlagen: idp meldet "+errCode, http.StatusBadGateway)
+		u.logger.Info("ui-auth: idp reports an error", "error", errCode, "description", query.Get("error_description"))
+		http.Error(w, "login failed: idp reports "+errCode, http.StatusBadGateway)
 		return
 	}
 	state, ok := u.callbackState(w, r)
@@ -222,27 +222,27 @@ func (u *uiAuthContext) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	token, err := u.oauthConfig(r).Exchange(r.Context(), query.Get("code"), oauth2.VerifierOption(state.Verifier))
 	if err != nil {
-		u.logger.Error("ui-auth: code-exchange fehlgeschlagen", "error", err)
-		http.Error(w, "login fehlgeschlagen: code-exchange mit dem idp fehlgeschlagen", http.StatusBadGateway)
+		u.logger.Error("ui-auth: code exchange failed", "error", err)
+		http.Error(w, "login failed: code exchange with the idp failed", http.StatusBadGateway)
 		return
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
-		u.logger.Error("ui-auth: token-antwort ohne id_token")
-		http.Error(w, "login fehlgeschlagen: idp lieferte kein id_token", http.StatusBadGateway)
+		u.logger.Error("ui-auth: token response without id_token")
+		http.Error(w, "login failed: idp did not return an id_token", http.StatusBadGateway)
 		return
 	}
 	claims, err := u.cfg.Verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
-		u.logger.Info("ui-auth: id-token abgelehnt", "error", err)
-		http.Error(w, "id-token ungültig", http.StatusUnauthorized)
+		u.logger.Info("ui-auth: id token rejected", "error", err)
+		http.Error(w, "id token invalid", http.StatusUnauthorized)
 		return
 	}
 	if _, err := u.mapper.EnsureUser(r.Context(), claims); errors.Is(err, auth.ErrUserInactive) {
-		http.Error(w, "benutzer ist deaktiviert", http.StatusForbidden)
+		http.Error(w, "user is disabled", http.StatusForbidden)
 		return
 	} else if err != nil {
-		u.logger.Error("ui-auth: benutzer-mapping fehlgeschlagen", "subject", claims.Subject, "error", err)
+		u.logger.Error("ui-auth: user mapping failed", "subject", claims.Subject, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -254,36 +254,36 @@ func (u *uiAuthContext) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	sealed, err := u.cfg.Codec.Seal(payload)
 	if err != nil {
-		u.logger.Error("ui-auth: session versiegeln fehlgeschlagen", "error", err)
+		u.logger.Error("ui-auth: sealing session failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure bewusst dynamisch (isSecureRequest ⇒ hinter TLS/Ingress true, lokal http false); HttpOnly und SameSite sind gesetzt
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure deliberately dynamic (isSecureRequest ⇒ true behind TLS/ingress, false for local http); HttpOnly and SameSite are set
 		Name: sessionCookieName, Value: sealed,
 		Path: "/", MaxAge: int(u.cfg.SessionTTL.Seconds()),
 		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
 	})
-	u.logger.Info("ui-auth: login erfolgreich", "subject", claims.Subject, "username", claims.Username())
+	u.logger.Info("ui-auth: login successful", "subject", claims.Subject, "username", claims.Username())
 	http.Redirect(w, r, state.Redirect, http.StatusFound)
 }
 
-// handleLogout löscht das Session-Cookie. Dex kennt kein RP-initiated
-// Logout — die IdP-Session bleibt bestehen, der nächste Login läuft ggf.
-// ohne erneute Passwort-Eingabe durch.
+// handleLogout deletes the session cookie. Dex has no RP-initiated
+// logout — the IdP session stays alive, the next login may go through
+// without re-entering a password.
 func (u *uiAuthContext) handleLogout(w http.ResponseWriter, r *http.Request) {
 	u.clearCookie(w, r, sessionCookieName, "/")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// authMeJSON ist die Antwort von GET /v1/auth/me.
+// authMeJSON is the response of GET /v1/auth/me.
 type authMeJSON struct {
 	Authenticated bool     `json:"authenticated"`
 	Username      string   `json:"username,omitempty"`
 	Roles         []string `json:"roles,omitempty"`
 }
 
-// handleMe liefert Login-Zustand, Benutzername und Rollen der Session —
-// die einzige Auth-Information, die die SPA noch braucht.
+// handleMe returns login state, username, and roles of the session — the
+// only auth information the SPA still needs.
 func (u *uiAuthContext) handleMe(w http.ResponseWriter, r *http.Request) {
 	claims := u.cfg.sessionFromRequest(r)
 	if claims == nil {
@@ -295,7 +295,7 @@ func (u *uiAuthContext) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, authMeJSON{Authenticated: false})
 		return
 	} else if err != nil {
-		u.logger.Error("ui-auth: benutzer-mapping fehlgeschlagen", "subject", claims.Subject, "error", err)
+		u.logger.Error("ui-auth: user mapping failed", "subject", claims.Subject, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -306,9 +306,9 @@ func (u *uiAuthContext) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// uiRoles bildet Gruppen-Claims auf die Rollen-Hierarchie ab (admin ⊃
-// auditor ⊃ readonly; leere Gruppen-Konfiguration vergibt nichts —
-// fail-closed, konsistent zu adminContext.hasRole).
+// uiRoles maps group claims onto the role hierarchy (admin ⊃ auditor ⊃
+// readonly; an empty group configuration grants nothing — fail-closed,
+// consistent with adminContext.hasRole).
 func uiRoles(groups []string, adminGroup, auditorGroup, readonlyGroup string) []string {
 	in := func(group string) bool {
 		return group != "" && slices.Contains(groups, group)
@@ -329,9 +329,9 @@ func uiRoles(groups []string, adminGroup, auditorGroup, readonlyGroup string) []
 	return roles
 }
 
-// clearCookie löscht ein Cookie (MaxAge < 0) mit identischen Attributen.
+// clearCookie deletes a cookie (MaxAge < 0) with identical attributes.
 func (u *uiAuthContext) clearCookie(w http.ResponseWriter, r *http.Request, name, path string) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure bewusst dynamisch (isSecureRequest ⇒ hinter TLS/Ingress true, lokal http false); HttpOnly und SameSite sind gesetzt
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure deliberately dynamic (isSecureRequest ⇒ true behind TLS/ingress, false for local http); HttpOnly and SameSite are set
 		Name: name, Value: "", Path: path, MaxAge: -1,
 		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
 	})

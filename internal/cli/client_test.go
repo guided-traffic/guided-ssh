@@ -15,7 +15,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
 )
 
-// spkiPin liefert den Base64-SPKI-SHA-256 des httptest-TLS-Zertifikats.
+// spkiPin returns the base64 SPKI SHA-256 of the httptest TLS certificate.
 func spkiPin(t *testing.T, server *httptest.Server) string {
 	t.Helper()
 	return pintls.FromCertificate(server.Certificate())
@@ -25,7 +25,7 @@ func marshalPub(pub ssh.PublicKey) string {
 	return string(ssh.MarshalAuthorizedKey(pub))
 }
 
-func TestSignUserMitPin(t *testing.T) {
+func TestSignUserWithPin(t *testing.T) {
 	sign := newFakeSign(t, "tok", time.Hour, true)
 	client, err := newAPIClient(&Config{APIURL: sign.server.URL, PinSHA256: spkiPin(t, sign.server)})
 	if err != nil {
@@ -40,11 +40,11 @@ func TestSignUserMitPin(t *testing.T) {
 		t.Errorf("keyid = %q", cert.KeyId)
 	}
 	if got := sign.lastValidity.Load(); got != int64((2 * time.Hour).Seconds()) {
-		t.Errorf("validity_seconds = %d, erwartet 7200", got)
+		t.Errorf("validity_seconds = %d, expected 7200", got)
 	}
 }
 
-func TestSignUserFalscherPin(t *testing.T) {
+func TestSignUserWrongPin(t *testing.T) {
 	sign := newFakeSign(t, "tok", time.Hour, true)
 	wrongPin := base64.StdEncoding.EncodeToString(make([]byte, sha256.Size))
 	client, err := newAPIClient(&Config{APIURL: sign.server.URL, PinSHA256: wrongPin})
@@ -54,13 +54,13 @@ func TestSignUserFalscherPin(t *testing.T) {
 	_, pub := testKeyPair(t)
 	_, err = client.signUser(context.Background(), "tok", marshalPub(pub), 0)
 	if err == nil || !strings.Contains(err.Error(), "fingerprint") {
-		t.Fatalf("erwartete pin-fehler, bekam %v", err)
+		t.Fatalf("expected pin error, got %v", err)
 	}
 }
 
-func TestSignUserOhnePinSelbstsigniert(t *testing.T) {
-	// Ohne Pin gelten die System-CAs — das selbstsignierte Test-Zertifikat
-	// muss abgelehnt werden.
+func TestSignUserWithoutPinSelfSigned(t *testing.T) {
+	// Without a pin, the system CAs apply — the self-signed test certificate
+	// must be rejected.
 	sign := newFakeSign(t, "tok", time.Hour, true)
 	client, err := newAPIClient(&Config{APIURL: sign.server.URL})
 	if err != nil {
@@ -68,11 +68,11 @@ func TestSignUserOhnePinSelbstsigniert(t *testing.T) {
 	}
 	_, pub := testKeyPair(t)
 	if _, err := client.signUser(context.Background(), "tok", marshalPub(pub), 0); err == nil {
-		t.Fatal("erwartete tls-fehler (unbekannte ca)")
+		t.Fatal("expected tls error (unknown ca)")
 	}
 }
 
-func TestSignUserHTTPFehler(t *testing.T) {
+func TestSignUserHTTPError(t *testing.T) {
 	sign := newFakeSign(t, "richtig", time.Hour, false)
 	client, err := newAPIClient(&Config{APIURL: sign.server.URL})
 	if err != nil {
@@ -81,16 +81,16 @@ func TestSignUserHTTPFehler(t *testing.T) {
 	_, pub := testKeyPair(t)
 	_, err = client.signUser(context.Background(), "falsch", marshalPub(pub), 0)
 	if err == nil || !strings.Contains(err.Error(), "401") {
-		t.Fatalf("erwartete 401, bekam %v", err)
+		t.Fatalf("expected 401, got %v", err)
 	}
 }
 
-func TestSignUserKaputteAntworten(t *testing.T) {
+func TestSignUserBrokenResponses(t *testing.T) {
 	_, pub := testKeyPair(t)
 	for name, response := range map[string]string{
-		"kein json":       "kaputt",
-		"kein zertifikat": `{"certificate":"kein-cert"}`,
-		"nur public key":  `{"certificate":"` + strings.TrimSpace(marshalPub(pub)) + `"}`,
+		"no json":         "broken",
+		"no certificate":  `{"certificate":"no-cert"}`,
+		"public key only": `{"certificate":"` + strings.TrimSpace(marshalPub(pub)) + `"}`,
 	} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(response))
@@ -100,19 +100,19 @@ func TestSignUserKaputteAntworten(t *testing.T) {
 			t.Fatalf("newAPIClient: %v", err)
 		}
 		if _, err := client.signUser(context.Background(), "tok", marshalPub(pub), 0); err == nil {
-			t.Errorf("%s: fehler erwartet", name)
+			t.Errorf("%s: error expected", name)
 		}
 		server.Close()
 	}
 }
 
-func TestSignUserServerNichtErreichbar(t *testing.T) {
+func TestSignUserServerUnreachable(t *testing.T) {
 	client, err := newAPIClient(&Config{APIURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("newAPIClient: %v", err)
 	}
 	_, pub := testKeyPair(t)
 	if _, err := client.signUser(context.Background(), "tok", marshalPub(pub), 0); err == nil {
-		t.Fatal("erwartete verbindungsfehler")
+		t.Fatal("expected connection error")
 	}
 }

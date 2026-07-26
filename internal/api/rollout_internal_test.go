@@ -13,8 +13,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/agentdist"
 )
 
-// fakeAgents ist eine AgentSource mit fest vorgegebener Liste; Open liefert den
-// Arch-Namen als Inhalt (genügt, um den Stream zu prüfen).
+// fakeAgents is an AgentSource with a fixed list; Open returns the arch
+// name as content (enough to verify the stream).
 type fakeAgents []agentdist.Info
 
 func (f fakeAgents) List() []agentdist.Info { return f }
@@ -28,10 +28,10 @@ func (f fakeAgents) Open(osName, arch string) (io.ReadCloser, agentdist.Info, er
 	return nil, agentdist.Info{}, fmt.Errorf("%w: %s/%s", agentdist.ErrNotFound, osName, arch)
 }
 
-// testPinPin ist ein gültiger (nie echt vergebener) Base64-SPKI-Pin.
+// testPinPin is a valid (never actually issued) base64 SPKI pin.
 const testPinPin = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-// readyDeps sind Abhängigkeiten mit allen vier erfüllten Gate-Bedingungen.
+// readyDeps are dependencies with all four gate conditions satisfied.
 func readyDeps(t *testing.T) Deps {
 	t.Helper()
 	logger, _ := testLogger()
@@ -43,56 +43,58 @@ func readyDeps(t *testing.T) Deps {
 	}
 }
 
-// TestRolloutGateBedingungen: jede fehlende Einzelbedingung erzeugt 503 mit
-// genau ihrem missing-Eintrag; sind alle erfüllt, lässt das Gate durch.
-func TestRolloutGateBedingungen(t *testing.T) {
+// TestRolloutGateConditions: each missing individual condition produces a
+// 503 with exactly its missing entry; once all are satisfied, the gate
+// lets requests through.
+func TestRolloutGateConditions(t *testing.T) {
 	logger, _ := testLogger()
 
 	if gate := newRolloutGate(readyDeps(t)); len(gate.status(t.Context()).Missing) != 0 {
-		t.Fatalf("vollständige konfiguration: missing = %v, erwartet leer", gate.status(t.Context()).Missing)
+		t.Fatalf("complete configuration: missing = %v, expected empty", gate.status(t.Context()).Missing)
 	}
 
 	tests := map[string]struct {
 		mutate func(*Deps)
 		want   string
 	}{
-		"keine binaries": {
+		"no binaries": {
 			mutate: func(d *Deps) { d.Agents = fakeAgents{} },
 			want:   rolloutMissingBinaries,
 		},
-		"keine agent-source": {
+		"no agent source": {
 			mutate: func(d *Deps) { d.Agents = nil },
 			want:   rolloutMissingBinaries,
 		},
-		"kein pin": {
-			// Dial-Quelle ohne Public-URL ⇒ kein Pin ermittelbar.
+		"no pin": {
+			// Dial source without a public URL ⇒ no pin determinable.
 			mutate: func(d *Deps) { d.Pins = NewPinProvider(PinProviderConfig{}, logger) },
 			want:   rolloutMissingPin,
 		},
-		"kein pin-provider": {
+		"no pin provider": {
 			mutate: func(d *Deps) { d.Pins = nil },
 			want:   rolloutMissingPin,
 		},
-		"keine agent-url": {
+		"no agent url": {
 			mutate: func(d *Deps) { d.AgentPublicURL = "" },
 			want:   rolloutMissingAgentURL,
 		},
-		"keine public-url": {
+		"no public url": {
 			mutate: func(d *Deps) { d.PublicBaseURL = "" },
 			want:   rolloutMissingPublicURL,
 		},
-		// http darf das Gate nie passieren: der install_command wäre sonst
-		// `curl http://… | sudo sh` — Klartext-Transport hebelt Hash-Check und
-		// Pin aus (beides schützt erst nach unverfälschter Script-Zustellung).
-		"agent-url nicht https": {
+		// http must never pass the gate: the install_command would
+		// otherwise be `curl http://… | sudo sh` — plaintext transport
+		// defeats the hash check and pin (both only protect after
+		// unaltered script delivery).
+		"agent url not https": {
 			mutate: func(d *Deps) { d.AgentPublicURL = "http://agent.gssh.example.com" },
 			want:   rolloutMissingAgentURLHTTPS,
 		},
-		"public-url nicht https": {
+		"public url not https": {
 			mutate: func(d *Deps) { d.PublicBaseURL = "http://gssh.example.com" },
 			want:   rolloutMissingPublicURLHTTPS,
 		},
-		"public-url unparsbar": {
+		"public url unparsable": {
 			mutate: func(d *Deps) { d.PublicBaseURL = "https://%zz" },
 			want:   rolloutMissingPublicURLHTTPS,
 		},
@@ -106,44 +108,45 @@ func TestRolloutGateBedingungen(t *testing.T) {
 
 			missing := gate.status(t.Context()).Missing
 			if !slices.Equal(missing, []string{tc.want}) {
-				t.Fatalf("missing = %v, erwartet genau [%s]", missing, tc.want)
+				t.Fatalf("missing = %v, expected exactly [%s]", missing, tc.want)
 			}
 
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/install.sh", nil)
 			if gate.allow(recorder, request) {
-				t.Fatal("gate ließ trotz fehlender bedingung durch")
+				t.Fatal("gate let the request through despite a missing condition")
 			}
 			if recorder.Code != http.StatusServiceUnavailable {
-				t.Fatalf("status = %d, erwartet 503", recorder.Code)
+				t.Fatalf("status = %d, expected 503", recorder.Code)
 			}
 			var body rolloutUnavailable
 			if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
-				t.Fatalf("antwort dekodieren: %v", err)
+				t.Fatalf("decoding response: %v", err)
 			}
 			if !slices.Equal(body.Missing, []string{tc.want}) {
-				t.Fatalf("body-missing = %v, erwartet [%s]", body.Missing, tc.want)
+				t.Fatalf("body-missing = %v, expected [%s]", body.Missing, tc.want)
 			}
 		})
 	}
 }
 
-// TestRolloutGateAllowOffen: bei offenem Gate schreibt allow nichts und lässt
-// den Handler weitermachen.
-func TestRolloutGateAllowOffen(t *testing.T) {
+// TestRolloutGateAllowOpen: with an open gate, allow writes nothing and
+// lets the handler proceed.
+func TestRolloutGateAllowOpen(t *testing.T) {
 	gate := newRolloutGate(readyDeps(t))
 	recorder := httptest.NewRecorder()
 	if !gate.allow(recorder, httptest.NewRequest(http.MethodGet, "/install.sh", nil)) {
-		t.Fatalf("gate blockiert trotz vollständiger konfiguration (body %q)", recorder.Body.String())
+		t.Fatalf("gate blocks despite complete configuration (body %q)", recorder.Body.String())
 	}
 	if recorder.Body.Len() != 0 {
-		t.Errorf("allow schrieb body %q", recorder.Body.String())
+		t.Errorf("allow wrote body %q", recorder.Body.String())
 	}
 }
 
-// TestRolloutGateMehrereFehlend: fehlen mehrere Bedingungen, nennt die Antwort
-// alle — Operator sieht die vollständige Liste statt einer nach der anderen.
-func TestRolloutGateMehrereFehlend(t *testing.T) {
+// TestRolloutGateMultipleMissing: if several conditions are missing, the
+// response names all of them — the operator sees the complete list
+// instead of one at a time.
+func TestRolloutGateMultipleMissing(t *testing.T) {
 	deps := readyDeps(t)
 	deps.Agents = nil
 	deps.AgentPublicURL = ""
@@ -151,16 +154,16 @@ func TestRolloutGateMehrereFehlend(t *testing.T) {
 
 	missing := gate.status(t.Context()).Missing
 	if !slices.Equal(missing, []string{rolloutMissingBinaries, rolloutMissingAgentURL}) {
-		t.Fatalf("missing = %v, erwartet [binaries agent_public_url]", missing)
+		t.Fatalf("missing = %v, expected [binaries agent_public_url]", missing)
 	}
 }
 
-// TestRolloutGatePinStatus: der ermittelte Pin-Zustand wird durchgereicht
-// (Quelle landet im Manifest, Phase B).
+// TestRolloutGatePinStatus: the determined pin state is passed through
+// (the source ends up in the manifest, phase B).
 func TestRolloutGatePinStatus(t *testing.T) {
 	gate := newRolloutGate(readyDeps(t))
 	status := gate.status(t.Context())
 	if status.Pin.Pin != testPinPin || status.Pin.Source != PinSourceStatic {
-		t.Fatalf("pin-status = %+v, erwartet statischen testpin", status.Pin)
+		t.Fatalf("pin status = %+v, expected the static test pin", status.Pin)
 	}
 }

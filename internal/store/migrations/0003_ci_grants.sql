@@ -1,16 +1,16 @@
 -- +goose Up
 
--- CI-Grants (Phase 7, ADR-019): GitLab-Projekt/Gruppe × Ref-Bedingung ×
--- Tag-Selektor → Ziel-Principals. project_path matcht exakt oder als
--- Namespace-Präfix (Zeile "infra" deckt "infra/ansible" ab).
+-- CI grants (phase 7, ADR-019): GitLab project/group × ref condition ×
+-- tag selector → target principals. project_path matches exactly or as a
+-- namespace prefix (the row "infra" covers "infra/ansible").
 CREATE TABLE ci_grants (
     id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_path         text        NOT NULL,
-    -- Glob über den Ref-Namen ('*' matcht beliebig, auch '/'); '' = alle Refs
+    -- glob over the ref name ('*' matches anything, including '/'); '' = all refs
     ref_pattern          text        NOT NULL DEFAULT '',
-    -- nur Jobs auf geschützten Refs (ref_protected)
+    -- only jobs on protected refs (ref_protected)
     protected_only       boolean     NOT NULL DEFAULT true,
-    -- Glob über den environment-Claim; '' = keine Bedingung
+    -- glob over the environment claim; '' = no condition
     environment_pattern  text        NOT NULL DEFAULT '',
     tag_selector         jsonb       NOT NULL DEFAULT '{}',
     principals           text[]      NOT NULL,

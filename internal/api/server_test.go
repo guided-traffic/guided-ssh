@@ -17,7 +17,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// fakeStore deckt die vom Bundle-Endpoint genutzten Store-Methoden ab.
+// fakeStore covers the store methods used by the bundle endpoint.
 type fakeStore struct {
 	keys    []store.CAKey
 	listErr error
@@ -53,8 +53,8 @@ func (f *fakeStore) UpdateCAKeyState(context.Context, uuid.UUID, string) (*store
 	return nil, store.ErrNotFound
 }
 
-// AdoptCAKey wird von den API-Tests nicht genutzt (managed mode), erfüllt aber
-// das ca.Store-Interface.
+// AdoptCAKey is not used by the API tests (managed mode), but it satisfies
+// the ca.Store interface.
 func (f *fakeStore) AdoptCAKey(context.Context, string, string, string) (*store.CAKey, bool, error) {
 	return nil, false, store.ErrNotFound
 }
@@ -79,14 +79,14 @@ func newTestServer(t *testing.T, fs *fakeStore) *httptest.Server {
 
 func get(t *testing.T, url string) (int, string) {
 	t.Helper()
-	resp, err := http.Get(url) //nolint:gosec // Test-URL vom httptest-Server
+	resp, err := http.Get(url) //nolint:gosec // test URL from the httptest server
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("body lesen: %v", err)
+		t.Fatalf("reading body: %v", err)
 	}
 	return resp.StatusCode, string(body)
 }
@@ -109,23 +109,23 @@ func TestBundleEndpoints(t *testing.T) {
 			t.Fatalf("bundle/%s: status %d", purpose, status)
 		}
 		if !strings.HasPrefix(body, "ssh-ed25519 ") {
-			t.Fatalf("bundle/%s: kein authorized_keys-Format: %q", purpose, body)
+			t.Fatalf("bundle/%s: not authorized_keys format: %q", purpose, body)
 		}
 	}
 }
 
-func TestBundleUnbekannterZweck(t *testing.T) {
+func TestBundleUnknownPurpose(t *testing.T) {
 	srv := newTestServer(t, &fakeStore{})
 	if status, _ := get(t, srv.URL+"/v1/ca/bundle/robot"); status != http.StatusNotFound {
-		t.Fatalf("status %d, erwartet 404", status)
+		t.Fatalf("status %d, expected 404", status)
 	}
 }
 
-func TestBundleStoreFehler(t *testing.T) {
+func TestBundleStoreError(t *testing.T) {
 	fs := &fakeStore{}
 	srv := newTestServer(t, fs)
 	fs.listErr = context.DeadlineExceeded
 	if status, _ := get(t, srv.URL+"/v1/ca/bundle/user"); status != http.StatusInternalServerError {
-		t.Fatalf("status %d, erwartet 500", status)
+		t.Fatalf("status %d, expected 500", status)
 	}
 }

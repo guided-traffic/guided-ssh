@@ -5,7 +5,7 @@ export interface EnrollRequest {
   hostname: string;
 
   /**
-   * PEM-kodierter CSR für das mTLS-Client-Zertifikat
+   * PEM-encoded CSR for the mTLS client certificate
    */
   mtls_csr: string;
   ssh_public_key: string;

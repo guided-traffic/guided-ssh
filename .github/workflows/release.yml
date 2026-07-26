@@ -15,15 +15,15 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write # Coverage-Kommentar am PR
-  issues: write        # sticky-pull-request-comment nutzt die Issues-API
+  pull-requests: write # coverage comment on the PR
+  issues: write        # sticky-pull-request-comment uses the issues API
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-# Job-Untergliederung wie valkey-operator (parallel auf self-hosted Runnern):
+# Job breakdown as in valkey-operator (parallel on self-hosted runners):
 # linter, gosec, govulncheck, cyclomatic-complexity, malware-scan, unit-tests,
-# integration-tests, e2e-tests (kind-Cluster, Phase 13), web-build,
+# integration-tests, e2e-tests (kind cluster, Phase 13), web-build,
 # coverage-report, container-malware-scan, semantic-release.
 jobs:
   linter:
@@ -61,8 +61,8 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
-      # gosec läuft über golangci-lint (wie `make gosec`), damit die im Code
-      # begründeten nolint:gosec-Ausnahmen gelten — standalone gosec kennt sie nicht.
+      # gosec runs via golangci-lint (like `make gosec`), so the nolint:gosec
+      # exceptions justified in the code apply — standalone gosec doesn't know them.
       - name: Run GoSec security scan
         uses: golangci/golangci-lint-action@v9
         with:
@@ -213,15 +213,15 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential ansible
-      # driver "docker": baut über den BuildKit des Daemons, Images landen
-      # direkt im lokalen Image-Store (nötig für "kind load docker-image").
+      # driver "docker": builds via the daemon's BuildKit, images land
+      # directly in the local image store (needed for "kind load docker-image").
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
           driver: docker
       - name: Set up Helm
         uses: azure/setup-helm@v5
-      - name: Install kind und kubectl
+      - name: Install kind and kubectl
         run: |
           # renovate: datasource=github-releases depName=kubernetes-sigs/kind
           KIND_VERSION=v0.29.0
@@ -229,15 +229,15 @@ jobs:
           sudo install -m 0755 kind /usr/local/bin/kind && rm kind
           curl -fsSLo kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           sudo install -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
-      - name: E2E-Suite (kind-Cluster, kompletter Durchstich Mensch + CI)
+      - name: E2E suite (kind cluster, full walkthrough human + CI)
         run: make e2e
-      - name: Cleanup kind-Cluster
+      - name: Cleanup kind cluster
         if: always()
         run: kind delete cluster --name gssh-e2e || true
 
-  # Lasttest des Sign-Endpoints (Ziel ≥ 50 Zert/s, docs/teststrategie.md).
-  # Nur auf main und nicht release-blockierend — der geteilte Runner macht
-  # Durchsatzmessungen auf PRs zu flaky für ein hartes Gate.
+  # Load test of the sign endpoint (target >= 50 certs/s, docs/test-strategy.md).
+  # Only on main and not release-blocking — the shared runner makes
+  # throughput measurements on PRs too flaky for a hard gate.
   load-test:
     name: Load Test Sign-Endpoint
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -254,7 +254,7 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
-      - name: Lasttest (Testcontainer-Postgres, ohne Rate-Limit)
+      - name: Load test (testcontainer Postgres, no rate limit)
         run: make loadtest
 
   build:
@@ -264,7 +264,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # git describe braucht Tags für die Versionsinfo
+          fetch-depth: 0 # git describe needs tags for the version info
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -273,9 +273,9 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
-      - name: Binaries bauen
+      - name: Build binaries
         run: make build
-      - name: Cross-Platform-Builds gssh (linux/amd64, linux/arm64, darwin/arm64)
+      - name: Cross-platform builds gssh (linux/amd64, linux/arm64, darwin/arm64)
         run: make cross
 
   web-build:
@@ -293,10 +293,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: web
-      - name: Frontend-Unit-Tests (vitest)
+      - name: Frontend unit tests (vitest)
         run: npx ng test --watch=false
         working-directory: web
-      - name: Angular-Build (Produktion)
+      - name: Angular build (production)
         run: npx ng build
         working-directory: web
 
@@ -307,7 +307,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # ct vergleicht die Chart-Version gegen main
+          fetch-depth: 0 # ct compares the chart version against main
       - name: Set up Helm
         uses: azure/setup-helm@v5
       - name: Set up Python
@@ -360,7 +360,7 @@ jobs:
           echo "📊 Combined Coverage: ${TOTAL_COVERAGE}%"
           echo "========================================"
 
-          # Coverage je Paket für den PR-Kommentar
+          # Coverage per package for the PR comment
           echo "## Coverage by Package" > coverage/summary.txt
           grep -v "total:" coverage/coverage.txt | awk '{printf "- **%s**: %s\n", $1, $3}' >> coverage/summary.txt || true
 
@@ -384,9 +384,9 @@ jobs:
           name: coverage-combined
           path: coverage/
 
-      # Badge wird nicht hier committet, sondern als Artefakt an den
-      # semantic-release-Job gereicht, der es via @semantic-release/git
-      # zusammen mit dem Release-Commit eincheckt.
+      # The badge is not committed here, but passed as an artifact to the
+      # semantic-release job, which checks it in via @semantic-release/git
+      # together with the release commit.
       - name: Create coverage badge
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -488,7 +488,7 @@ jobs:
   container-malware-scan:
     name: Container Malware Scan
     runs-on: self-hosted
-    needs: [malware-scan] # Erst nach sauberem Quellcode-Scan
+    needs: [malware-scan] # Only after a clean source code scan
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -582,7 +582,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.BOT_PAT }}
-      - name: Coverage-Badge herunterladen
+      - name: Download coverage badge
         uses: actions/download-artifact@v8
         with:
           name: coverage-badge
@@ -596,8 +596,8 @@ jobs:
         run: npm install
       - name: Verify the integrity of provenance attestations and registry signatures for installed dependencies
         run: npm audit signatures
-      # BOT_PAT statt GITHUB_TOKEN: nur so triggert das erzeugte
-      # GitHub-Release den Build-Workflow (build.yml).
+      # BOT_PAT instead of GITHUB_TOKEN: only this way does the created
+      # GitHub release trigger the build workflow (build.yml).
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_PAT }}

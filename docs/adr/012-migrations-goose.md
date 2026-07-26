@@ -1,25 +1,25 @@
-# ADR-012: Schema-Migrationen mit goose (embedded)
+# ADR-012: Schema migrations with goose (embedded)
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Das PostgreSQL-Schema (Phase 1) braucht versionierte, idempotente Migrationen —
-lokal, in Tests und später als Init-Container/Job im Helm-Deployment (Phase 11).
-Kandidaten laut Plan: goose oder golang-migrate. Beide sind etabliert und
-unterstützen SQL-Dateien via `embed.FS`.
+The PostgreSQL schema (Phase 1) needs versioned, idempotent migrations —
+locally, in tests, and later as an init container/job in the Helm deployment
+(Phase 11). Candidates per the plan: goose or golang-migrate. Both are
+established and support SQL files via `embed.FS`.
 
-## Entscheidung
+## Decision
 
-`pressly/goose` v3 mit reinen SQL-Migrationen, eingebettet ins Binary
-(`internal/store/migrations/`, `//go:embed`). Anwendung programmatisch über die
-Provider-API (`store.Migrate`), kein separates CLI im Deployment nötig.
+`pressly/goose` v3 with plain SQL migrations, embedded into the binary
+(`internal/store/migrations/`, `//go:embed`). Applied programmatically through
+the provider API (`store.Migrate`); no separate CLI needed in the deployment.
 
-## Konsequenzen
+## Consequences
 
-- Ein Binary migriert sich selbst — Init-Container braucht kein Zusatz-Image.
-- goose-Versionstabelle macht Migrationen idempotent (Test in Phase 1).
-- Multi-Statement-SQL (Trigger-Funktionen) via `+goose StatementBegin/End`.
-- Rückbaupfad: Migrationsdateien sind Plain SQL — Wechsel zu golang-migrate
-  wäre im Wesentlichen eine Umbenennung der Direktiven.
+- A single binary migrates itself — the init container needs no extra image.
+- The goose version table makes migrations idempotent (tested in Phase 1).
+- Multi-statement SQL (trigger functions) via `+goose StatementBegin/End`.
+- Fallback path: migration files are plain SQL — switching to golang-migrate
+  would essentially just mean renaming the directives.

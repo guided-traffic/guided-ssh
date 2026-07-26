@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-// AuditFilter schränkt ListAuditEvents ein; Zero-Values bedeuten "kein Filter".
+// AuditFilter restricts ListAuditEvents; zero values mean "no filter".
 type AuditFilter struct {
 	EventType string
 	Actor     string
-	// Search matcht als Teilstring (case-insensitiv) gegen Actor und
-	// Payload — deckt Filter nach Host oder Pipeline ab, die nur im
-	// Payload stehen.
+	// Search matches as a substring (case-insensitive) against Actor and
+	// Payload — covers filtering by host or pipeline, which only appear in
+	// the payload.
 	Search string
 	Since  time.Time
 	Until  time.Time
@@ -19,8 +19,8 @@ type AuditFilter struct {
 	Offset int
 }
 
-// auditFilterWhere ist die WHERE-Klausel der Audit-Queries; die Argumente
-// $1–$5 liefern auditFilterArgs.
+// auditFilterWhere is the WHERE clause of the audit queries; arguments
+// $1-$5 are supplied by auditFilterArgs.
 const auditFilterWhere = `
 	($1 = '' OR event_type = $1)
 	AND ($2 = '' OR actor = $2)
@@ -28,7 +28,7 @@ const auditFilterWhere = `
 	AND ($4::timestamptz IS NULL OR occurred_at <= $4)
 	AND ($5 = '' OR actor ILIKE '%' || $5 || '%' OR payload::text ILIKE '%' || $5 || '%')`
 
-// auditFilterArgs baut die Argumente zu auditFilterWhere.
+// auditFilterArgs builds the arguments for auditFilterWhere.
 func auditFilterArgs(f AuditFilter) []any {
 	var since, until *time.Time
 	if !f.Since.IsZero() {
@@ -40,10 +40,10 @@ func auditFilterArgs(f AuditFilter) []any {
 	return []any{f.EventType, f.Actor, since, until, f.Search}
 }
 
-// insertAuditEvent schreibt ein Audit-Event (append-only) über den gegebenen
-// querier (Pool oder Transaktion). Nil-Payload wird zu {}. Ein gesetztes
-// OccurredAt wird übernommen (z. B. auf dem Host aufgetretene, verzögert
-// eingelieferte Session-Events); Zero-Value ⇒ now().
+// insertAuditEvent writes an audit event (append-only) through the given
+// querier (pool or transaction). A nil payload becomes {}. A set
+// OccurredAt is kept as-is (e.g. session events that occurred on the host
+// and were delivered late); a zero value defaults to now().
 func insertAuditEvent(ctx context.Context, q querier, e *AuditEvent) error {
 	var occurredAt *time.Time
 	if !e.OccurredAt.IsZero() {
@@ -61,13 +61,13 @@ func insertAuditEvent(ctx context.Context, q querier, e *AuditEvent) error {
 	return nil
 }
 
-// AppendAuditEvent schreibt ein Audit-Event (append-only) und füllt ID und
-// Zeitstempel.
+// AppendAuditEvent writes an audit event (append-only) and fills in the ID
+// and timestamp.
 func (s *Store) AppendAuditEvent(ctx context.Context, e *AuditEvent) error {
 	return insertAuditEvent(ctx, s.pool, e)
 }
 
-// ListAuditEvents liefert Audit-Events, neueste zuerst.
+// ListAuditEvents returns audit events, newest first.
 func (s *Store) ListAuditEvents(ctx context.Context, f AuditFilter) ([]AuditEvent, error) {
 	args := append(auditFilterArgs(f), f.Limit, f.Offset)
 	return queryAll[AuditEvent](ctx, s.pool, `
@@ -77,7 +77,7 @@ func (s *Store) ListAuditEvents(ctx context.Context, f AuditFilter) ([]AuditEven
 		LIMIT NULLIF($6, 0) OFFSET $7`, args...)
 }
 
-// CountAuditEvents zählt die Events zum Filter (für Pagination in der UI).
+// CountAuditEvents counts the events matching the filter (for pagination in the UI).
 func (s *Store) CountAuditEvents(ctx context.Context, f AuditFilter) (int64, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT count(*) FROM audit_events WHERE `+auditFilterWhere,
@@ -95,9 +95,9 @@ func (s *Store) CountAuditEvents(ctx context.Context, f AuditFilter) (int64, err
 	return count, rows.Err()
 }
 
-// ListAuditEventsAfter liefert bis zu limit Events mit ID > afterID in
-// aufsteigender Reihenfolge — Basis für das Audit-Streaming (SIEM/Webhook),
-// das committete Events fortlaufend abholt.
+// ListAuditEventsAfter returns up to limit events with ID > afterID in
+// ascending order — the basis for audit streaming (SIEM/webhook), which
+// continuously polls for committed events.
 func (s *Store) ListAuditEventsAfter(ctx context.Context, afterID int64, limit int) ([]AuditEvent, error) {
 	return queryAll[AuditEvent](ctx, s.pool, `
 		SELECT * FROM audit_events
@@ -106,8 +106,8 @@ func (s *Store) ListAuditEventsAfter(ctx context.Context, afterID int64, limit i
 		LIMIT $2`, afterID, limit)
 }
 
-// MaxAuditEventID liefert die höchste vorhandene Event-ID (0 bei leerer
-// Tabelle); Startpunkt des Audit-Streamings.
+// MaxAuditEventID returns the highest existing event ID (0 for an empty
+// table); the starting point for audit streaming.
 func (s *Store) MaxAuditEventID(ctx context.Context) (int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT COALESCE(max(id), 0) FROM audit_events`)
 	if err != nil {

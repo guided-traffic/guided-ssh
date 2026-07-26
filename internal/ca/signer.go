@@ -1,7 +1,7 @@
-// Package ca implementiert die Zertifizierungsstelle: Signer-Interface,
-// Software-Signer (Ed25519, Private Key AES-GCM-verschlüsselt at rest),
-// Policy-Engine, Ausstellung mit transaktionalem Audit sowie Key-Rotation
-// mit CA-Bundle (Phase 2 des Projektplans).
+// Package ca implements the certification authority: the signer interface,
+// the software signer (Ed25519, private key AES-GCM encrypted at rest),
+// the policy engine, issuance with transactional audit, and key rotation
+// with a CA bundle (Phase 2 of the project plan).
 package ca
 
 import (
@@ -15,9 +15,9 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// CertRequest beschreibt ein zu signierendes SSH-Zertifikat.
+// CertRequest describes an SSH certificate to be signed.
 type CertRequest struct {
-	CertType        string // store.CertTypeUser oder store.CertTypeHost
+	CertType        string // store.CertTypeUser or store.CertTypeHost
 	PublicKey       ssh.PublicKey
 	KeyID           string
 	Principals      []string
@@ -28,15 +28,15 @@ type CertRequest struct {
 	Serial          uint64
 }
 
-// Signer signiert Zertifikats-Requests mit einem CA-Key. Implementierungen:
-// SoftwareSigner und FileSigner (Phase 2); KMS/HSM-Signer folgen in Phase 10
-// über dasselbe Interface.
+// Signer signs certificate requests with a CA key. Implementations:
+// SoftwareSigner and FileSigner (Phase 2); KMS/HSM signers follow in Phase 10
+// over the same interface.
 type Signer interface {
-	// Sign baut aus dem Request ein SSH-Zertifikat und signiert es.
+	// Sign builds an SSH certificate from the request and signs it.
 	Sign(ctx context.Context, req CertRequest) (*ssh.Certificate, error)
-	// CAKeyID ist die Datenbank-ID des verwendeten CA-Keys.
+	// CAKeyID is the database ID of the CA key used.
 	CAKeyID() uuid.UUID
-	// PublicKey ist der öffentliche Schlüssel des CA-Keys.
+	// PublicKey is the public key of the CA key.
 	PublicKey() ssh.PublicKey
 }
 
@@ -51,10 +51,10 @@ func buildCert(req CertRequest) (*ssh.Certificate, error) {
 	case store.CertTypeHost:
 		certType = ssh.HostCert
 	default:
-		return nil, fmt.Errorf("ca: unbekannter zertifikatstyp %q", req.CertType)
+		return nil, fmt.Errorf("ca: unknown certificate type %q", req.CertType)
 	}
 	if req.PublicKey == nil {
-		return nil, fmt.Errorf("ca: request ohne public key")
+		return nil, fmt.Errorf("ca: request without public key")
 	}
 	return &ssh.Certificate{
 		Key:             req.PublicKey,
@@ -62,8 +62,8 @@ func buildCert(req CertRequest) (*ssh.Certificate, error) {
 		CertType:        certType,
 		KeyId:           req.KeyID,
 		ValidPrincipals: req.Principals,
-		ValidAfter:      uint64(req.ValidAfter.Unix()),  //nolint:gosec // Unix-Zeit nach 1970, nie negativ
-		ValidBefore:     uint64(req.ValidBefore.Unix()), //nolint:gosec // dito
+		ValidAfter:      uint64(req.ValidAfter.Unix()),  //nolint:gosec // unix time after 1970, never negative
+		ValidBefore:     uint64(req.ValidBefore.Unix()), //nolint:gosec // ditto
 		Permissions: ssh.Permissions{
 			CriticalOptions: req.CriticalOptions,
 			Extensions:      req.Extensions,

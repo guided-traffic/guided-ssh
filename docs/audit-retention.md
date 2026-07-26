@@ -1,65 +1,67 @@
-# Audit-Retention und Append-only-Garantie
+# Audit Retention and Append-only Guarantee
 
-Gilt für die Tabelle `audit_events` (Phase 1). Ziel: Audit-Daten sind
-unveränderlich, ihr Wachstum ist beherrschbar, Löschung geschieht ausschließlich
-kontrolliert über Partitionen — nie zeilenweise.
+Applies to the `audit_events` table (Phase 1). Goal: audit data is
+immutable, its growth is manageable, and deletion happens exclusively in a
+controlled way via partitions — never row by row.
 
-## Append-only-Garantie (zwei Schichten)
+## Append-only guarantee (two layers)
 
-1. **Trigger (im Schema, Migration 0001):** `audit_events_append_only` lehnt
-   UPDATE und DELETE auf `audit_events` (inkl. aller Partitionen) mit einer
-   Exception ab — unabhängig davon, mit welcher Rolle zugegriffen wird.
-2. **DB-Grants (Betrieb):** Die Anwendungsrolle erhält auf `audit_events` nur
-   `INSERT` und `SELECT` — kein `UPDATE`, `DELETE` oder `TRUNCATE`. Migrationen
-   laufen als Schema-Owner (separate Rolle). Beispiel:
+1. **Trigger (in the schema, migration 0001):** `audit_events_append_only`
+   rejects UPDATE and DELETE on `audit_events` (including all partitions)
+   with an exception — regardless of which role performs the access.
+2. **DB grants (operations):** The application role is granted only
+   `INSERT` and `SELECT` on `audit_events` — no `UPDATE`, `DELETE`, or
+   `TRUNCATE`. Migrations run as the schema owner (a separate role).
+   Example:
 
    ```sql
    CREATE ROLE guidedssh_app LOGIN;
    GRANT USAGE ON SCHEMA public TO guidedssh_app;
    GRANT SELECT, INSERT ON audit_events TO guidedssh_app;
-   -- übrige Tabellen: SELECT, INSERT, UPDATE, DELETE nach Bedarf
+   -- other tables: SELECT, INSERT, UPDATE, DELETE as needed
    ```
 
-   Hinweis: `TRUNCATE` feuert keine Row-Trigger — der fehlende
-   `TRUNCATE`-Grant ist daher zwingender Teil der Garantie, nicht Kür.
+   Note: `TRUNCATE` does not fire row triggers — the missing
+   `TRUNCATE` grant is therefore a mandatory part of the guarantee, not optional.
 
-Retention-Löschungen umgehen beide Schichten bewusst per `DETACH`/`DROP`
-ganzer Partitionen durch eine privilegierte Wartungsrolle (siehe unten) —
-zeilenweises Löschen bleibt damit auch für Admins ungewöhnlich und auffällig.
+Retention deletions deliberately bypass both layers via `DETACH`/`DROP` of
+entire partitions, performed by a privileged maintenance role (see below) —
+row-by-row deletion therefore remains unusual and conspicuous even for admins.
 
-## Partitionierung nach Monat
+## Partitioning by month
 
-`audit_events` ist `PARTITION BY RANGE (occurred_at)`; der Primärschlüssel ist
-`(id, occurred_at)`, weil der Partitionsschlüssel Teil des PK sein muss.
+`audit_events` is `PARTITION BY RANGE (occurred_at)`; the primary key is
+`(id, occurred_at)`, because the partition key must be part of the PK.
 
-- **Stand Phase 1:** Es existiert nur `audit_events_default`. Sie fängt alle
-  Zeilen, solange keine Monatspartitionen angelegt sind — funktional korrekt,
-  aber ohne Retention-Vorteil.
-- **Zielbild (ab Inbetriebnahme):** Pro Monat eine Partition, angelegt vor
-  Monatsbeginn (z. B. durch einen CronJob, Phase 11):
+- **As of Phase 1:** Only `audit_events_default` exists. It catches all
+  rows as long as no monthly partitions have been created — functionally
+  correct, but without any retention benefit.
+- **Target state (from go-live onward):** One partition per month, created
+  before the start of the month (e.g. by a CronJob, Phase 11):
 
   ```sql
   CREATE TABLE audit_events_2026_08 PARTITION OF audit_events
       FOR VALUES FROM ('2026-08-01T00:00:00Z') TO ('2026-09-01T00:00:00Z');
   ```
 
-- **Ablauf der Retention** (Aufbewahrungsfrist konfigurierbar, Default-Empfehlung
-  18 Monate; regulatorische Vorgaben des Betreibers gehen vor):
+- **Retention expiry** (retention period configurable, default recommendation
+  18 months; the operator's regulatory requirements take precedence):
 
   1. `ALTER TABLE audit_events DETACH PARTITION audit_events_2025_01;`
-  2. Optional archivieren (`COPY ... TO` / `pg_dump` der abgehängten Tabelle
-     nach Objektspeicher, komprimiert).
+  2. Optionally archive (`COPY ... TO` / `pg_dump` of the detached table
+     to object storage, compressed).
   3. `DROP TABLE audit_events_2025_01;`
 
-  Detach + Drop sind metadaten-schnell und erzeugen kein zeilenweises
-  DELETE-Volumen (kein Bloat, kein Vacuum-Druck).
+  Detach + drop are metadata-fast and produce no row-by-row DELETE volume
+  (no bloat, no vacuum pressure).
 
-## Betriebshinweise
+## Operational notes
 
-- Partitions-Pflege (Anlegen künftiger Monate, Detach/Drop abgelaufener) wird in
-  Phase 11 als Kubernetes-CronJob mit eigener DB-Rolle umgesetzt; bis dahin
-  manuell nach obigem Muster.
-- Läuft eine Zeile in die Default-Partition (Partition fehlte), später per
-  `DETACH`/Re-Attach-Fenster korrigieren — Inhalte bleiben unverändert.
-- SIEM-Streaming (Phase 8) reduziert die Abhängigkeit von langer DB-Retention:
-  Export ist der Langzeitspeicher, die DB hält das Abfragefenster.
+- Partition maintenance (creating upcoming months, detaching/dropping expired
+  ones) will be implemented in Phase 11 as a Kubernetes CronJob with its own
+  DB role; until then it is done manually following the pattern above.
+- If a row ends up in the default partition (because a partition was
+  missing), correct it later via a `DETACH`/re-attach window — the content
+  stays unchanged.
+- SIEM streaming (Phase 8) reduces the dependency on long DB retention:
+  the export is the long-term store, the DB holds the query window.

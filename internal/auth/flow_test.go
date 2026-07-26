@@ -23,18 +23,18 @@ func newFlow(t *testing.T, idp *fakeIDP) *auth.Flow {
 	return flow
 }
 
-// browse simuliert den Browser: folgt der Authorize-URL inkl. Redirect zum
-// lokalen Callback.
+// browse simulates the browser: follows the authorize URL including the
+// redirect to the local callback.
 func browse(t *testing.T) func(string) error {
 	t.Helper()
 	return func(authURL string) error {
-		resp, err := http.Get(authURL) //nolint:gosec // Test-URL vom Fake-IdP
+		resp, err := http.Get(authURL) //nolint:gosec // test URL from the fake IdP
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			t.Errorf("callback-status %d", resp.StatusCode)
+			t.Errorf("callback status %d", resp.StatusCode)
 		}
 		return nil
 	}
@@ -49,20 +49,20 @@ func TestAuthCodePKCE(t *testing.T) {
 		t.Fatalf("AuthCodePKCE: %v", err)
 	}
 	if raw == "" {
-		t.Fatal("leeres id_token")
+		t.Fatal("empty id_token")
 	}
-	// PKCE-Verifier muss beim Code-Exchange mitgeschickt worden sein.
+	// The PKCE verifier must have been sent along with the code exchange.
 	if v, _ := idp.lastCodeVerifier.Load().(string); v == "" {
-		t.Error("kein code_verifier beim token-endpoint angekommen")
+		t.Error("no code_verifier arrived at the token endpoint")
 	}
 }
 
-func TestAuthCodePKCEIdPFehler(t *testing.T) {
+func TestAuthCodePKCEIdPError(t *testing.T) {
 	idp := newFakeIDP(t)
 	flow := newFlow(t, idp)
 
-	// "Browser" ruft den Callback direkt mit einer IdP-Fehlermeldung auf
-	// (State stimmt, damit der Fehlerpfad des IdP getestet wird).
+	// The "browser" calls the callback directly with an IdP error message
+	// (state matches, so the IdP's error path is exercised).
 	openURL := func(authURL string) error {
 		parsed, err := url.Parse(authURL)
 		if err != nil {
@@ -75,7 +75,7 @@ func TestAuthCodePKCEIdPFehler(t *testing.T) {
 		}
 		values := url.Values{"state": {q.Get("state")}, "error": {"access_denied"}}
 		callback.RawQuery = values.Encode()
-		resp, err := http.Get(callback.String()) //nolint:gosec // lokale Test-URL
+		resp, err := http.Get(callback.String()) //nolint:gosec // local test URL
 		if err != nil {
 			return err
 		}
@@ -83,11 +83,11 @@ func TestAuthCodePKCEIdPFehler(t *testing.T) {
 		return nil
 	}
 	if _, err := flow.AuthCodePKCE(context.Background(), openURL); err == nil {
-		t.Fatal("erwartete idp-fehler")
+		t.Fatal("expected idp error")
 	}
 }
 
-func TestAuthCodePKCEAbbruch(t *testing.T) {
+func TestAuthCodePKCECanceled(t *testing.T) {
 	idp := newFakeIDP(t)
 	flow := newFlow(t, idp)
 
@@ -96,15 +96,15 @@ func TestAuthCodePKCEAbbruch(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
-	// openURL öffnet nichts ⇒ es kommt nie ein Callback.
+	// openURL opens nothing ⇒ no callback ever arrives.
 	if _, err := flow.AuthCodePKCE(ctx, func(string) error { return nil }); !errors.Is(err, context.Canceled) {
-		t.Fatalf("erwartete context.Canceled, bekam %v", err)
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 
 func TestDeviceFlow(t *testing.T) {
 	idp := newFakeIDP(t)
-	idp.deviceStillPending.Store(1) // erster Poll: authorization_pending
+	idp.deviceStillPending.Store(1) // first poll: authorization_pending
 	flow := newFlow(t, idp)
 
 	var gotURI, gotCode string
@@ -115,10 +115,10 @@ func TestDeviceFlow(t *testing.T) {
 		t.Fatalf("DeviceFlow: %v", err)
 	}
 	if raw == "" {
-		t.Fatal("leeres id_token")
+		t.Fatal("empty id_token")
 	}
 	if gotCode != fakeUserCode || gotURI == "" {
-		t.Errorf("prompt bekam uri=%q code=%q", gotURI, gotCode)
+		t.Errorf("prompt received uri=%q code=%q", gotURI, gotCode)
 	}
 }
 
@@ -131,22 +131,22 @@ func TestClientCredentials(t *testing.T) {
 		t.Fatalf("ClientCredentials: %v", err)
 	}
 	if raw == "" {
-		t.Fatal("leeres id_token")
+		t.Fatal("empty id_token")
 	}
 }
 
-func TestClientCredentialsFalschesSecret(t *testing.T) {
+func TestClientCredentialsWrongSecret(t *testing.T) {
 	idp := newFakeIDP(t)
 	flow := newFlow(t, idp)
 
-	if _, err := flow.ClientCredentials(context.Background(), "falsch"); err == nil {
-		t.Fatal("erwartete fehler bei falschem client-secret")
+	if _, err := flow.ClientCredentials(context.Background(), "wrong-secret"); err == nil {
+		t.Fatal("expected error for wrong client secret")
 	}
 }
 
-func TestNewFlowDiscoveryFehler(t *testing.T) {
+func TestNewFlowDiscoveryError(t *testing.T) {
 	_, err := auth.NewFlow(context.Background(), auth.FlowConfig{IssuerURL: "http://127.0.0.1:1/realms/nix"})
 	if err == nil {
-		t.Fatal("erwartete discovery-fehler")
+		t.Fatal("expected discovery error")
 	}
 }

@@ -2,8 +2,8 @@ import { inject, provideEnvironmentInitializer } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 
-// Inline-SVGs (Material-Icon-Pfade, 24×24) statt Icon-Font: die UI ist ins
-// Server-Binary eingebettet und darf keine externen Ressourcen laden.
+// Inline SVGs (Material icon paths, 24×24) instead of an icon font: the UI
+// is embedded in the server binary and must not load external resources.
 const ICON_PATHS: Record<string, string> = {
   hosts:
     'M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
@@ -33,7 +33,7 @@ const ICON_PATHS: Record<string, string> = {
     'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
 };
 
-/** provideAppIcons registriert die Inline-Icons beim App-Start. */
+/** provideAppIcons registers the inline icons at app startup. */
 export function provideAppIcons() {
   return provideEnvironmentInitializer(() => {
     const registry = inject(MatIconRegistry);

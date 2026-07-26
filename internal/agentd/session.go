@@ -11,33 +11,33 @@ import (
 )
 
 const (
-	// sessionFlushInterval ist das Intervall, in dem der Spool an den Server
-	// geflusht wird.
+	// sessionFlushInterval is the interval at which the spool is flushed to
+	// the server.
 	sessionFlushInterval = 15 * time.Second
-	// authWindow: so lange gilt ein am Login gemeldeter Serial als Kandidat für
-	// die Korrelation einer folgenden Session-Open.
+	// authWindow: how long a serial reported at login remains a candidate
+	// for correlating a following session open.
 	authWindow = 2 * time.Minute
-	// maxSpoolBytes deckelt den Spool, falls der Server länger nicht erreichbar
-	// ist (verlust-tolerant: darüber werden neue Events verworfen).
+	// maxSpoolBytes caps the spool in case the server is unreachable for a
+	// while (loss-tolerant: new events beyond this are dropped).
 	maxSpoolBytes = 1 << 20
-	// maxFlushBatch begrenzt die Events pro Flush-Request.
+	// maxFlushBatch limits the events per flush request.
 	maxFlushBatch = 500
 )
 
-// authRec ist ein am Login gesehener Serial (aus %s/%i), Kandidat für die
-// Korrelation der nächsten Session-Open desselben lokalen Benutzers.
+// authRec is a serial seen at login (from %s/%i), a candidate for
+// correlating the next session open of the same local user.
 type authRec struct {
 	serial int64
 	keyid  string
 	at     time.Time
 }
 
-// checkToken verifiziert das Token der schreibenden Socket-Endpunkte.
+// checkToken verifies the token of the writable socket endpoints.
 func (d *Daemon) checkToken(r *http.Request) bool {
 	return d.token != "" && r.Header.Get(socketTokenHeader) == d.token
 }
 
-// handleAuth nimmt einen am Login gemeldeten Serial entgegen (POST /auth).
+// handleAuth accepts a serial reported at login (POST /auth).
 func (d *Daemon) handleAuth(w http.ResponseWriter, r *http.Request) {
 	if !d.checkToken(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -52,7 +52,7 @@ func (d *Daemon) handleAuth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// recordAuth legt den Serial in den recentAuth-Ring und entfernt Abgelaufenes.
+// recordAuth stores the serial in the recentAuth ring and drops expired entries.
 func (d *Daemon) recordAuth(rec authRecord) {
 	now := time.Now()
 	d.mu.Lock()
@@ -67,8 +67,8 @@ func (d *Daemon) recordAuth(rec authRecord) {
 	d.recentAuth[rec.User] = fresh
 }
 
-// takeSerial liefert den jüngsten noch gültigen Serial für einen Benutzer und
-// entfernt ihn (eine Session-Open verbraucht eine Login-Meldung).
+// takeSerial returns the most recent still-valid serial for a user and
+// removes it (a session open consumes one login report).
 func (d *Daemon) takeSerial(user string) (int64, string) {
 	now := time.Now()
 	d.mu.Lock()
@@ -85,8 +85,8 @@ func (d *Daemon) takeSerial(user string) (int64, string) {
 	return 0, ""
 }
 
-// handleSessionEvent nimmt ein pam-Session-Event entgegen (POST /session-event),
-// reichert sshd-Opens mit dem korrelierten Serial an und spoolt es.
+// handleSessionEvent accepts a pam session event (POST /session-event),
+// enriches sshd opens with the correlated serial, and spools it.
 func (d *Daemon) handleSessionEvent(w http.ResponseWriter, r *http.Request) {
 	if !d.checkToken(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -101,15 +101,15 @@ func (d *Daemon) handleSessionEvent(w http.ResponseWriter, r *http.Request) {
 		ev.Serial, ev.KeyID = d.takeSerial(ev.LocalUser)
 	}
 	if err := d.spoolAppend(ev); err != nil {
-		d.logger.Warn("session-event spoolen fehlgeschlagen", "error", err)
+		d.logger.Warn("spooling session event failed", "error", err)
 		http.Error(w, "spool error", http.StatusServiceUnavailable)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// spoolAppend hängt ein Event als JSON-Zeile an den Spool an (0600). Über dem
-// Größenlimit wird verworfen (verlust-tolerant, geloggt).
+// spoolAppend appends an event as a JSON line to the spool (0600). Events
+// beyond the size limit are dropped (loss-tolerant, logged).
 func (d *Daemon) spoolAppend(ev sessionEventWire) error {
 	line, err := json.Marshal(ev)
 	if err != nil {
@@ -118,7 +118,7 @@ func (d *Daemon) spoolAppend(ev sessionEventWire) error {
 	d.spoolMu.Lock()
 	defer d.spoolMu.Unlock()
 	if info, statErr := os.Stat(d.paths.SpoolFile()); statErr == nil && info.Size() > maxSpoolBytes {
-		d.logger.Warn("session-spool voll — event verworfen", "size", info.Size())
+		d.logger.Warn("session spool full — event dropped", "size", info.Size())
 		return nil
 	}
 	f, err := os.OpenFile(d.paths.SpoolFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -130,9 +130,9 @@ func (d *Daemon) spoolAppend(ev sessionEventWire) error {
 	return err
 }
 
-// flushSpool sendet die gepufferten Events an den Server. Der Spool wird unter
-// Lock übernommen (Datei geleert) und nur die Netzwerk-Sendung außerhalb des
-// Locks ausgeführt; bei Fehler werden die Events zurückgeschrieben.
+// flushSpool sends the buffered events to the server. The spool is taken
+// under lock (file cleared) and only the network send happens outside the
+// lock; on error the events are written back.
 func (d *Daemon) flushSpool(ctx context.Context) {
 	d.spoolMu.Lock()
 	raw, err := os.ReadFile(d.paths.SpoolFile())
@@ -142,7 +142,7 @@ func (d *Daemon) flushSpool(ctx context.Context) {
 	}
 	if err := os.Truncate(d.paths.SpoolFile(), 0); err != nil {
 		d.spoolMu.Unlock()
-		d.logger.Warn("session-spool leeren fehlgeschlagen", "error", err)
+		d.logger.Warn("clearing session spool failed", "error", err)
 		return
 	}
 	d.spoolMu.Unlock()
@@ -152,19 +152,19 @@ func (d *Daemon) flushSpool(ctx context.Context) {
 		return
 	}
 	if len(events) > maxFlushBatch {
-		// Rest zurückschreiben, Batch begrenzt halten.
+		// Write the remainder back, keep the batch bounded.
 		d.requeueSpool(mustMarshalLines(events[maxFlushBatch:]))
 		events = events[:maxFlushBatch]
 	}
 	if err := d.api.SendSessions(ctx, events); err != nil {
-		d.logger.Warn("session-events flushen fehlgeschlagen — zurückgestellt", "count", len(events), "error", err)
+		d.logger.Warn("flushing session events failed — requeued", "count", len(events), "error", err)
 		d.requeueSpool(mustMarshalLines(events))
 		return
 	}
-	d.logger.Info("session-events geflusht", "count", len(events))
+	d.logger.Info("session events flushed", "count", len(events))
 }
 
-// requeueSpool schreibt Events (bereits als Zeilen) zurück an den Spool-Anfang.
+// requeueSpool writes events (already as lines) back to the start of the spool.
 func (d *Daemon) requeueSpool(lines []byte) {
 	if len(lines) == 0 {
 		return
@@ -172,14 +172,14 @@ func (d *Daemon) requeueSpool(lines []byte) {
 	d.spoolMu.Lock()
 	defer d.spoolMu.Unlock()
 	existing, _ := os.ReadFile(d.paths.SpoolFile())
-	// G703-Falschmeldung: SpoolFile() ist StateDir + fester Dateiname (config.go),
-	// kein Nutzer-/Netzwerkeingang — kein Path-Traversal möglich.
-	if err := os.WriteFile(d.paths.SpoolFile(), append(lines, existing...), 0o600); err != nil { //nolint:gosec // siehe Kommentar
-		d.logger.Warn("session-spool zurückschreiben fehlgeschlagen", "error", err)
+	// G703 false positive: SpoolFile() is StateDir + a fixed filename
+	// (config.go), no user/network input — path traversal is not possible.
+	if err := os.WriteFile(d.paths.SpoolFile(), append(lines, existing...), 0o600); err != nil { //nolint:gosec // see comment above
+		d.logger.Warn("writing back session spool failed", "error", err)
 	}
 }
 
-// parseSpool zerlegt Spool-Bytes in Events (unlesbare Zeilen werden übersprungen).
+// parseSpool splits spool bytes into events (unreadable lines are skipped).
 func parseSpool(raw []byte) []sessionEventWire {
 	var events []sessionEventWire
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
@@ -197,7 +197,7 @@ func parseSpool(raw []byte) []sessionEventWire {
 	return events
 }
 
-// mustMarshalLines serialisiert Events als JSON-Lines (Fehler übersprungen).
+// mustMarshalLines serializes events as JSON lines (errors are skipped).
 func mustMarshalLines(events []sessionEventWire) []byte {
 	var buf bytes.Buffer
 	for _, ev := range events {

@@ -1,8 +1,8 @@
-# Konfiguration für chart-testing (ct) — Helm-Chart-Lint in der CI.
+# Configuration for chart-testing (ct) — Helm chart linting in CI.
 chart-dirs:
   - deploy/helm
 target-branch: main
-# Maintainer sind eine Org, keine GitHub-User — Validierung würde fehlschlagen.
+# Maintainers are an org, not GitHub users — validation would fail.
 validate-maintainers: false
-# Release erfolgt über git-Tag, nicht über Chart-Versions-Bump.
+# Release happens via git tag, not via a chart version bump.
 check-version-increment: false

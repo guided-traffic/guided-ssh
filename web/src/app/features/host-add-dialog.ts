@@ -15,7 +15,7 @@ import { createEnrollToken } from '../api/functions';
 import { AgentManifest, EnrollTokenResponse } from '../api/models';
 import { formatBytes, formatTimestamp, textToTags } from '../core/format';
 
-/** Wählbare Token-Laufzeiten; Default 1 h (siehe Server-Default). */
+/** Selectable token lifetimes; default 1 h (see server default). */
 export const TTL_OPTIONS: Array<{ seconds: number; label: string }> = [
   { seconds: 900, label: '15 min' },
   { seconds: 3600, label: '1 h' },
@@ -24,9 +24,9 @@ export const TTL_OPTIONS: Array<{ seconds: number; label: string }> = [
 ];
 
 /**
- * maskToken verdeckt den Token-Klartext in der Anzeige: Prefix und die
- * letzten vier Zeichen bleiben sichtbar (genug zum Wiedererkennen), der Rest
- * nicht. Der volle Klartext geht nur über den Copy-Button in die Zwischenablage.
+ * maskToken hides the token's plaintext in the display: the prefix and the
+ * last four characters stay visible (enough to recognize it), the rest does
+ * not. The full plaintext only reaches the clipboard via the copy button.
  */
 export function maskToken(token: string): string {
   const prefix = 'gssh-et-';
@@ -38,16 +38,16 @@ export function maskToken(token: string): string {
 }
 
 /**
- * withArch hängt die Arch-Auswahl an den Install-Befehl. Leere Auswahl =
- * „auto“: das Script ermittelt die Architektur dann selbst.
+ * withArch appends the arch selection to the install command. An empty
+ * selection means "auto": the script then detects the architecture itself.
  */
 export function withArch(command: string, arch: string): string {
   return arch === '' ? command : `${command} --arch ${arch}`;
 }
 
 /**
- * twoStepCommands zerlegt den Pipe-to-shell-Befehl in die Variante ohne
- * `curl | sh`: herunterladen, prüfen, ausführen. Gleiche URL, gleiche Flags.
+ * twoStepCommands splits the pipe-to-shell command into the variant without
+ * `curl | sh`: download, review, run. Same URL, same flags.
  */
 export function twoStepCommands(command: string): string {
   const url = command.match(/https?:\/\/\S+\/install\.sh/)?.[0] ?? '';
@@ -55,7 +55,7 @@ export function twoStepCommands(command: string): string {
   const args = sep < 0 ? '' : command.slice(sep + 4);
   return [
     `curl -fsSLO ${url}`,
-    'less install.sh          # prüfen',
+    'less install.sh          # review',
     `sudo sh install.sh ${args}`.trimEnd(),
   ].join('\n');
 }
@@ -73,53 +73,53 @@ export function twoStepCommands(command: string): string {
     MatIconModule,
   ],
   template: `
-    <h2 mat-dialog-title>Host hinzufügen</h2>
+    <h2 mat-dialog-title>Add Host</h2>
     <mat-dialog-content>
       @if (result(); as res) {
         <div class="dialog-form">
           <div class="pill warn">
-            Token wird nur einmal angezeigt, die TTL läuft bereits (gültig bis
+            The token is shown only once, and the TTL is already running (valid until
             {{ formatTimestamp(res.expires_at) }}).
           </div>
 
-          <label class="field-label">Enrollment-Token</label>
+          <label class="field-label">Enrollment token</label>
           <div class="copy-row">
             <code class="mono grow">{{ maskToken(res.token) }}</code>
-            <button mat-icon-button aria-label="Token kopieren" (click)="copy(res.token, 'Token')">
+            <button mat-icon-button aria-label="Copy token" (click)="copy(res.token, 'Token')">
               <mat-icon svgIcon="copy" />
             </button>
           </div>
 
           <mat-form-field appearance="outline">
-            <mat-label>Architektur</mat-label>
+            <mat-label>Architecture</mat-label>
             <mat-select [(ngModel)]="arch">
-              <mat-option value="">auto (Script erkennt)</mat-option>
+              <mat-option value="">auto (script detects)</mat-option>
               @for (agent of manifest.agents; track agent.os + agent.arch) {
                 <mat-option [value]="agent.arch">{{ agent.os }}/{{ agent.arch }}</mat-option>
               }
             </mat-select>
           </mat-form-field>
 
-          <label class="field-label">Auf dem Host ausführen</label>
+          <label class="field-label">Run on the host</label>
           <div class="copy-row">
             <code class="mono grow wrap">{{ installLine() }}</code>
             <button
               mat-icon-button
-              aria-label="Befehl kopieren"
-              (click)="copy(installLine(), 'Befehl')"
+              aria-label="Copy command"
+              (click)="copy(installLine(), 'Command')"
             >
               <mat-icon svgIcon="copy" />
             </button>
           </div>
 
           <details>
-            <summary>Ohne <code>curl | sh</code>: herunterladen, prüfen, ausführen</summary>
+            <summary>Without <code>curl | sh</code>: download, review, run</summary>
             <div class="copy-row">
               <pre class="mono grow wrap">{{ twoStep() }}</pre>
               <button
                 mat-icon-button
-                aria-label="Zwei-Schritt-Variante kopieren"
-                (click)="copy(twoStep(), 'Befehle')"
+                aria-label="Copy two-step variant"
+                (click)="copy(twoStep(), 'Commands')"
               >
                 <mat-icon svgIcon="copy" />
               </button>
@@ -127,7 +127,7 @@ export function twoStepCommands(command: string): string {
           </details>
 
           <details>
-            <summary>Ausgelieferte Agent-Binaries ({{ manifest.version }})</summary>
+            <summary>Shipped agent binaries ({{ manifest.version }})</summary>
             <table class="agent-table mono">
               @for (agent of manifest.agents; track agent.os + agent.arch) {
                 <tr>
@@ -144,32 +144,32 @@ export function twoStepCommands(command: string): string {
           <mat-form-field appearance="outline">
             <mat-label>Hostname (optional)</mat-label>
             <input matInput [(ngModel)]="hostname" placeholder="web-01" />
-            <mat-hint>leer = Token nicht an einen Hostnamen gebunden</mat-hint>
+            <mat-hint>empty = token not bound to a hostname</mat-hint>
           </mat-form-field>
           <div class="dim hint-text">
-            Gesetzt bindet das Token an genau diesen Namen — er muss exakt der
-            <code>hostname</code>-Ausgabe des Zielhosts entsprechen (Kurzname vs. FQDN beachten),
-            sonst schlägt das Enrollment fehl. Das Token bleibt dabei unverbraucht; ein erneuter
-            Lauf mit korrigiertem Namen funktioniert.
+            If set, the token is bound to exactly this name — it must exactly match the
+            target host's <code>hostname</code> output (mind short name vs. FQDN),
+            otherwise enrollment fails. The token remains unused in that case; a re-run
+            with the corrected name will work.
           </div>
           <mat-form-field appearance="outline">
             <mat-label>Tags (key=value, …)</mat-label>
             <input matInput [(ngModel)]="tags" placeholder="env=prod, role=web" />
           </mat-form-field>
           <mat-form-field appearance="outline">
-            <mat-label>Gültigkeit des Tokens</mat-label>
+            <mat-label>Token validity</mat-label>
             <mat-select [(ngModel)]="ttlSeconds">
               @for (option of ttlOptions; track option.seconds) {
                 <mat-option [value]="option.seconds">{{ option.label }}</mat-option>
               }
             </mat-select>
           </mat-form-field>
-          <mat-checkbox [(ngModel)]="sessionAudit">Session-Audit aktivieren</mat-checkbox>
+          <mat-checkbox [(ngModel)]="sessionAudit">Enable session audit</mat-checkbox>
           <div class="dim hint-text">
-            Der Agent hängt <code>pam_exec</code>-Hooks an die PAM-Stacks von sshd und sudo
-            (<code>/etc/pam.d/*</code>) und korreliert Sessions mit Zertifikaten (sshd
-            <code>LogLevel VERBOSE</code>). Meldet Session-Start/-Ende und sudo-Aktionen an die
-            Plattform. Ändert die PAM-Konfiguration des Hosts — deshalb Opt-in.
+            The agent attaches <code>pam_exec</code> hooks to the PAM stacks of sshd and sudo
+            (<code>/etc/pam.d/*</code>) and correlates sessions with certificates (sshd
+            <code>LogLevel VERBOSE</code>). Reports session start/end and sudo actions to the
+            platform. Changes the host's PAM configuration — hence opt-in.
           </div>
           @if (error()) {
             <div class="pill danger">{{ error() }}</div>
@@ -179,10 +179,10 @@ export function twoStepCommands(command: string): string {
     </mat-dialog-content>
     <mat-dialog-actions align="end">
       @if (result()) {
-        <button mat-flat-button mat-dialog-close>Fertig</button>
+        <button mat-flat-button mat-dialog-close>Done</button>
       } @else {
-        <button mat-button mat-dialog-close>Abbrechen</button>
-        <button mat-flat-button (click)="mint()" [disabled]="minting()">Token erzeugen</button>
+        <button mat-button mat-dialog-close>Cancel</button>
+        <button mat-flat-button (click)="mint()" [disabled]="minting()">Generate Token</button>
       }
     </mat-dialog-actions>
   `,
@@ -254,14 +254,14 @@ export class HostAddDialog {
   protected tags = '';
   protected ttlSeconds = 3600;
   protected sessionAudit = false;
-  /** Leer = „auto“; das Script erkennt die Architektur dann selbst. */
+  /** Empty = "auto"; the script then detects the architecture itself. */
   protected arch = '';
 
   protected readonly minting = signal(false);
   protected readonly error = signal('');
   protected readonly result = signal<EnrollTokenResponse | null>(null);
 
-  /** installLine ist der Befehl inklusive aktueller Arch-Auswahl. */
+  /** installLine is the command including the current arch selection. */
   installLine(): string {
     return withArch(this.result()?.install_command ?? '', this.arch);
   }
@@ -292,13 +292,13 @@ export class HostAddDialog {
         },
       })
       .then((res) => this.result.set(res))
-      .catch(() => this.error.set('Token konnte nicht erzeugt werden'))
+      .catch(() => this.error.set('Failed to generate token'))
       .finally(() => this.minting.set(false));
   }
 
   copy(text: string, what: string): void {
     const ok = this.clipboard.copy(text);
-    this.snackBar.open(ok ? `${what} kopiert` : `${what} kopieren fehlgeschlagen`, 'OK', {
+    this.snackBar.open(ok ? `${what} copied` : `Failed to copy ${what.toLowerCase()}`, 'OK', {
       duration: 3000,
     });
   }

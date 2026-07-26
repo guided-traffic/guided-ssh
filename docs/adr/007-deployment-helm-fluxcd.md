@@ -1,21 +1,22 @@
-# ADR-007: Deployment via Helm-Chart, FluxCD-kompatibel
+# ADR-007: Deployment via Helm chart, FluxCD-compatible
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Zielumgebung ist Kubernetes, verwaltet über GitOps mit FluxCD (Anforderung).
+The target environment is Kubernetes, managed via GitOps with FluxCD (a requirement).
 
-## Entscheidung
+## Decision
 
-Auslieferung als Helm-Chart (`deploy/helm/guided-ssh`), publiziert in eine
-OCI-Registry. Referenz-Setup für FluxCD (`HelmRelease`, Kustomize-Overlays,
-SOPS-Beispiele) wird in `deploy/flux-example/` gepflegt.
+Delivery as a Helm chart (`deploy/helm/guided-ssh`), published to an OCI
+registry. A reference setup for FluxCD (`HelmRelease`, Kustomize overlays,
+SOPS examples) is maintained in `deploy/flux-example/`.
 
-## Konsequenzen
+## Consequences
 
-- Konfiguration vollständig über `values.yaml`; Secrets nur als
-  `existingSecret`-Referenzen (kompatibel mit external-secrets und SOPS).
-- DB-Migrationen als Job/Init-Container mit Lock — Upgrade via Flux ohne Handarbeit.
-- Chart wird wie Code getestet (chart-testing, `helm test`) und versioniert released.
+- Configuration entirely via `values.yaml`; secrets only as
+  `existingSecret` references (compatible with external-secrets and SOPS).
+- DB migrations as a Job/init container with a lock — upgrades via Flux
+  without manual steps.
+- The chart is tested like code (chart-testing, `helm test`) and released with versioning.

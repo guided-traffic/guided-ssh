@@ -1,5 +1,5 @@
-// Package version stellt Build- und Versionsinformationen bereit.
-// Die Werte werden beim Build über -ldflags "-X ..." gesetzt (siehe Makefile).
+// Package version provides build and version information.
+// The values are set at build time via -ldflags "-X ..." (see Makefile).
 package version
 
 import "fmt"
@@ -10,7 +10,7 @@ var (
 	date    = "unknown"
 )
 
-// String liefert die menschenlesbare Versionsangabe des Builds.
+// String returns the human-readable version string of the build.
 func String() string {
-	return fmt.Sprintf("guided-ssh %s (commit %s, gebaut %s)", version, commit, date)
+	return fmt.Sprintf("guided-ssh %s (commit %s, built %s)", version, commit, date)
 }

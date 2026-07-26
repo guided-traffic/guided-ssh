@@ -11,21 +11,21 @@ import (
 	"testing"
 )
 
-const testToken = "test-token" //#nosec G101 -- Testwert, kein Credential
+const testToken = "test-token" //#nosec G101 -- test value, not a credential
 
-// writeConfig legt eine minimale CLI-Konfiguration an und liefert den Pfad.
+// writeConfig creates a minimal CLI configuration and returns the path.
 func writeConfig(t *testing.T, apiURL string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	content := "api_url: " + apiURL + "\nissuer: https://idp.example/realms/x\nclient_id: gssh-cli\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("config schreiben: %v", err)
+		t.Fatalf("write config: %v", err)
 	}
 	return path
 }
 
-// fakeAdminAPI ist ein Fake der Admin-API; er prüft das Bearer-Token und
-// zeichnet Requests auf.
+// fakeAdminAPI is a fake of the admin API; it checks the bearer token and
+// records requests.
 type fakeAdminAPI struct {
 	t        *testing.T
 	grants   []Grant
@@ -73,23 +73,23 @@ func (f *fakeAdminAPI) handler() http.Handler {
 			_ = json.NewEncoder(w).Encode(Grant{ID: strings.TrimPrefix(r.URL.Path, "/v1/admin/grants/"), Group: "deployers"})
 		case r.Method == http.MethodGet && isCI:
 			if len(f.ciGrants) == 0 {
-				http.Error(w, "nicht gefunden", http.StatusNotFound)
+				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(f.ciGrants[0])
 		case r.Method == http.MethodGet:
 			if len(f.grants) == 0 {
-				http.Error(w, "nicht gefunden", http.StatusNotFound)
+				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(f.grants[0])
 		default:
-			http.Error(w, "unerwartet", http.StatusTeapot)
+			http.Error(w, "unexpected", http.StatusTeapot)
 		}
 	})
 }
 
-// runCLI führt Run mit Testservern aus und liefert Exit-Code und Ausgaben.
+// runCLI runs Run against test servers and returns the exit code and outputs.
 func runCLI(t *testing.T, api *fakeAdminAPI, args ...string) (int, string, string) {
 	t.Helper()
 	srv := httptest.NewServer(api.handler())
@@ -101,23 +101,23 @@ func runCLI(t *testing.T, api *fakeAdminAPI, args ...string) (int, string, strin
 	return code, stdout.String(), stderr.String()
 }
 
-func TestUsageUndUnbekanntesKommando(t *testing.T) {
+func TestUsageAndUnknownCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Run(&stdout, &stderr, nil); code != 2 {
-		t.Errorf("ohne argumente: code %d, erwartet 2", code)
+		t.Errorf("without arguments: code %d, expected 2", code)
 	}
 	if code := Run(&stdout, &stderr, []string{"help"}); code != 0 {
 		t.Errorf("help: code %d", code)
 	}
-	if code := Run(&stdout, &stderr, []string{"quatsch"}); code != 2 {
-		t.Errorf("unbekanntes kommando: code %d, erwartet 2", code)
+	if code := Run(&stdout, &stderr, []string{"bogus"}); code != 2 {
+		t.Errorf("unknown command: code %d, expected 2", code)
 	}
 	if code := Run(&stdout, &stderr, []string{"grant"}); code != 2 {
-		t.Errorf("grant ohne subkommando: code %d, erwartet 2", code)
+		t.Errorf("grant without subcommand: code %d, expected 2", code)
 	}
 	stdout.Reset()
 	if code := Run(&stdout, &stderr, []string{"version"}); code != 0 || stdout.Len() == 0 {
-		t.Errorf("version: code %d, ausgabe %q", code, stdout.String())
+		t.Errorf("version: code %d, output %q", code, stdout.String())
 	}
 }
 
@@ -133,7 +133,7 @@ func TestGrantList(t *testing.T) {
 	}
 	for _, want := range []string{"deployers", "env=prod,role=web", "deploy", "1h0m0s"} {
 		if !strings.Contains(stdout, want) {
-			t.Errorf("ausgabe ohne %q:\n%s", want, stdout)
+			t.Errorf("output missing %q:\n%s", want, stdout)
 		}
 	}
 }
@@ -154,17 +154,17 @@ func TestGrantCreate(t *testing.T) {
 		t.Errorf("body = %v", api.lastBody)
 	}
 	if !strings.Contains(stdout, "neu-1") {
-		t.Errorf("ausgabe ohne id: %s", stdout)
+		t.Errorf("output missing id: %s", stdout)
 	}
 }
 
-func TestGrantCreatePflichtfelder(t *testing.T) {
+func TestGrantCreateRequiredFields(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Run(&stdout, &stderr, []string{"grant", "create", "--group", "x"}); code != 2 {
-		t.Errorf("ohne principals: code %d, erwartet 2", code)
+		t.Errorf("without principals: code %d, expected 2", code)
 	}
 	if code := Run(&stdout, &stderr, []string{"grant", "create", "--principals", "deploy"}); code != 2 {
-		t.Errorf("ohne group: code %d, erwartet 2", code)
+		t.Errorf("without group: code %d, expected 2", code)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestGrantUpdate(t *testing.T) {
 	if api.method != http.MethodPut || api.lastPath != "/v1/admin/grants/id-1" {
 		t.Errorf("request: %s %s", api.method, api.lastPath)
 	}
-	// Nicht angegebene Felder bleiben erhalten, principals sind neu.
+	// Fields not specified are preserved; principals are new.
 	principals, _ := api.lastBody["principals"].([]any)
 	if len(principals) != 2 || api.lastBody["max_validity_seconds"] != float64(3600) {
 		t.Errorf("body = %v", api.lastBody)
@@ -192,7 +192,7 @@ func TestGrantUpdate(t *testing.T) {
 
 	var stdout, errOut bytes.Buffer
 	if code := Run(&stdout, &errOut, []string{"grant", "update"}); code != 2 {
-		t.Errorf("update ohne id: code %d, erwartet 2", code)
+		t.Errorf("update without id: code %d, expected 2", code)
 	}
 }
 
@@ -206,7 +206,7 @@ func TestGrantDelete(t *testing.T) {
 		t.Errorf("request: %s %s", api.method, api.lastPath)
 	}
 	if !strings.Contains(stdout, "id-1") {
-		t.Errorf("ausgabe: %s", stdout)
+		t.Errorf("output: %s", stdout)
 	}
 }
 
@@ -232,40 +232,40 @@ func TestApply(t *testing.T) {
 		t.Fatalf("code %d: %s", code, stderr)
 	}
 	if api.lastPath != "/v1/admin/grants/apply" {
-		t.Errorf("pfad: %s", api.lastPath)
+		t.Errorf("path: %s", api.lastPath)
 	}
 	grants, _ := api.lastBody["grants"].([]any)
 	if len(grants) != 2 {
-		t.Fatalf("apply-body: %v", api.lastBody)
+		t.Fatalf("apply body: %v", api.lastBody)
 	}
 	first, _ := grants[0].(map[string]any)
 	if first["group"] != "deployers" || first["max_validity_seconds"] != float64(8*3600) {
-		t.Errorf("erster grant: %v", first)
+		t.Errorf("first grant: %v", first)
 	}
-	if !strings.Contains(stdout, "2 angelegt") || !strings.Contains(stdout, "1 gelöscht") {
-		t.Errorf("zusammenfassung: %s", stdout)
+	if !strings.Contains(stdout, "2 created") || !strings.Contains(stdout, "1 deleted") {
+		t.Errorf("summary: %s", stdout)
 	}
 
 	var stdout2, stderr2 bytes.Buffer
 	if code := Run(&stdout2, &stderr2, []string{"apply"}); code != 2 {
-		t.Errorf("apply ohne datei: code %d, erwartet 2", code)
+		t.Errorf("apply without file: code %d, expected 2", code)
 	}
 }
 
-func TestLoadGrantsFileFehler(t *testing.T) {
-	if _, _, _, err := loadGrantsFile(filepath.Join(t.TempDir(), "fehlt.yaml")); err == nil {
-		t.Error("fehlende datei: fehler erwartet")
+func TestLoadGrantsFileError(t *testing.T) {
+	if _, _, _, err := loadGrantsFile(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
+		t.Error("missing file: error expected")
 	}
-	path := filepath.Join(t.TempDir(), "kaputt.yaml")
-	if err := os.WriteFile(path, []byte("grants: [max_validity: quatsch"), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "broken.yaml")
+	if err := os.WriteFile(path, []byte("grants: [max_validity: bogus"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := loadGrantsFile(path); err == nil {
-		t.Error("kaputtes yaml: fehler erwartet")
+		t.Error("broken yaml: error expected")
 	}
 }
 
-func TestTokenAusUmgebung(t *testing.T) {
+func TestTokenFromEnvironment(t *testing.T) {
 	api := &fakeAdminAPI{t: t}
 	srv := httptest.NewServer(api.handler())
 	t.Cleanup(srv.Close)
@@ -278,16 +278,16 @@ func TestTokenAusUmgebung(t *testing.T) {
 	}
 }
 
-// TestClientCredentialsAusUmgebung: GSSH_CLIENT_SECRET aktiviert den
-// nicht-interaktiven Client-Credentials-Flow, GSSH_CLIENT_ID übersteuert die
-// client_id der Konfiguration (GitOps-Sync-CronJob).
-func TestClientCredentialsAusUmgebung(t *testing.T) {
+// TestClientCredentialsFromEnvironment: GSSH_CLIENT_SECRET activates the
+// non-interactive client-credentials flow, GSSH_CLIENT_ID overrides the
+// configuration's client_id (GitOps sync cronjob).
+func TestClientCredentialsFromEnvironment(t *testing.T) {
 	api := &fakeAdminAPI{t: t}
 	srv := httptest.NewServer(api.handler())
 	t.Cleanup(srv.Close)
 
-	// Minimaler IdP: Discovery + Token-Endpoint, der das erwartete Bearer-
-	// Token der fakeAdminAPI als id_token ausgibt.
+	// Minimal IdP: discovery + token endpoint that returns the fakeAdminAPI's
+	// expected bearer token as id_token.
 	var tokenClientID string
 	mux := http.NewServeMux()
 	var idp *httptest.Server
@@ -300,7 +300,7 @@ func TestClientCredentialsAusUmgebung(t *testing.T) {
 	})
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil || r.Form.Get("grant_type") != "client_credentials" {
-			http.Error(w, "grant_type falsch", http.StatusBadRequest)
+			http.Error(w, "invalid grant_type", http.StatusBadRequest)
 			return
 		}
 		id, secret, ok := r.BasicAuth()
@@ -308,13 +308,13 @@ func TestClientCredentialsAusUmgebung(t *testing.T) {
 			id, secret = r.Form.Get("client_id"), r.Form.Get("client_secret")
 		}
 		if secret != "sync-secret" {
-			http.Error(w, "secret falsch", http.StatusUnauthorized)
+			http.Error(w, "invalid secret", http.StatusUnauthorized)
 			return
 		}
 		tokenClientID = id
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "unbenutzt",
+			"access_token": "unused",
 			"token_type":   "Bearer",
 			"expires_in":   3600,
 			"id_token":     testToken,
@@ -326,7 +326,7 @@ func TestClientCredentialsAusUmgebung(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	content := "api_url: " + srv.URL + "\nissuer: " + idp.URL + "\nclient_id: gssh-cli\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("config schreiben: %v", err)
+		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv(envClientSecret, "sync-secret")
 	t.Setenv(envClientID, "gssh-grants-sync")
@@ -335,8 +335,8 @@ func TestClientCredentialsAusUmgebung(t *testing.T) {
 	if code := Run(&stdout, &stderr, []string{"grant", "list", "--config", path}); code != 0 {
 		t.Fatalf("code %d: %s", code, stderr.String())
 	}
-	if tokenClientID != "gssh-grants-sync" { //nolint:gosec // Client-ID, kein Credential
-		t.Errorf("token-endpoint sah client_id %q, erwartet gssh-grants-sync", tokenClientID)
+	if tokenClientID != "gssh-grants-sync" { //nolint:gosec // client ID, not a credential
+		t.Errorf("token endpoint saw client_id %q, expected gssh-grants-sync", tokenClientID)
 	}
 }
 
@@ -345,8 +345,8 @@ func TestParseHelpers(t *testing.T) {
 	if err != nil || tags["env"] != "prod" || tags["role"] != "web" {
 		t.Errorf("parseTags: %v, %v", tags, err)
 	}
-	if _, err := parseTags("kaputt"); err == nil {
-		t.Error("parseTags ohne '=': fehler erwartet")
+	if _, err := parseTags("invalid"); err == nil {
+		t.Error("parseTags without '=': error expected")
 	}
 	if got := formatTags(nil); got != "*" {
 		t.Errorf("formatTags(nil) = %q", got)
@@ -356,9 +356,9 @@ func TestParseHelpers(t *testing.T) {
 	}
 }
 
-func TestAPIFehlerWirdGemeldet(t *testing.T) {
+func TestAPIErrorIsReported(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "keine admin-berechtigung", http.StatusForbidden)
+		http.Error(w, "no admin permission", http.StatusForbidden)
 	}))
 	t.Cleanup(srv.Close)
 	config := writeConfig(t, srv.URL)
@@ -366,9 +366,9 @@ func TestAPIFehlerWirdGemeldet(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run(&stdout, &stderr, []string{"grant", "list", "--config", config, "--token", testToken})
 	if code != 1 {
-		t.Fatalf("code %d, erwartet 1", code)
+		t.Fatalf("code %d, expected 1", code)
 	}
-	if !strings.Contains(stderr.String(), "keine admin-berechtigung") {
+	if !strings.Contains(stderr.String(), "no admin permission") {
 		t.Errorf("stderr: %s", stderr.String())
 	}
 }

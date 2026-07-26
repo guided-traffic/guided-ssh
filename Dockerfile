@@ -1,4 +1,4 @@
-# Web-UI-Stage: Angular-Build (Phase 8), wird via go:embed ins Binary eingebettet
+# Web UI stage: Angular build (Phase 8), embedded into the binary via go:embed
 FROM node:24-bookworm-slim AS webbuild
 WORKDIR /web
 
@@ -8,16 +8,17 @@ RUN npm ci
 COPY web/ .
 RUN npx ng build
 
-# Agent-Build-Stage: gssh-agentd für alle Ziel-Arches cross-bauen. Die Binaries
-# werden ins Server-Binary eingebettet (internal/agentdist) und beim
-# One-Command-Host-Install ausgeliefert — gleicher Build, gleiche -ldflags,
-# also garantierter Versions-Lockstep mit dem Server.
+# Agent build stage: cross-build gssh-agentd for all target arches. The
+# binaries are embedded into the server binary (internal/agentdist) and
+# shipped during the one-command host install — same build, same -ldflags,
+# so a guaranteed version lockstep with the server.
 #
-# --platform=$BUILDPLATFORM ist zwingend: sonst liefe diese Stage bei
-# buildx-Multi-Arch je Zielplattform unter QEMU (Go-Compile um ein Vielfaches
-# langsamer). So läuft der Compiler nativ und crosst via GOOS/GOARCH; die Stage
-# ist plattform-invariant, BuildKit dedupliziert sie. Jede Server-Variante
-# bettet den vollständigen Agent-Satz ein (amd64-Server enthält auch arm64).
+# --platform=$BUILDPLATFORM is mandatory: otherwise this stage would run
+# under QEMU for each target platform on buildx multi-arch builds (Go compile
+# many times slower). This way the compiler runs natively and cross-compiles
+# via GOOS/GOARCH; the stage is platform-invariant, so BuildKit deduplicates
+# it. Every server variant embeds the full agent set (the amd64 server also
+# contains arm64).
 FROM --platform=$BUILDPLATFORM golang:1.26 AS agentbuild
 WORKDIR /src
 
@@ -39,25 +40,25 @@ RUN for arch in amd64 arm64; do \
         -o /out/gssh-agentd-linux-$arch ./cmd/gssh-agentd || exit 1; \
     done
 
-# Build-Stage
+# Build stage
 FROM golang:1.26 AS build
 WORKDIR /src
 
-# Abhängigkeiten zuerst, für Layer-Caching (go.sum entsteht mit der ersten externen Dependency)
+# Dependencies first, for layer caching (go.sum appears with the first external dependency)
 COPY go.* ./
 RUN go mod download
 
 COPY . .
 COPY --from=webbuild /web/dist ./web/dist
-# Identische -ldflags wie in agentbuild — das ist der Versions-Lockstep.
+# Identical -ldflags as in agentbuild — that is the version lockstep.
 COPY --from=agentbuild /out/ ./internal/agentdist/bin/
 
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
 
-# gssh-admin liegt mit im Image: der GitOps-Grants-Sync (CronJob, Phase 12)
-# ruft es mit überschriebenem command auf — distroless hat keine Shell.
+# gssh-admin ships in the image too: the GitOps grants sync (CronJob, Phase 12)
+# invokes it with an overridden command — distroless has no shell.
 RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w \
         -X github.com/guided-traffic/guided-ssh/internal/version.version=${VERSION} \
@@ -65,7 +66,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
         -X github.com/guided-traffic/guided-ssh/internal/version.date=${DATE}" \
       -o /out/ ./cmd/gssh-server ./cmd/gssh-admin
 
-# Runtime-Stage: distroless, non-root, nur die statischen Binaries
+# Runtime stage: distroless, non-root, static binaries only
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/gssh-server /out/gssh-admin /usr/local/bin/
 USER nonroot:nonroot

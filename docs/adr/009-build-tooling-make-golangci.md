@@ -1,25 +1,27 @@
-# ADR-009: Build-Tooling — Makefile + golangci-lint
+# ADR-009: Build tooling — Makefile + golangci-lint
 
-- Status: akzeptiert
-- Datum: 2026-07-19
+- Status: accepted
+- Date: 2026-07-19
 
-## Kontext
+## Context
 
-Der Plan ließ Makefile oder Taskfile offen; Linting war mit `golangci-lint` gesetzt.
-Build-Targets sind zugleich die Schnittstelle der CI-Pipeline.
+The plan left Makefile vs. Taskfile open; linting was already set to
+`golangci-lint`. Build targets also serve as the CI pipeline's interface.
 
-## Entscheidung
+## Decision
 
-Makefile (statt Taskfile): `build`, `test`, `cover` (inkl. Coverage-Gate ≥ 80 %,
-Schwelle `COVERAGE_MIN`), `lint`, `fmt`, `image`, `clean`.
-golangci-lint v2 mit Standard-Linter-Set plus `gosec`, `revive`, `misspell`,
-`unconvert`, `unparam`, `copyloopvar`; Formatierung via `gofumpt` + `goimports`.
+Makefile (instead of Taskfile): `build`, `test`, `cover` (including a coverage
+gate ≥ 80%, threshold `COVERAGE_MIN`), `lint`, `fmt`, `image`, `clean`.
+golangci-lint v2 with the standard linter set plus `gosec`, `revive`,
+`misspell`, `unconvert`, `unparam`, `copyloopvar`; formatting via `gofumpt` +
+`goimports`.
 
-## Konsequenzen
+## Consequences
 
-- `make` ist auf jedem Runner/Entwicklerrechner vorhanden — kein zusätzliches
-  Tool zu installieren (Taskfile bräuchte das `task`-Binary).
-- CI ruft dieselben Targets wie Entwickler lokal ⇒ „works on my machine"-Lücken klein.
-- `gosec` von Anfang an aktiv — passend zum Sicherheitsfokus des Projekts.
-- Makefile-Syntax ist spröde; bei wachsender Komplexität wandern Schritte in
-  Skripte unter `hack/` (Beispiel: `hack/coverage.sh`).
+- `make` is available on every runner/developer machine — no additional tool
+  to install (Taskfile would need the `task` binary).
+- CI calls the same targets developers use locally ⇒ "works on my machine"
+  gaps stay small.
+- `gosec` is active from the start — fitting the project's security focus.
+- Makefile syntax is brittle; as complexity grows, steps move into scripts
+  under `hack/` (example: `hack/coverage.sh`).

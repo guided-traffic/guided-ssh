@@ -20,11 +20,11 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// adminGroupName ist die konfigurierte Admin-Gruppe der Tests.
+// adminGroupName is the configured admin group for the tests.
 const adminGroupName = "gssh-admins"
 
-// fakeAdminStore ist ein In-Memory-AdminStore; Gruppen kommen aus dem
-// eingebetteten fakeAuthStore (gemeinsamer Zustand mit dem Mapper).
+// fakeAdminStore is an in-memory AdminStore; groups come from the
+// embedded fakeAuthStore (shared state with the mapper).
 type fakeAdminStore struct {
 	*fakeAuthStore
 	grants       map[uuid.UUID]*store.AccessGrant
@@ -46,7 +46,7 @@ func newFakeAdminStore(fs *fakeAuthStore) *fakeAdminStore {
 func (f *fakeAdminStore) withGroup(g *store.AccessGrant) (*store.GrantWithGroup, error) {
 	group, ok := f.groups[g.GroupID]
 	if !ok {
-		return nil, fmt.Errorf("gruppe %s fehlt", g.GroupID) //nolint:err113
+		return nil, fmt.Errorf("group %s missing", g.GroupID) //nolint:err113
 	}
 	return &store.GrantWithGroup{AccessGrant: *g, GroupName: group.Name, GroupIssuer: group.Issuer}, nil
 }
@@ -73,7 +73,7 @@ func (f *fakeAdminStore) GetGrantDetailed(_ context.Context, id uuid.UUID) (*sto
 
 func (f *fakeAdminStore) CreateGrant(_ context.Context, actor string, g *store.AccessGrant) error {
 	if actor == "" {
-		return fmt.Errorf("actor fehlt") //nolint:err113
+		return fmt.Errorf("actor missing") //nolint:err113
 	}
 	g.ID = uuid.New()
 	copied := *g
@@ -109,7 +109,7 @@ func (f *fakeAdminStore) ApplyGrants(_ context.Context, _, _ string, specs []sto
 	return &store.ApplyResult{Created: len(specs)}, nil
 }
 
-// adminClaims sind Claims eines Admin-Benutzers.
+// adminClaims are claims of an admin user.
 func adminClaims() *auth.Claims {
 	claims := testClaims()
 	claims.Subject = "admin-id"
@@ -119,7 +119,7 @@ func adminClaims() *auth.Claims {
 	return claims
 }
 
-// newAdminServer baut den Testserver inklusive Admin-API.
+// newAdminServer builds the test server including the admin API.
 func newAdminServer(t *testing.T, fs *fakeAuthStore, admin api.AdminStore, verifier api.TokenVerifier, adminGroup string) *httptest.Server {
 	t.Helper()
 	masterKey := make([]byte, ca.MasterKeySize)
@@ -139,20 +139,20 @@ func newAdminServer(t *testing.T, fs *fakeAuthStore, admin api.AdminStore, verif
 	return srv
 }
 
-// adminCall führt einen Admin-API-Request aus und liefert Status und Body.
+// adminCall executes an admin API request and returns status and body.
 func adminCall(t *testing.T, method, url, token string, payload any) (int, []byte) {
 	t.Helper()
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
 		if err != nil {
-			t.Fatalf("payload marshalen: %v", err)
+			t.Fatalf("marshaling payload: %v", err)
 		}
 		body = bytes.NewReader(data)
 	}
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		t.Fatalf("request bauen: %v", err)
+		t.Fatalf("building request: %v", err)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -164,52 +164,52 @@ func adminCall(t *testing.T, method, url, token string, payload any) (int, []byt
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("body lesen: %v", err)
+		t.Fatalf("reading body: %v", err)
 	}
 	return resp.StatusCode, data
 }
 
-func TestAdminNichtKonfiguriert(t *testing.T) {
+func TestAdminNotConfigured(t *testing.T) {
 	fs := newFakeAuthStore()
-	// Ohne AdminGroup bleibt die Admin-API deaktiviert (503).
+	// Without AdminGroup, the admin API stays disabled (503).
 	srv := newAdminServer(t, fs, newFakeAdminStore(fs), &fakeVerifier{token: testToken, claims: adminClaims()}, "")
 	status, body := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", testToken, nil)
 	if status != http.StatusServiceUnavailable {
-		t.Errorf("status %d (erwartet 503): %s", status, body)
+		t.Errorf("status %d (expected 503): %s", status, body)
 	}
 }
 
 func TestAdminAuth(t *testing.T) {
 	fs := newFakeAuthStore()
 	admin := newFakeAdminStore(fs)
-	verifier := &fakeVerifier{token: testToken, claims: testClaims()} // kein Admin (Gruppe admins)
+	verifier := &fakeVerifier{token: testToken, claims: testClaims()} // not an admin (group admins)
 	srv := newAdminServer(t, fs, admin, verifier, adminGroupName)
 
 	if status, _ := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", "", nil); status != http.StatusUnauthorized {
-		t.Errorf("ohne token: status %d, erwartet 401", status)
+		t.Errorf("without token: status %d, expected 401", status)
 	}
-	if status, _ := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", "falsch", nil); status != http.StatusUnauthorized {
-		t.Errorf("falsches token: status %d, erwartet 401", status)
+	if status, _ := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", "wrong", nil); status != http.StatusUnauthorized {
+		t.Errorf("wrong token: status %d, expected 401", status)
 	}
 	if status, _ := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", testToken, nil); status != http.StatusForbidden {
-		t.Errorf("nicht-admin: status %d, erwartet 403", status)
+		t.Errorf("non-admin: status %d, expected 403", status)
 	}
 }
 
-func TestAdminInaktiverBenutzer(t *testing.T) {
+func TestAdminInactiveUser(t *testing.T) {
 	fs := newFakeAuthStore()
 	admin := newFakeAdminStore(fs)
 	srv := newAdminServer(t, fs, admin, &fakeVerifier{token: testToken, claims: adminClaims()}, adminGroupName)
 
-	// Erster Zugriff legt den Benutzer an, dann deaktivieren.
+	// First access creates the user, then deactivate them.
 	if status, _ := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", testToken, nil); status != http.StatusOK {
-		t.Fatal("setup fehlgeschlagen")
+		t.Fatal("setup failed")
 	}
 	for _, u := range fs.users {
 		u.Active = false
 	}
 	if status, _ := adminCall(t, http.MethodGet, srv.URL+"/v1/admin/grants", testToken, nil); status != http.StatusForbidden {
-		t.Errorf("inaktiver admin: status %d, erwartet 403", status)
+		t.Errorf("inactive admin: status %d, expected 403", status)
 	}
 }
 
@@ -219,7 +219,7 @@ func TestAdminGrantCRUD(t *testing.T) {
 	srv := newAdminServer(t, fs, admin, &fakeVerifier{token: testToken, claims: adminClaims()}, adminGroupName)
 	base := srv.URL + "/v1/admin/grants"
 
-	// Create: Gruppe existiert noch nicht und wird angelegt.
+	// Create: group does not exist yet and gets created.
 	status, body := adminCall(t, http.MethodPost, base, testToken, map[string]any{
 		"group":                "deployers",
 		"tag_selector":         map[string]string{"env": "prod"},
@@ -236,19 +236,19 @@ func TestAdminGrantCRUD(t *testing.T) {
 		Issuer string `json:"issuer"`
 	}
 	if err := json.Unmarshal(body, &created); err != nil {
-		t.Fatalf("create-antwort: %v", err)
+		t.Fatalf("create response: %v", err)
 	}
 	if created.Group != "deployers" || created.Issuer != adminClaims().Issuer {
 		t.Errorf("create: group=%q issuer=%q", created.Group, created.Issuer)
 	}
 
-	// List und Get.
+	// List and get.
 	status, body = adminCall(t, http.MethodGet, base, testToken, nil)
 	var list []struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &list); err != nil || status != http.StatusOK || len(list) != 1 {
-		t.Fatalf("list: status %d, %d einträge (%v): %s", status, len(list), err, body)
+		t.Fatalf("list: status %d, %d entries (%v): %s", status, len(list), err, body)
 	}
 	if status, _ = adminCall(t, http.MethodGet, base+"/"+created.ID, testToken, nil); status != http.StatusOK {
 		t.Errorf("get: status %d", status)
@@ -268,10 +268,10 @@ func TestAdminGrantCRUD(t *testing.T) {
 		Sudo               bool     `json:"sudo"`
 	}
 	if err := json.Unmarshal(body, &updated); err != nil {
-		t.Fatalf("update-antwort: %v", err)
+		t.Fatalf("update response: %v", err)
 	}
 	if !slices.Equal(updated.Principals, []string{"deploy", "root"}) || updated.MaxValiditySeconds != 7200 || updated.Sudo {
-		t.Errorf("update nicht übernommen: %+v", updated)
+		t.Errorf("update not applied: %+v", updated)
 	}
 
 	// Delete.
@@ -279,11 +279,11 @@ func TestAdminGrantCRUD(t *testing.T) {
 		t.Errorf("delete: status %d", status)
 	}
 	if status, _ = adminCall(t, http.MethodGet, base+"/"+created.ID, testToken, nil); status != http.StatusNotFound {
-		t.Errorf("get nach delete: status %d, erwartet 404", status)
+		t.Errorf("get after delete: status %d, expected 404", status)
 	}
 }
 
-func TestAdminGrantValidierung(t *testing.T) {
+func TestAdminGrantValidation(t *testing.T) {
 	fs := newFakeAuthStore()
 	admin := newFakeAdminStore(fs)
 	srv := newAdminServer(t, fs, admin, &fakeVerifier{token: testToken, claims: adminClaims()}, adminGroupName)
@@ -296,25 +296,25 @@ func TestAdminGrantValidierung(t *testing.T) {
 		payload    any
 		wantStatus int
 	}{
-		{"create ohne group", http.MethodPost, base, map[string]any{
+		{"create without group", http.MethodPost, base, map[string]any{
 			"principals": []string{"deploy"}, "max_validity_seconds": 3600,
 		}, http.StatusBadRequest},
-		{"create ohne principals", http.MethodPost, base, map[string]any{
+		{"create without principals", http.MethodPost, base, map[string]any{
 			"group": "x", "max_validity_seconds": 3600,
 		}, http.StatusBadRequest},
-		{"create ohne laufzeit", http.MethodPost, base, map[string]any{
+		{"create without validity", http.MethodPost, base, map[string]any{
 			"group": "x", "principals": []string{"deploy"},
 		}, http.StatusBadRequest},
-		{"kaputter body", http.MethodPost, base, "kein-json", http.StatusBadRequest},
-		{"update unbekannte id", http.MethodPut, base + "/" + uuid.NewString(), map[string]any{
+		{"broken body", http.MethodPost, base, "not-json", http.StatusBadRequest},
+		{"update unknown id", http.MethodPut, base + "/" + uuid.NewString(), map[string]any{
 			"principals": []string{"deploy"}, "max_validity_seconds": 3600,
 		}, http.StatusNotFound},
-		{"kaputte id", http.MethodGet, base + "/keine-uuid", nil, http.StatusNotFound},
-		{"delete unbekannte id", http.MethodDelete, base + "/" + uuid.NewString(), nil, http.StatusNotFound},
+		{"broken id", http.MethodGet, base + "/not-a-uuid", nil, http.StatusNotFound},
+		{"delete unknown id", http.MethodDelete, base + "/" + uuid.NewString(), nil, http.StatusNotFound},
 	}
 	for _, c := range cases {
 		if status, body := adminCall(t, c.method, c.url, testToken, c.payload); status != c.wantStatus {
-			t.Errorf("%s: status %d (erwartet %d): %s", c.name, status, c.wantStatus, body)
+			t.Errorf("%s: status %d (expected %d): %s", c.name, status, c.wantStatus, body)
 		}
 	}
 }
@@ -339,7 +339,7 @@ func TestAdminApply(t *testing.T) {
 	}
 	var result store.ApplyResult
 	if err := json.Unmarshal(body, &result); err != nil {
-		t.Fatalf("apply-antwort: %v", err)
+		t.Fatalf("apply response: %v", err)
 	}
 	if result != *admin.applyResult {
 		t.Errorf("result = %+v", result)
@@ -348,10 +348,10 @@ func TestAdminApply(t *testing.T) {
 		t.Errorf("specs = %+v", admin.applySpecs)
 	}
 
-	// Validierungsfehler aus dem Store werden 400.
-	admin.applyErr = fmt.Errorf("%w: prüfung", store.ErrInvalidGrantSpec)
+	// Validation errors from the store become 400.
+	admin.applyErr = fmt.Errorf("%w: check", store.ErrInvalidGrantSpec)
 	if status, _ := adminCall(t, http.MethodPost, srv.URL+"/v1/admin/grants/apply", testToken,
 		map[string]any{"grants": []map[string]any{}}); status != http.StatusBadRequest {
-		t.Errorf("apply-validierung: status %d, erwartet 400", status)
+		t.Errorf("apply validation: status %d, expected 400", status)
 	}
 }

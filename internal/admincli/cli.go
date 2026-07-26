@@ -1,3 +1,7 @@
+// Package admincli implements the gssh-admin admin CLI (phase 6): grant
+// management (CRUD) and declarative YAML sync against the gssh-server's
+// admin API. Authentication like gssh: OIDC ID token (PKCE or device flow),
+// alternatively via GSSH_ID_TOKEN/--token.
 package admincli
 
 import (
@@ -18,20 +22,21 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
 
-// envIDToken übergibt ein fertiges ID-Token (z. B. aus CI) und überspringt
-// den interaktiven OIDC-Flow.
-const envIDToken = "GSSH_ID_TOKEN" //nolint:gosec // Name der Env-Variable, kein Secret
+// envIDToken passes a ready-made ID token (e.g. from CI) and skips the
+// interactive OIDC flow.
+const envIDToken = "GSSH_ID_TOKEN" //nolint:gosec // env var name, not a secret
 
-// envClientSecret aktiviert den Client-Credentials-Flow (Service-Account,
-// z. B. GitOps-Sync-CronJob): Token nicht-interaktiv vom Token-Endpoint des
-// Issuers; envClientID übersteuert dabei die client_id der Konfiguration.
+// envClientSecret activates the client-credentials flow (service account,
+// e.g. a GitOps sync cronjob): the token is fetched non-interactively from
+// the issuer's token endpoint; envClientID overrides the configured
+// client_id.
 const (
 	envClientID     = "GSSH_CLIENT_ID"
-	envClientSecret = "GSSH_CLIENT_SECRET" //nolint:gosec // Name der Env-Variable, kein Secret
+	envClientSecret = "GSSH_CLIENT_SECRET" //nolint:gosec // env var name, not a secret
 )
 
-// Run führt das Admin-CLI aus und liefert den Exit-Code (0 ok, 1 Fehler,
-// 2 Aufruffehler).
+// Run executes the admin CLI and returns the exit code (0 ok, 1 error,
+// 2 usage error).
 func Run(stdout, stderr io.Writer, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -55,52 +60,51 @@ func Run(stdout, stderr io.Writer, args []string) int {
 		usage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "gssh-admin: unbekanntes kommando %q\n\n", command)
+		fmt.Fprintf(stderr, "gssh-admin: unknown command %q\n\n", command)
 		usage(stderr)
 		return 2
 	}
 }
 
-// usage gibt die Kommandoübersicht aus.
+// usage prints the command overview.
 func usage(w io.Writer) {
-	fmt.Fprint(w, `gssh-admin — zugriffsregeln (grants) verwalten (guided-ssh)
+	fmt.Fprint(w, `gssh-admin — manage access rules (grants) for guided-ssh
 
-kommandos:
+commands:
   grant list
-        alle zugriffsregeln anzeigen
+        show all access rules
   grant create --group <name> --principals <p1,p2> [--tags k=v,…]
                [--sudo] [--max-validity 8h] [--issuer url]
-        zugriffsregel anlegen (gruppe wird bei bedarf angelegt)
+        create an access rule (group is created if needed)
   grant update <id> [--principals …] [--tags …] [--sudo=true|false] [--max-validity …]
-        zugriffsregel ändern (nur angegebene felder)
+        change an access rule (only the given fields)
   grant delete <id>
-        zugriffsregel löschen
+        delete an access rule
   ci-grant list
-        alle ci-zugriffsregeln (gitlab-pipelines) anzeigen
-  ci-grant create --project <pfad> --principals <p1,p2> [--ref muster]
-                  [--protected-only=true|false] [--environment muster]
+        show all CI access rules (GitLab pipelines)
+  ci-grant create --project <path> --principals <p1,p2> [--ref pattern]
+                  [--protected-only=true|false] [--environment pattern]
                   [--tags k=v,…] [--max-validity 1h]
-        ci-zugriffsregel anlegen (projekt- oder gruppen-pfad)
-  ci-grant update <id> [flags wie create außer --project]
-        ci-zugriffsregel ändern (nur angegebene felder)
+        create a CI access rule (project or group path)
+  ci-grant update <id> [flags as for create except --project]
+        change a CI access rule (only the given fields)
   ci-grant delete <id>
-        ci-zugriffsregel löschen
+        delete a CI access rule
   apply -f grants.yaml
-        deklarativer abgleich: datei ist der zielzustand (gitops);
-        abschnitt ci_grants wird nur abgeglichen, wenn er vorhanden ist
+        declarative sync: the file is the target state (GitOps);
+        the ci_grants section is only synced if present
   version
-        version ausgeben
+        print the version
 
-gemeinsame flags: --config <pfad>, --token <id-token>, --device
-authentifizierung: --token, sonst GSSH_ID_TOKEN, sonst client-credentials
-(GSSH_CLIENT_SECRET gesetzt; GSSH_CLIENT_ID übersteuert die client_id der
-konfiguration — für service-accounts, z. b. gitops-sync), sonst oidc-login
-(browser bzw. --device); erfordert mitgliedschaft in der admin-gruppe des
-servers.
+common flags: --config <path>, --token <id-token>, --device
+authentication: --token, else GSSH_ID_TOKEN, else client credentials
+(GSSH_CLIENT_SECRET set; GSSH_CLIENT_ID overrides the configured client_id —
+for service accounts, e.g. GitOps sync), else OIDC login (browser or
+--device); requires membership in the server's admin group.
 `)
 }
 
-// commonFlags registriert die für alle Kommandos gemeinsamen Flags.
+// commonFlags registers the flags shared by all commands.
 type commonFlags struct {
 	configPath string
 	token      string
@@ -108,16 +112,17 @@ type commonFlags struct {
 }
 
 func (c *commonFlags) register(fs *flag.FlagSet) {
-	fs.StringVar(&c.configPath, "config", "", "pfad zur konfigurationsdatei")
-	fs.StringVar(&c.token, "token", "", "fertiges oidc-id-token (überspringt den login)")
-	fs.BoolVar(&c.device, "device", false, "device-flow statt browser (headless)")
+	fs.StringVar(&c.configPath, "config", "", "path to the configuration file")
+	fs.StringVar(&c.token, "token", "", "ready-made OIDC ID token (skips login)")
+	fs.BoolVar(&c.device, "device", false, "device flow instead of browser (headless)")
 }
 
-// connect lädt die Konfiguration, besorgt ein ID-Token und baut den Client.
+// connect loads the configuration, obtains an ID token, and builds the
+// client.
 func (c *commonFlags) connect(ctx context.Context, stderr io.Writer) (*client, error) {
 	path := cli.ResolveConfigPath(c.configPath)
 	if path == "" {
-		return nil, errors.New("kein konfigurationspfad ermittelbar (HOME nicht gesetzt?)")
+		return nil, errors.New("no configuration path could be determined (HOME not set?)")
 	}
 	cfg, err := cli.LoadConfig(path)
 	if err != nil {
@@ -140,10 +145,10 @@ func (c *commonFlags) connect(ctx context.Context, stderr io.Writer) (*client, e
 	return newClient(cfg, token)
 }
 
-// runGrantCmd verzweigt in die grant-Subkommandos.
+// runGrantCmd dispatches to the grant subcommands.
 func runGrantCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "gssh-admin: grant braucht ein subkommando (list, create, update, delete)")
+		fmt.Fprintln(stderr, "gssh-admin: grant requires a subcommand (list, create, update, delete)")
 		return 2
 	}
 	sub, rest := args[0], args[1:]
@@ -157,12 +162,12 @@ func runGrantCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	case "delete":
 		return runGrantDelete(ctx, rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "gssh-admin: unbekanntes grant-subkommando %q\n", sub)
+		fmt.Fprintf(stderr, "gssh-admin: unknown grant subcommand %q\n", sub)
 		return 2
 	}
 }
 
-// fail gibt den Fehler aus und liefert Exit-Code 1.
+// fail prints the error and returns exit code 1.
 func fail(stderr io.Writer, err error) int {
 	fmt.Fprintf(stderr, "gssh-admin: %v\n", err)
 	return 1
@@ -188,10 +193,10 @@ func runGrantList(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	return 0
 }
 
-// printGrants gibt Grants tabellarisch aus.
+// printGrants prints grants as a table.
 func printGrants(w io.Writer, grants []Grant) {
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tGRUPPE\tTAGS\tPRINCIPALS\tSUDO\tMAX-LAUFZEIT")
+	fmt.Fprintln(tw, "ID\tGROUP\tTAGS\tPRINCIPALS\tSUDO\tMAX-VALIDITY")
 	for _, g := range grants {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%t\t%s\n",
 			g.ID, g.Group, formatTags(g.TagSelector),
@@ -201,7 +206,7 @@ func printGrants(w io.Writer, grants []Grant) {
 	_ = tw.Flush()
 }
 
-// formatTags rendert einen Tag-Selektor als k=v,…; leer = alle Hosts.
+// formatTags renders a tag selector as k=v,…; empty = all hosts.
 func formatTags(tags map[string]string) string {
 	if len(tags) == 0 {
 		return "*"
@@ -210,11 +215,11 @@ func formatTags(tags map[string]string) string {
 	for k, v := range tags {
 		pairs = append(pairs, k+"="+v)
 	}
-	slices.Sort(pairs) // stabile Ausgabe
+	slices.Sort(pairs) // stable output
 	return strings.Join(pairs, ",")
 }
 
-// parseTags parst "k=v,k2=v2" in eine Map.
+// parseTags parses "k=v,k2=v2" into a map.
 func parseTags(raw string) (map[string]string, error) {
 	tags := map[string]string{}
 	if raw == "" {
@@ -223,14 +228,14 @@ func parseTags(raw string) (map[string]string, error) {
 	for _, pair := range strings.Split(raw, ",") {
 		key, value, found := strings.Cut(pair, "=")
 		if !found || key == "" {
-			return nil, fmt.Errorf("ungültiges tag %q (erwartet key=value)", pair)
+			return nil, fmt.Errorf("invalid tag %q (expected key=value)", pair)
 		}
 		tags[key] = value
 	}
 	return tags, nil
 }
 
-// splitList parst eine Komma-Liste ohne Leereinträge.
+// splitList parses a comma-separated list, skipping empty entries.
 func splitList(raw string) []string {
 	var out []string
 	for _, item := range strings.Split(raw, ",") {
@@ -246,18 +251,18 @@ func runGrantCreate(ctx context.Context, args []string, stdout, stderr io.Writer
 	fs.SetOutput(stderr)
 	var common commonFlags
 	common.register(fs)
-	group := fs.String("group", "", "idp-gruppe (pflicht)")
-	issuer := fs.String("issuer", "", "issuer der gruppe (default: issuer des tokens)")
-	tagsFlag := fs.String("tags", "", "tag-selektor, z. B. env=prod,role=web (leer = alle hosts)")
-	principalsFlag := fs.String("principals", "", "ziel-principals, z. B. deploy,root (pflicht)")
-	sudo := fs.Bool("sudo", false, "sudo-berechtigung markieren")
-	maxValidity := fs.Duration("max-validity", 16*time.Hour, "maximale zertifikatslaufzeit")
+	group := fs.String("group", "", "IdP group (required)")
+	issuer := fs.String("issuer", "", "issuer of the group (default: token's issuer)")
+	tagsFlag := fs.String("tags", "", "tag selector, e.g. env=prod,role=web (empty = all hosts)")
+	principalsFlag := fs.String("principals", "", "target principals, e.g. deploy,root (required)")
+	sudo := fs.Bool("sudo", false, "mark as sudo permission")
+	maxValidity := fs.Duration("max-validity", 16*time.Hour, "maximum certificate validity")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	principals := splitList(*principalsFlag)
 	if *group == "" || len(principals) == 0 {
-		fmt.Fprintln(stderr, "gssh-admin: --group und --principals sind pflicht")
+		fmt.Fprintln(stderr, "gssh-admin: --group and --principals are required")
 		return 2
 	}
 	tags, err := parseTags(*tagsFlag)
@@ -279,7 +284,7 @@ func runGrantCreate(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "grant angelegt: %s (gruppe %s)\n", created.ID, created.Group)
+	fmt.Fprintf(stdout, "grant created: %s (group %s)\n", created.ID, created.Group)
 	return 0
 }
 
@@ -288,10 +293,10 @@ func runGrantUpdate(ctx context.Context, args []string, stdout, stderr io.Writer
 	fs.SetOutput(stderr)
 	var common commonFlags
 	common.register(fs)
-	tagsFlag := fs.String("tags", "", "neuer tag-selektor (k=v,…)")
-	principalsFlag := fs.String("principals", "", "neue ziel-principals (komma-liste)")
-	sudo := fs.Bool("sudo", false, "sudo-berechtigung")
-	maxValidity := fs.Duration("max-validity", 0, "neue maximale laufzeit")
+	tagsFlag := fs.String("tags", "", "new tag selector (k=v,…)")
+	principalsFlag := fs.String("principals", "", "new target principals (comma list)")
+	sudo := fs.Bool("sudo", false, "sudo permission")
+	maxValidity := fs.Duration("max-validity", 0, "new maximum validity")
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		fmt.Fprintln(stderr, "gssh-admin: grant update <id> [flags]")
 		return 2
@@ -331,7 +336,7 @@ func runGrantUpdate(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "grant aktualisiert: %s (gruppe %s)\n", updated.ID, updated.Group)
+	fmt.Fprintf(stdout, "grant updated: %s (group %s)\n", updated.ID, updated.Group)
 	return 0
 }
 
@@ -355,7 +360,7 @@ func runGrantDelete(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := apiClient.deleteGrant(ctx, id); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "grant gelöscht: %s\n", id)
+	fmt.Fprintf(stdout, "grant deleted: %s\n", id)
 	return 0
 }
 
@@ -364,7 +369,7 @@ func runApplyCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	fs.SetOutput(stderr)
 	var common commonFlags
 	common.register(fs)
-	file := fs.String("f", "", "pfad zur grants.yaml (pflicht)")
+	file := fs.String("f", "", "path to grants.yaml (required)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -384,14 +389,14 @@ func runApplyCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "abgleich fertig: %d angelegt, %d aktualisiert, %d gelöscht, %d unverändert\n",
+	fmt.Fprintf(stdout, "sync complete: %d created, %d updated, %d deleted, %d unchanged\n",
 		result.Created, result.Updated, result.Deleted, result.Unchanged)
 	if ciPresent {
 		ciResult, err := apiClient.applyCIGrants(ctx, ciGrants)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		fmt.Fprintf(stdout, "ci-abgleich fertig: %d angelegt, %d aktualisiert, %d gelöscht, %d unverändert\n",
+		fmt.Fprintf(stdout, "ci-sync complete: %d created, %d updated, %d deleted, %d unchanged\n",
 			ciResult.Created, ciResult.Updated, ciResult.Deleted, ciResult.Unchanged)
 	}
 	return 0

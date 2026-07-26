@@ -2,10 +2,11 @@
 
 package e2e
 
-// Kubernetes-Manifeste und Konfigurationen der E2E-Umgebung als Templates;
-// Platzhalter {{NS}}, {{ALICE_OTHERGROUPS}} … werden via render() ersetzt.
+// Kubernetes manifests and configurations of the E2E environment as
+// templates; placeholders {{NS}}, {{ALICE_OTHERGROUPS}} … are replaced via
+// render().
 
-// postgresYAML ist die Wegwerf-Datenbank (analog hack/flux-upgrade-test.sh).
+// postgresYAML is the throwaway database (analogous to hack/flux-upgrade-test.sh).
 const postgresYAML = `
 apiVersion: apps/v1
 kind: Deployment
@@ -40,10 +41,10 @@ spec:
   ports: [{port: 5432}]
 `
 
-// glauthConfig ist das Mini-LDAP mit statischen Benutzern und Gruppen.
-// Dex kann bei staticPasswords keine Gruppen liefern — GLAuth stellt sie über
-// den LDAP-Connector bereit. Offboarding = alice aus "dev" (5502) entfernen
-// (ALICE_OTHERGROUPS umschreiben) + GLAuth-Restart.
+// glauthConfig is the mini LDAP with static users and groups. Dex cannot
+// deliver groups with staticPasswords — GLAuth provides them via the LDAP
+// connector. Offboarding = remove alice from "dev" (5502) (rewrite
+// ALICE_OTHERGROUPS) + GLAuth restart.
 const glauthConfig = `
 [ldap]
   enabled = true
@@ -90,7 +91,7 @@ const glauthConfig = `
   gidnumber = 5503
 `
 
-// glauthYAML deployt GLAuth mit der Konfiguration aus der ConfigMap.
+// glauthYAML deploys GLAuth with the configuration from the ConfigMap.
 const glauthYAML = `
 apiVersion: apps/v1
 kind: Deployment
@@ -105,8 +106,8 @@ spec:
       labels: {app: glauth}
     spec:
       containers:
-        # Kein args-Override: der Image-Entrypoint (dumb-init + Start-Skript)
-        # liest /app/config/config.cfg — genau dorthin mountet die ConfigMap.
+        # No args override: the image entrypoint (dumb-init + start script)
+        # reads /app/config/config.cfg — exactly where the ConfigMap is mounted.
         - name: glauth
           image: glauth/glauth:v2.3.2
           ports: [{containerPort: 3893}]
@@ -128,9 +129,10 @@ spec:
   ports: [{port: 3893}]
 `
 
-// dexConfig: Dex mit statischem Public-Client (gssh-cli) und LDAP-Connector
-// gegen GLAuth; passwordConnector erlaubt den Resource-Owner-Password-Grant
-// (Admin-Token der Suite), skipApprovalScreen strafft den Device-Flow.
+// dexConfig: Dex with a static public client (gssh-cli) and LDAP connector
+// against GLAuth; passwordConnector allows the resource owner password
+// grant (admin token of the suite), skipApprovalScreen streamlines the
+// device flow.
 const dexConfig = `
 issuer: http://dex.{{NS}}.svc.cluster.local:5556/dex
 storage:
@@ -208,8 +210,8 @@ spec:
   ports: [{port: 5556}]
 `
 
-// gitlabFakeNginx serviert Discovery + JWKS des simulierten GitLab-OIDC
-// (statisches JSON reicht — Job-Tokens signiert die Suite selbst).
+// gitlabFakeNginx serves discovery + JWKS of the simulated GitLab OIDC
+// (static JSON is enough — the suite signs job tokens itself).
 const gitlabFakeNginx = `
 server {
   listen 80;
@@ -255,8 +257,9 @@ spec:
   ports: [{port: 80}]
 `
 
-// testhostYAML ist ein sshd-Testhost ({{NAME}}: testhost-web/testhost-db);
-// enrollt wird per kubectl exec, danach startet der Entrypoint agentd + sshd.
+// testhostYAML is an sshd test host ({{NAME}}: testhost-web/testhost-db);
+// enrollment happens via kubectl exec, then the entrypoint starts agentd +
+// sshd.
 const testhostYAML = `
 apiVersion: apps/v1
 kind: Deployment
@@ -285,8 +288,8 @@ spec:
   ports: [{port: 22}]
 `
 
-// workstationYAML ist der "Mensch": alpine + openssh-client + gssh-Binary,
-// ssh-agent unter /tmp/agent.sock, gssh-Konfiguration aus der ConfigMap.
+// workstationYAML is the "human": alpine + openssh-client + gssh binary,
+// ssh-agent under /tmp/agent.sock, gssh configuration from the ConfigMap.
 const workstationYAML = `
 apiVersion: v1
 kind: Pod
@@ -304,7 +307,7 @@ spec:
       configMap: {name: gssh-config}
 `
 
-// gsshConfig ist die CLI-Konfiguration der Workstation.
+// gsshConfig is the workstation's CLI configuration.
 const gsshConfig = `
 api_url: http://guided-ssh.{{NS}}.svc.cluster.local
 issuer: http://dex.{{NS}}.svc.cluster.local:5556/dex
@@ -312,10 +315,10 @@ client_id: gssh-cli
 scopes: [openid, profile, email, groups]
 `
 
-// helmValues konfiguriert das produktive Chart für die E2E-Umgebung.
-// GSSH_HOST_CERT_VALIDITY=3m macht die Host-Rotation (2/3 Laufzeit)
-// in Minuten beobachtbar; großzügiges Rate-Limit, weil alle Requests der
-// Suite über den Port-Forward von einer Client-IP kommen.
+// helmValues configures the production chart for the E2E environment.
+// GSSH_HOST_CERT_VALIDITY=3m makes host rotation (2/3 of the lifetime)
+// observable in minutes; a generous rate limit, because all of the suite's
+// requests come from a single client IP through the port-forward.
 const helmValues = `
 image:
   repository: gssh-e2e-server
@@ -344,9 +347,10 @@ config:
       value: 3m
 `
 
-// helmValuesInternal konfiguriert das Chart mit interner Test-Datenbank
-// (Postgres-Sidecar, internalDatabase.enabled): kein DB-Secret, nur das
-// CA-Secret — der Minimal-Pfad "ausprobieren ohne eigene Postgres-Instanz".
+// helmValuesInternal configures the chart with an internal test database
+// (Postgres sidecar, internalDatabase.enabled): no DB secret, only the CA
+// secret — the minimal path for "trying it out without your own Postgres
+// instance".
 const helmValuesInternal = `
 image:
   repository: gssh-e2e-server
@@ -362,8 +366,8 @@ config:
     trustProxy: false
 `
 
-// grantsBase: Ausgangszustand — Gruppe dev darf als deploy auf role=web-Hosts,
-// CI-Projekt platform/deploy (nur protected refs) ebenfalls.
+// grantsBase: initial state — group dev may act as deploy on role=web
+// hosts, CI project platform/deploy (protected refs only) as well.
 const grantsBase = `
 grants:
   - group: dev
@@ -380,7 +384,7 @@ ci_grants:
     max_validity: 1h
 `
 
-// grantsWithDB erweitert grantsBase um Zugriff auf role=db (Grant-Änderung).
+// grantsWithDB extends grantsBase with access to role=db (grant change).
 const grantsWithDB = `
 grants:
   - group: dev

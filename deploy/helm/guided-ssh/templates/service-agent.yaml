@@ -1,6 +1,6 @@
 {{- if and .Values.agent.enabled .Values.agent.service.enabled }}
-# Separater Service für die Agent-API (mTLS): Agents außerhalb des Clusters
-# brauchen TLS-Passthrough — daher kein Ingress, sondern i. d. R. LoadBalancer.
+# Separate service for the agent API (mTLS): agents outside the cluster
+# need TLS passthrough — hence no ingress, but usually a LoadBalancer instead.
 apiVersion: v1
 kind: Service
 metadata:

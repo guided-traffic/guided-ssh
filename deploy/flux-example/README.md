@@ -1,43 +1,43 @@
-# GitOps mit FluxCD — Referenz-Setup für guided-ssh
+# GitOps with FluxCD — reference setup for guided-ssh
 
-Dieses Verzeichnis ist die Vorlage für ein eigenständiges GitOps-Repo, das
-guided-ssh mit FluxCD betreibt: Helm-Release aus dem GitHub-Pages-Helm-Repo,
-Kustomize-Overlays pro Umgebung, SOPS-verschlüsselte Secrets und deklarative
-Zugriffsregeln (`grants.yaml`) mit periodischem Abgleich. Alle Images kommen
-aus `docker.io/guidedtraffic`.
+This directory is the template for a standalone GitOps repo that runs
+guided-ssh with FluxCD: Helm release from the GitHub Pages Helm repo,
+Kustomize overlays per environment, SOPS-encrypted secrets, and declarative
+access rules (`grants.yaml`) with periodic reconciliation. All images come
+from `docker.io/guidedtraffic`.
 
-## Repo-Struktur
+## Repo structure
 
 ```
 .
-├── .sops.yaml                      # SOPS-Regel: secrets.yaml → age-verschlüsselt
+├── .sops.yaml                      # SOPS rule: secrets.yaml → age-encrypted
 ├── clusters/
-│   ├── production/guided-ssh.yaml  # Flux-Kustomization → apps/overlays/production
-│   └── staging/guided-ssh.yaml     # Flux-Kustomization → apps/overlays/staging
+│   ├── production/guided-ssh.yaml  # Flux Kustomization → apps/overlays/production
+│   └── staging/guided-ssh.yaml     # Flux Kustomization → apps/overlays/staging
 └── apps/
     ├── base/guided-ssh/
     │   ├── namespace.yaml
     │   ├── helmrepository.yaml     # https://guided-traffic.github.io/guided-ssh
-    │   ├── helmrelease.yaml        # Chart guided-ssh, Version gepinnt
-    │   ├── sync-config.yaml        # gssh-admin-Konfiguration (api_url, issuer)
-    │   └── grants-sync-cronjob.yaml# gssh-admin apply alle 15 min
+    │   ├── helmrelease.yaml        # Chart guided-ssh, version pinned
+    │   ├── sync-config.yaml        # gssh-admin configuration (api_url, issuer)
+    │   └── grants-sync-cronjob.yaml# gssh-admin apply every 15 min
     └── overlays/
-        ├── staging/                # Version-Range, Staging-IdP/-Ingress
-        │   ├── grants.yaml         # Zielzustand der Zugriffsregeln
-        │   └── secrets.yaml        # SOPS-verschlüsselt committen!
-        └── production/             # exakter Pin, Prod-Werte, 2 Replikas
+        ├── staging/                # version range, staging IdP/ingress
+        │   ├── grants.yaml         # target state of the access rules
+        │   └── secrets.yaml        # commit SOPS-encrypted!
+        └── production/             # exact pin, prod values, 2 replicas
 ```
 
-`HelmRepository` zeigt auf das GitHub-Pages-Helm-Repo, das der
-`chart-release`-Workflow bei jedem Chart-Version-Bump aktualisiert
-(siehe `deploy/helm/guided-ssh/README.md`). Die `HelmRelease` referenziert
-es; Umgebungsunterschiede sind reine Kustomize-Patches auf `values`.
+`HelmRepository` points to the GitHub Pages Helm repo that the
+`chart-release` workflow updates on every chart version bump
+(see `deploy/helm/guided-ssh/README.md`). `HelmRelease` references
+it; environment differences are pure Kustomize patches on `values`.
 
 ## Bootstrap
 
-Flux in den Cluster bootstrappen und auf das GitOps-Repo zeigen lassen —
-dabei entsteht die `GitRepository` `flux-system`, auf die die
-Cluster-Kustomizationen verweisen:
+Bootstrap Flux into the cluster and point it at the GitOps repo — this
+creates the `GitRepository` `flux-system` that the cluster Kustomizations
+reference:
 
 ```sh
 flux bootstrap github \
@@ -45,191 +45,190 @@ flux bootstrap github \
   --branch=main --path=clusters/production
 ```
 
-Die Datei `clusters/production/guided-ssh.yaml` liegt im Bootstrap-Pfad und
-wird damit automatisch angewendet; sie synct `apps/overlays/production` mit
-`prune: true` (gelöschte Manifeste verschwinden auch im Cluster) und
-`wait: true` (Kustomization wird erst ready, wenn das HelmRelease ready ist).
+The file `clusters/production/guided-ssh.yaml` sits in the bootstrap path and
+is therefore applied automatically; it syncs `apps/overlays/production` with
+`prune: true` (deleted manifests also disappear from the cluster) and
+`wait: true` (the Kustomization only becomes ready once the HelmRelease is
+ready).
 
-## Secrets mit SOPS (age)
+## Secrets with SOPS (age)
 
-Einmalig einen age-Key erzeugen und den **privaten** Schlüssel als Secret in
-den Cluster legen — nur Flux (kustomize-controller) kann damit entschlüsseln:
+Generate an age key once and put the **private** key into the cluster as a
+secret — only Flux (kustomize-controller) can decrypt with it:
 
 ```sh
-age-keygen -o age.agekey            # public key notieren, private key sichern
+age-keygen -o age.agekey            # note the public key, secure the private key
 kubectl -n flux-system create secret generic sops-age \
   --from-file=age.agekey=age.agekey
 ```
 
-Den Public-Key in `.sops.yaml` eintragen (der eingetragene Wert ist ein
-Beispiel). Danach werden alle `secrets.yaml` vor dem Commit verschlüsselt:
+Enter the public key in `.sops.yaml` (the value checked in there is a
+placeholder). After that, every `secrets.yaml` gets encrypted before commit:
 
 ```sh
 sops --encrypt --in-place apps/overlays/production/secrets.yaml
 ```
 
-`encrypted_regex: ^(data|stringData)$` lässt Metadaten lesbar — Diffs bleiben
-reviewbar. Die Cluster-Kustomization entschlüsselt beim Apply
-(`decryption.provider: sops`, `secretRef: sops-age`). Die hier eingecheckten
-`secrets.yaml` sind Platzhalter-Beispiele; im echten Repo niemals Klartext
-committen. Das Chart selbst erzeugt keine Secrets, es referenziert nur
-existierende Secrets (`secrets.db.existingSecret` mit den einzelnen
-Postgres-Verbindungsdaten, `secrets.ca.existingSecret` mit dem CA-Master-Key,
-optional `secrets.ca.selfManaged.existingSecret` mit den CA-Keys)
-— SOPS und external-secrets sind damit gleichwertig austauschbar.
+`encrypted_regex: ^(data|stringData)$` leaves metadata readable — diffs stay
+reviewable. The cluster Kustomization decrypts on apply
+(`decryption.provider: sops`, `secretRef: sops-age`). The `secrets.yaml`
+files checked in here are placeholder examples; never commit plaintext in
+the real repo. The chart itself never creates secrets, it only references
+existing secrets (`secrets.db.existingSecret` with the individual Postgres
+connection data, `secrets.ca.existingSecret` with the CA master key,
+optionally `secrets.ca.selfManaged.existingSecret` with the CA keys)
+— SOPS and external-secrets are therefore equally interchangeable.
 
-## Self-managed CA-Keys
+## Self-managed CA keys
 
-Im Default-Modus (`secrets.ca.mode: managed`) erzeugt der Server die
-CA-Private-Keys beim ersten Start und legt sie verschlüsselt in der Datenbank
-ab — die Datenbank ist damit der Trust-Anchor und lässt sich nicht per Git
-verwalten. Mit `self-managed` kommen alle drei CAs (Benutzer-CA, Host-CA,
-Agent-mTLS-CA) aus einem gemounteten Secret; die Datenbank hält nur noch die
-öffentlichen Metadaten, und **dieses Repo wird die Quelle der Wahrheit für die
-CA**. Hintergrund, Fehlerbilder und Startup-Fehlermeldungen:
+In the default mode (`secrets.ca.mode: managed`), the server generates the
+CA private keys on first start and stores them encrypted in the database —
+the database is therefore the trust anchor and cannot be managed via Git.
+With `self-managed`, all three CAs (user CA, host CA, agent mTLS CA) come
+from a mounted secret; the database only holds the public metadata, and
+**this repo becomes the source of truth for the CA**. Background, failure
+modes, and startup error messages:
 [docs/self-managed-ca.md](../../docs/self-managed-ca.md).
 
-### Einmalige Erzeugung
+### One-time generation
 
 ```sh
 ssh-keygen -t ed25519 -f user-ca -N '' -C 'guided-ssh user ca'
 ssh-keygen -t ed25519 -f host-ca -N '' -C 'guided-ssh host ca'
-gssh-server gen-mtls-ca -out mtls-ca      # erzeugt mtls-ca.key (0600) + mtls-ca.crt
+gssh-server gen-mtls-ca -out mtls-ca      # generates mtls-ca.key (0600) + mtls-ca.crt
 ```
 
-Ins Secret gehören nur die **privaten** Dateien (`user-ca`, `host-ca`,
-`mtls-ca.key`) plus das Zertifikat `mtls-ca.crt` — **nicht** die
-`.pub`-Dateien; die öffentlichen Schlüssel leitet der Server selbst ab. Die
-Keys müssen unverschlüsselt sein (kein Passphrase-Schutz), sonst verweigert
-der Server den Start.
+Only the **private** files (`user-ca`, `host-ca`, `mtls-ca.key`) plus the
+certificate `mtls-ca.crt` belong in the secret — **not** the `.pub` files;
+the server derives the public keys itself. The keys must be unencrypted (no
+passphrase protection), otherwise the server refuses to start.
 
-Die vier Dateien als `stringData` in
-`apps/overlays/<env>/secrets.yaml` eintragen (Vorlage: Secret
-`guided-ssh-ca-keys` in `apps/overlays/production/secrets.yaml` — die dort
-eingetragenen Keys sind öffentlich bekannte Wegwerf-Beispiele und **müssen**
-ersetzt werden) und anschließend verschlüsseln:
+Enter the four files as `stringData` in
+`apps/overlays/<env>/secrets.yaml` (template: secret
+`guided-ssh-ca-keys` in `apps/overlays/production/secrets.yaml` — the keys
+checked in there are publicly known throwaway examples and **must** be
+replaced) and then encrypt:
 
 ```sh
 sops --encrypt --in-place apps/overlays/production/secrets.yaml
 ```
 
-### Aktivieren
+### Activation
 
-Der Modus ist eine Chart-Value, gehört also in den HelmRelease-Patch der
-Umgebung (`apps/overlays/<env>/helmrelease-patch.yaml`):
+The mode is a chart value, so it belongs in the environment's HelmRelease
+patch (`apps/overlays/<env>/helmrelease-patch.yaml`):
 
 ```yaml
   values:
     secrets:
       ca:
         mode: self-managed
-        # Master-Key bleibt Pflicht: er leitet den Session-Key der Web-UI ab.
+        # Master key remains mandatory: it derives the web UI's session key.
         existingSecret: guided-ssh-ca
         selfManaged:
           existingSecret: guided-ssh-ca-keys
 ```
 
-Beim Start übernimmt der Server die gemounteten Keys in die Tabelle `ca_keys`
-(ohne Private Key, Zustand `active`) — eine leere Datenbank plus dieses Repo
-reproduziert damit dieselbe CA.
+On start, the server picks up the mounted keys into the `ca_keys` table
+(without the private key, state `active`) — an empty database plus this repo
+therefore reproduces the same CA.
 
 ### Rotation
 
-Rotation ist ein Commit, kein Eingriff am laufenden System:
+Rotation is a commit, not an intervention on the running system:
 
-1. Neues Schlüsselpaar erzeugen (Kommandos oben, in ein leeres Verzeichnis).
-2. Den Dateiinhalt im SOPS-verschlüsselten Secret ersetzen (`sops
-   apps/overlays/production/secrets.yaml`), committen, mergen — Flux rollt das
-   Deployment neu aus.
-3. Beim Start übernimmt der Server den neuen Key als `active` und setzt den
-   bisherigen auf `retiring`. Dessen **Public Key bleibt im CA-Bundle**
-   (`GET /v1/ca/bundle/{user|host}`), Hosts vertrauen also weiter den bereits
-   ausgestellten Zertifikaten; die Agenten holen das Bundle stündlich.
-4. Sind alle mit dem alten Key signierten Zertifikate abgelaufen
-   (Benutzer-Zertifikate ≤ 16 h, Host-Zertifikate 30 Tage), den alten Key
-   endgültig zurückziehen — derzeit per SQL, ein Admin-Kommando fehlt noch:
+1. Generate a new key pair (commands above, into an empty directory).
+2. Replace the file content in the SOPS-encrypted secret (`sops
+   apps/overlays/production/secrets.yaml`), commit, merge — Flux rolls out
+   the deployment again.
+3. On start, the server adopts the new key as `active` and sets the
+   previous one to `retiring`. Its **public key stays in the CA bundle**
+   (`GET /v1/ca/bundle/{user|host}`), so hosts keep trusting already-issued
+   certificates; agents fetch the bundle hourly.
+4. Once all certificates signed with the old key have expired
+   (user certificates ≤ 16 h, host certificates 30 days), retire the old key
+   for good — currently via SQL, an admin command is still missing:
 
    ```sql
    UPDATE ca_keys SET state = 'retired', retired_at = now()
     WHERE purpose = 'user' AND state = 'retiring';
    ```
 
-Ein bereits auf `retired` gesetzter Key darf nicht erneut gemountet werden —
-der Server bricht dann beim Start mit einer entsprechenden Meldung ab.
+A key already set to `retired` must not be mounted again — the server then
+aborts on start with a corresponding message.
 
-Das Übergangsfenster gilt nur für die SSH-CAs: Client-Zertifikate der Agenten
-prüft der Server ausschließlich gegen die **aktive** mTLS-CA. Ein Wechsel von
-`mtls-ca.key`/`mtls-ca.crt` macht alle ausgestellten Agent-Zertifikate
-ungültig und erfordert ein Re-Enrollment der Hosts — die drei Dateien also
-nicht „mitrotieren", wenn nur die Benutzer-CA getauscht werden soll.
+The transition window only applies to the SSH CAs: the server checks the
+agents' client certificates exclusively against the **active** mTLS CA.
+Rotating `mtls-ca.key`/`mtls-ca.crt` invalidates all issued agent
+certificates and requires re-enrollment of the hosts — so don't "co-rotate"
+these three files when only the user CA is meant to be swapped.
 
-## Grants deklarativ (GitOps)
+## Declarative grants (GitOps)
 
-`apps/overlays/<env>/grants.yaml` ist der versionierte Zielzustand der
-Zugriffsregeln (Format: `docs/grants.md`). Der CronJob
-`guided-ssh-grants-sync` ruft alle 15 Minuten `gssh-admin apply -f
-grants.yaml` gegen die Admin-API auf — Änderungen an Zugriffsregeln laufen
-damit als reviewbarer Merge-Request; was in der Datei fehlt, wird gelöscht.
-Sofort statt zum nächsten Tick:
+`apps/overlays/<env>/grants.yaml` is the versioned target state of the
+access rules (format: `docs/grants.md`). The CronJob
+`guided-ssh-grants-sync` calls `gssh-admin apply -f grants.yaml` against the
+admin API every 15 minutes — changes to access rules thus run as a
+reviewable merge request; whatever is missing from the file gets deleted.
+Immediately instead of waiting for the next tick:
 
 ```sh
 kubectl -n guided-ssh create job --from=cronjob/guided-ssh-grants-sync sync-now
 ```
 
-### IdP-Service-Account für den Sync
+### IdP service account for the sync
 
-`gssh-admin` authentifiziert sich im CronJob nicht-interaktiv per
-Client-Credentials-Flow (`GSSH_CLIENT_ID`/`GSSH_CLIENT_SECRET`). Das
-ausgestellte ID-Token muss vom Server wie ein Benutzer-Token verifizierbar
-sein: Issuer = `GSSH_OIDC_ISSUER`, Audience enthält `GSSH_OIDC_CLIENT_ID`,
-`groups`-Claim enthält die Admin-Gruppe. Einrichtung in Keycloak:
+`gssh-admin` authenticates non-interactively in the CronJob via the
+client-credentials flow (`GSSH_CLIENT_ID`/`GSSH_CLIENT_SECRET`). The issued
+ID token must be verifiable by the server like a user token: issuer =
+`GSSH_OIDC_ISSUER`, audience contains `GSSH_OIDC_CLIENT_ID`, the `groups`
+claim contains the admin group. Setup in Keycloak:
 
-1. Client `gssh-grants-sync` anlegen: confidential („Client authentication“
-   an), **Service accounts roles** aktivieren, Standard/Direct-Flows aus.
-2. Dedizierte Client-Scope-Mapper des Clients:
-   - **Audience**-Mapper: `GSSH_OIDC_CLIENT_ID` (z. B. `gssh-cli`) in die
-     Token-Audience aufnehmen („Add to ID token“ an).
-   - **Group Membership**-Mapper: Claim `groups` („Full group path“ aus,
-     „Add to ID token“ an).
-3. Den Service-Account-Benutzer `service-account-gssh-grants-sync` in die
-   Admin-Gruppe (`GSSH_ADMIN_GROUP`, z. B. `gssh-admins`) aufnehmen.
-4. Client-Secret in `secrets.yaml` (`guided-ssh-sync-oidc/client-secret`)
-   eintragen und mit SOPS verschlüsseln.
+1. Create client `gssh-grants-sync`: confidential ("Client authentication"
+   on), enable **Service accounts roles**, standard/direct flows off.
+2. Dedicated client scope mappers on the client:
+   - **Audience** mapper: add `GSSH_OIDC_CLIENT_ID` (e.g. `gssh-cli`) to the
+     token audience ("Add to ID token" on).
+   - **Group Membership** mapper: claim `groups` ("Full group path" off,
+     "Add to ID token" on).
+3. Add the service account user `service-account-gssh-grants-sync` to the
+   admin group (`GSSH_ADMIN_GROUP`, e.g. `gssh-admins`).
+4. Enter the client secret in `secrets.yaml`
+   (`guided-ssh-sync-oidc/client-secret`) and encrypt it with SOPS.
 
-Der Scope `openid` muss dem Client zugewiesen sein, damit die Token-Antwort
-ein `id_token` enthält.
+The scope `openid` must be assigned to the client so the token response
+contains an `id_token`.
 
-## Upgrade-Pfad
+## Upgrade path
 
-Chart-Releases entstehen im Produkt-Repo (Chart-Version-Bump → Tag
-`guided-ssh-x.y.z` → GitHub Pages `index.yaml`). Rollout per Flux:
+Chart releases originate in the product repo (chart version bump → tag
+`guided-ssh-x.y.z` → GitHub Pages `index.yaml`). Rollout via Flux:
 
-- **staging** folgt `>=0.1.0 <0.2.0` automatisch: Flux prüft das Helm-Repo
-  im `chart.spec.interval` und rollt neue Patch-/Minor-Versionen ohne Commit
-  aus — Frühwarnung vor production.
-- **production** pinnt exakt. Upgrade = `version:` in
-  `apps/overlays/production/helmrelease-patch.yaml` bumpen, Merge-Request,
-  merge; Flux führt das `helm upgrade` aus.
+- **staging** follows `>=0.1.0 <0.2.0` automatically: Flux checks the Helm
+  repo on `chart.spec.interval` and rolls out new patch/minor versions
+  without a commit — an early warning ahead of production.
+- **production** pins exactly. Upgrade = bump `version:` in
+  `apps/overlays/production/helmrelease-patch.yaml`, merge request,
+  merge; Flux runs the `helm upgrade`.
 
-DB-Migrationen laufen bei jedem Rollout automatisch: Init-Container
-`migrate` (goose) vor dem Server, ein Postgres-Advisory-Lock serialisiert
-parallele Replikas. Schlägt das Upgrade fehl, greift
-`upgrade.remediation.retries` (Helm-Rollback durch Flux); Migrationen sind
-vorwärts-only und müssen deshalb abwärtskompatibel zur Vorversion sein.
+DB migrations run automatically on every rollout: init container `migrate`
+(goose) before the server, a Postgres advisory lock serializes parallel
+replicas. If the upgrade fails, `upgrade.remediation.retries` kicks in
+(Helm rollback via Flux); migrations are forward-only and must therefore be
+backward-compatible with the previous version.
 
-Der komplette Pfad (Bump → Flux-Reconcile → Migration → Ready) ist
-automatisiert testbar: `hack/flux-upgrade-test.sh` baut einen kind-Cluster
-mit Flux, installiert Chart-Version A aus einem lokalen Helm-Repo, bumpt auf
-Version B und verifiziert Rollout und Migrationslauf.
+The complete path (bump → Flux reconcile → migration → ready) is
+automatically testable: `hack/flux-upgrade-test.sh` builds a kind cluster
+with Flux, installs chart version A from a local Helm repo, bumps to
+version B, and verifies the rollout and migration run.
 
-## Betriebsnotizen
+## Operational notes
 
-- Das Image des Sync-CronJobs (`docker.io/guidedtraffic/guided-ssh:<tag>`)
-  zur ausgerollten `appVersion` passend halten — `gssh-admin` liegt im
-  Server-Image (distroless, Command wird überschrieben).
-- `grants.yaml` wird ohne Hash-Suffix als ConfigMap generiert: Job-Pods
-  starten frisch und lesen immer den aktuellen Stand; ein Rolling-Update
-  wie bei Deployments ist nicht nötig.
-- Agent-mTLS braucht TLS-Passthrough: die Agent-API läuft über den
-  separaten Service (production: `type: LoadBalancer`), nicht über den
-  HTTP-Ingress.
+- Keep the sync CronJob's image (`docker.io/guidedtraffic/guided-ssh:<tag>`)
+  matching the rolled-out `appVersion` — `gssh-admin` lives in the server
+  image (distroless, command gets overridden).
+- `grants.yaml` is generated as a ConfigMap without a hash suffix: job pods
+  start fresh and always read the current state; a rolling update like for
+  deployments is not needed.
+- Agent mTLS needs TLS passthrough: the agent API runs through the separate
+  service (production: `type: LoadBalancer`), not through the HTTP ingress.

@@ -36,7 +36,7 @@ metadata; the Git repository becomes the source of truth for the CA.
 and `Bundle()` builds the `TrustedUserCAKeys` content from
 `ca_keys.public_key` ([internal/ca/ca.go](internal/ca/ca.go#L196)). The
 schema already anticipates external keys: `encrypted_private_key` is nullable
-("NULL, wenn der Key in einem KMS/HSM liegt", Phase 10 comment).
+("NULL when the key lives in a KMS/HSM", Phase 10 comment).
 
 In self-managed mode the row contains only purpose, algorithm, public key,
 and state — no secret. The row is **derived state**: it can always be

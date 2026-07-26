@@ -1,15 +1,15 @@
 #!/bin/sh
-# guided-ssh One-Command-Host-Install — vom Server getemplatet (Version {{.Version}}).
+# guided-ssh one-command host install — templated by the server (version {{.Version}}).
 #
 #   curl -fsSL {{.BaseURL}}/install.sh | sudo sh -s -- --token gssh-et-…
 #
-# Server-URL, Agent-URL, SPKI-Pin, Binary-Hashes und die systemd-Unit stecken
-# bereits in diesem Script; variabel sind nur Token und Flags.
+# Server URL, agent URL, SPKI pin, binary hashes, and the systemd unit are
+# already baked into this script; only the token and flags vary.
 #
-# POSIX-sh, bewusst ohne pipefail (in dash/busybox nicht verlässlich) — Fehler
-# in Pipes werden über Exit-Codes geprüft.
-# Das gesamte Script steckt in main(); der Aufruf steht in der letzten Zeile,
-# damit eine abgebrochene Übertragung kein halbes Script ausführt.
+# POSIX sh, deliberately without pipefail (not reliable in dash/busybox) —
+# errors in pipes are checked via exit codes.
+# The entire script lives in main(); the call is on the last line so an
+# interrupted transfer never executes half a script.
 set -eu
 
 SERVER_URL='{{.BaseURL}}'
@@ -23,12 +23,12 @@ UNIT=/etc/systemd/system/gssh-agentd.service
 STATE=/var/lib/guided-ssh
 SOCKET="$STATE/agentd.sock"
 
-# tmp hält das heruntergeladene Binary bis zum atomaren mv; der EXIT-Trap räumt
-# es weg, falls das Script vorher abbricht.
+# tmp holds the downloaded binary until the atomic mv; the EXIT trap cleans
+# it up if the script aborts beforehand.
 tmp=''
 
 fail() {
-    echo "gssh-install: fehler: $*" >&2
+    echo "gssh-install: error: $*" >&2
     exit 1
 }
 
@@ -40,18 +40,18 @@ cleanup() {
 
 usage() {
     cat >&2 <<'USAGE_EOF'
-aufruf: install.sh --token <enrollment-token> [--arch amd64|arm64]
+usage: install.sh --token <enrollment-token> [--arch amd64|arm64]
                    [--session-audit] [--no-systemd]
 
-  --token          einmaliges Enrollment-Token (Pflicht)
-  --arch           Ziel-Architektur; ohne Angabe aus `uname -m`
-  --session-audit  Host-Session-/sudo-Audit aktivieren (pam_exec, opt-in)
-  --no-systemd     Unit nur schreiben, nicht aktivieren (Hosts ohne systemd)
+  --token          one-time enrollment token (required)
+  --arch           target architecture; defaults to `uname -m`
+  --session-audit  enable host session/sudo audit (pam_exec, opt-in)
+  --no-systemd     only write the unit, don't enable it (hosts without systemd)
 USAGE_EOF
 }
 
-# arch_from_uname bildet `uname -m` auf die Namen der Agent-Binaries ab; leere
-# Ausgabe heißt „nicht unterstützt".
+# arch_from_uname maps `uname -m` onto the agent binary names; empty output
+# means "not supported".
 arch_from_uname() {
     case "$(uname -m)" in
         x86_64) echo amd64 ;;
@@ -60,8 +60,8 @@ arch_from_uname() {
     esac
 }
 
-# sha_for_arch liefert den erwarteten SHA-256 (Hex) des Binaries; leer, wenn für
-# die Architektur keines eingebettet ist.
+# sha_for_arch returns the expected SHA-256 (hex) of the binary; empty if
+# none is embedded for the architecture.
 sha_for_arch() {
     case "$1" in
 {{- range .Agents}}
@@ -71,9 +71,9 @@ sha_for_arch() {
     esac
 }
 
-# wait_ready wartet bis zu 10 s auf einen wirklich bereiten Daemon: aktive Unit
-# *und* vorhandener Socket. Bei Type=simple sagt `is-active` allein nur, dass
-# der Prozess gestartet wurde; den Socket legt der Agent erst bei Bereitschaft an.
+# wait_ready waits up to 10s for a truly ready daemon: active unit *and* an
+# existing socket. With Type=simple, `is-active` alone only says the process
+# started; the agent creates the socket only once it is ready.
 wait_ready() {
     i=0
     while [ "$i" -lt 10 ]; do
@@ -95,109 +95,111 @@ main() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --token) [ $# -ge 2 ] || fail "--token braucht einen wert"; token="$2"; shift 2 ;;
+            --token) [ $# -ge 2 ] || fail "--token requires a value"; token="$2"; shift 2 ;;
             --token=*) token="${1#--token=}"; shift ;;
-            --arch) [ $# -ge 2 ] || fail "--arch braucht einen wert"; arch="$2"; shift 2 ;;
+            --arch) [ $# -ge 2 ] || fail "--arch requires a value"; arch="$2"; shift 2 ;;
             --arch=*) arch="${1#--arch=}"; shift ;;
             --session-audit) session_audit=1; shift ;;
             --no-systemd) use_systemd=0; shift ;;
             -h|--help) usage; return 0 ;;
-            *) usage; fail "unbekanntes argument: $1" ;;
+            *) usage; fail "unknown argument: $1" ;;
         esac
     done
-    [ -n "$token" ] || { usage; fail "--token fehlt"; }
+    [ -n "$token" ] || { usage; fail "--token missing"; }
 
     trap cleanup EXIT
 
-    # 1. Vorbedingungen
-    [ "$(id -u)" = 0 ] || fail "bitte als root ausführen (sudo sh -s -- …)"
-    command -v curl >/dev/null 2>&1 || fail "curl fehlt — bitte installieren"
-    # Ohne sha256sum liefe die Hash-Prüfung (Schritt 4) in eine Fehldiagnose:
-    # deren stderr ist verworfen, die Meldung läse sich wie Manipulation.
-    command -v sha256sum >/dev/null 2>&1 || fail "sha256sum fehlt — bitte coreutils installieren"
-    command -v sshd >/dev/null 2>&1 || fail "sshd fehlt — bitte openssh-server installieren"
+    # 1. Preconditions
+    [ "$(id -u)" = 0 ] || fail "please run as root (sudo sh -s -- …)"
+    command -v curl >/dev/null 2>&1 || fail "curl missing — please install it"
+    # Without sha256sum, the hash check (step 4) would end up in a misleading
+    # diagnosis: its stderr is discarded, and the message would read like tampering.
+    command -v sha256sum >/dev/null 2>&1 || fail "sha256sum missing — please install coreutils"
+    command -v sshd >/dev/null 2>&1 || fail "sshd missing — please install openssh-server"
     if [ ! -f /etc/ssh/ssh_host_ed25519_key.pub ]; then
-        echo "gssh-install: erzeuge fehlende ssh-host-keys (ssh-keygen -A)"
-        ssh-keygen -A || fail "ssh-keygen -A fehlgeschlagen"
+        echo "gssh-install: generating missing ssh host keys (ssh-keygen -A)"
+        ssh-keygen -A || fail "ssh-keygen -A failed"
     fi
 
-    # 2. Pin-Guard — doppelter Boden. Das Server-Gate liefert dieses Script gar
-    #    nicht erst ohne Pin aus; ungepinnt enrollt wird trotzdem nie.
-    [ -n "$PIN" ] || fail "kein spki-pin im script — server-rollout nicht konfiguriert"
+    # 2. Pin guard — belt and suspenders. The server gate never serves this
+    #    script without a pin in the first place; enrollment without a pin
+    #    still never happens.
+    [ -n "$PIN" ] || fail "no spki pin in script — server rollout not configured"
 
-    # 3. Architektur bestimmen
+    # 3. Determine architecture
     if [ -z "$arch" ]; then
         arch="$(arch_from_uname)"
-        [ -n "$arch" ] || fail "architektur $(uname -m) nicht unterstützt — verfügbar: $ARCHES (ggf. --arch setzen)"
+        [ -n "$arch" ] || fail "architecture $(uname -m) not supported — available: $ARCHES (set --arch if needed)"
     fi
     sha="$(sha_for_arch "$arch")"
-    [ -n "$sha" ] || fail "kein agent-binary für arch '$arch' — verfügbar: $ARCHES"
+    [ -n "$sha" ] || fail "no agent binary for arch '$arch' — available: $ARCHES"
 
-    # 4. Binary laden und atomar tauschen. Das Tempfile liegt im Zielverzeichnis
-    #    (gleiche Partition), sonst wäre das mv ein nicht-atomarer Cross-Device-
-    #    Copy. Kein `systemctl stop` davor: rename(2) ersetzt auch das Binary
-    #    eines laufenden Daemons ohne ETXTBSY, der behält sein altes Inode.
-    echo "gssh-install: lade gssh-agentd $VERSION (linux/$arch)"
-    tmp="$(mktemp /usr/bin/.gssh-agentd.XXXXXX)" || fail "tempfile in /usr/bin anlegen fehlgeschlagen"
-    curl -fsSL "$SERVER_URL/v1/agents/linux/$arch" -o "$tmp" || fail "download von $SERVER_URL/v1/agents/linux/$arch fehlgeschlagen"
-    echo "$sha  $tmp" | sha256sum -c - >/dev/null 2>&1 || fail "sha256-prüfung fehlgeschlagen — binary verworfen"
+    # 4. Download the binary and swap it atomically. The tempfile lives in the
+    #    target directory (same partition), otherwise the mv would be a
+    #    non-atomic cross-device copy. No `systemctl stop` beforehand:
+    #    rename(2) replaces the binary of a running daemon too, without
+    #    ETXTBSY — it keeps its old inode.
+    echo "gssh-install: downloading gssh-agentd $VERSION (linux/$arch)"
+    tmp="$(mktemp /usr/bin/.gssh-agentd.XXXXXX)" || fail "creating tempfile in /usr/bin failed"
+    curl -fsSL "$SERVER_URL/v1/agents/linux/$arch" -o "$tmp" || fail "download from $SERVER_URL/v1/agents/linux/$arch failed"
+    echo "$sha  $tmp" | sha256sum -c - >/dev/null 2>&1 || fail "sha256 check failed — binary discarded"
     chmod 0755 "$tmp"
-    mv -f "$tmp" "$BIN" || fail "$BIN ersetzen fehlgeschlagen"
+    mv -f "$tmp" "$BIN" || fail "replacing $BIN failed"
     tmp=''
 
-    # 5. State-Verzeichnis (mTLS-Material, Konfiguration, Principals-Cache)
+    # 5. State directory (mTLS material, configuration, principals cache)
     mkdir -p "$STATE"
     chmod 700 "$STATE"
 
-    # 6. systemd-Unit. Bewusst /etc/systemd/system (nicht /lib — das gehört den
-    #    Paketen); Script- und deb/rpm-Install nicht mischen. Das Verzeichnis
-    #    fehlt auf Hosts ohne systemd (--no-systemd) — die Unit wird trotzdem
-    #    abgelegt, damit ein späterer systemd-Host sie vorfindet.
+    # 6. systemd unit. Deliberately /etc/systemd/system (not /lib — that
+    #    belongs to packages); don't mix script install and deb/rpm install.
+    #    The directory is missing on hosts without systemd (--no-systemd) —
+    #    the unit is written anyway, so a later systemd host finds it.
     mkdir -p "$(dirname "$UNIT")"
     cat >"$UNIT" <<'UNIT_EOF'
 {{.Unit}}UNIT_EOF
 
-    # 7. Enrollment — läuft immer, auch auf einem bereits enrollten Host. Ein
-    #    Re-Run derselben Zeile scheitert hier (Token einmalig verbraucht); mit
-    #    vorhandener config.yaml wird deshalb degradiert weitergemacht statt
-    #    abzubrechen, ohne sie ist der Abbruch hart.
+    # 7. Enrollment — always runs, even on an already-enrolled host. A
+    #    re-run of the same line fails here (token consumed once); with an
+    #    existing config.yaml we therefore continue in a degraded mode
+    #    instead of aborting, without it the abort is hard.
     set -- enroll --server "$SERVER_URL" --agent-url "$AGENT_URL" \
         --token "$token" --pin "$PIN" --require-pin
     if [ "$session_audit" = 1 ]; then
         set -- "$@" --session-audit
     fi
     if "$BIN" "$@"; then
-        echo "gssh-install: enrollment erfolgreich"
+        echo "gssh-install: enrollment successful"
     elif [ -f "$STATE/config.yaml" ]; then
         reused_enrollment=1
-        echo "gssh-install: WARNUNG: enrollment fehlgeschlagen — bestehendes enrollment aus $STATE/config.yaml wird weiterverwendet." >&2
+        echo "gssh-install: WARNING: enrollment failed — continuing to use the existing enrollment from $STATE/config.yaml." >&2
     else
-        fail "enrollment fehlgeschlagen und kein bestehendes $STATE/config.yaml — host nicht einsatzbereit"
+        fail "enrollment failed and no existing $STATE/config.yaml — host not ready for use"
     fi
 
-    # 8. Dienst starten
+    # 8. Start the service
     if [ "$use_systemd" = 0 ]; then
-        echo "gssh-install: --no-systemd — übersprungen: daemon-reload, enable/start, health-check"
-        echo "gssh-install: manuell aktivieren: systemctl daemon-reload && systemctl enable --now gssh-agentd"
+        echo "gssh-install: --no-systemd — skipped: daemon-reload, enable/start, health check"
+        echo "gssh-install: enable manually: systemctl daemon-reload && systemctl enable --now gssh-agentd"
     else
-        command -v systemctl >/dev/null 2>&1 || fail "systemctl nicht gefunden — mit --no-systemd erneut ausführen"
+        command -v systemctl >/dev/null 2>&1 || fail "systemctl not found — re-run with --no-systemd"
         systemctl daemon-reload
-        # `enable --now` startet eine bereits aktive Unit *nicht* neu — beim
-        # Upgrade liefe sonst weiter das alte Binary.
+        # `enable --now` does *not* restart an already-active unit — on
+        # upgrade the old binary would otherwise keep running.
         if systemctl is-active --quiet gssh-agentd; then
             systemctl restart gssh-agentd
         else
             systemctl enable --now gssh-agentd
         fi
-        # 9. Health-Check
-        wait_ready || fail "gssh-agentd wurde nicht bereit — diagnose: journalctl -u gssh-agentd -n 20"
-        echo "gssh-install: dienst aktiv, socket $SOCKET vorhanden"
+        # 9. Health check
+        wait_ready || fail "gssh-agentd did not become ready — diagnose with: journalctl -u gssh-agentd -n 20"
+        echo "gssh-install: service active, socket $SOCKET present"
     fi
 
-    # 10. Abschluss
-    echo "gssh-install: fertig — gssh-agentd $VERSION unter $BIN installiert"
+    # 10. Wrap-up
+    echo "gssh-install: done — gssh-agentd $VERSION installed at $BIN"
     if [ "$reused_enrollment" = 1 ]; then
-        echo "gssh-install: WARNUNG: das übergebene token wurde NICHT eingelöst; der host läuft mit seinem bisherigen enrollment weiter." >&2
+        echo "gssh-install: WARNING: the supplied token was NOT redeemed; the host keeps running with its previous enrollment." >&2
     fi
 }
 

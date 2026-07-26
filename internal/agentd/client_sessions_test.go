@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// Deckt RenewMTLS, SendSessions und setClientCert des apiClient ab (mTLS-
-// Harness aus client_test.go).
-func TestAPIClientRenewMTLSUndSessions(t *testing.T) {
+// Covers RenewMTLS, SendSessions, and setClientCert of the apiClient (mTLS
+// harness from client_test.go).
+func TestAPIClientRenewMTLSAndSessions(t *testing.T) {
 	var gotEvents atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/agent/renew-mtls", func(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +20,7 @@ func TestAPIClientRenewMTLSUndSessions(t *testing.T) {
 			CSR string `json:"csr"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CSR == "" {
-			http.Error(w, "csr fehlt", http.StatusBadRequest)
+			http.Error(w, "csr missing", http.StatusBadRequest)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"certificate": "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----"})
@@ -50,29 +50,29 @@ func TestAPIClientRenewMTLSUndSessions(t *testing.T) {
 		t.Errorf("SendSessions: %v", err)
 	}
 	if gotEvents.Load() != 2 {
-		t.Errorf("server hat %d events erhalten (2 erwartet)", gotEvents.Load())
+		t.Errorf("server received %d events (expected 2)", gotEvents.Load())
 	}
 
-	// setClientCert schaltet das Zertifikat für künftige Handshakes um
-	// (die Rotation nutzt das ohne Neustart) — hier nur der Umschalt-Pfad.
+	// setClientCert swaps the certificate for future handshakes (rotation
+	// uses this without a restart) — this only exercises the swap path.
 	client.setClientCert(tls.Certificate{})
 }
 
-func TestAPIClientRenewMTLSOhneZertifikat(t *testing.T) {
+func TestAPIClientRenewMTLSWithoutCertificate(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/agent/renew-mtls", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{})
 	})
 	mux.HandleFunc("POST /v1/agent/sessions", func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "kaputt", http.StatusInternalServerError)
+		http.Error(w, "broken", http.StatusInternalServerError)
 	})
 	client := newTestAgentAPI(t, mux)
 	ctx := context.Background()
 
 	if _, err := client.RenewMTLS(ctx, "csr"); err == nil {
-		t.Error("renew-mtls ohne zertifikat: fehler erwartet")
+		t.Error("renew-mtls without certificate: expected error")
 	}
 	if err := client.SendSessions(ctx, nil); err == nil {
-		t.Error("sessions 500: fehler erwartet")
+		t.Error("sessions 500: expected error")
 	}
 }
