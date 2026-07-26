@@ -1,0 +1,198 @@
+#!/bin/sh
+# guided-ssh client install — templated by the server (version {{.Version}}).
+#
+#   curl -fsSL {{.BaseURL}}/client.sh | sh
+#
+# Server URL, OIDC issuer, client ID, and the binary hashes are already baked
+# into this script; it needs no arguments, no token, and no root.
+#
+# POSIX sh, deliberately without pipefail (not reliable in dash/busybox) —
+# errors in pipes are checked via exit codes.
+# The entire script lives in main(); the call is on the last line so an
+# interrupted transfer never executes half a script.
+set -eu
+
+SERVER_URL='{{.BaseURL}}'
+ISSUER='{{.Issuer}}'
+CLIENT_ID='{{.ClientID}}'
+PIN='{{.Pin}}'
+PIN_HINT='{{.PinHint}}'
+VERSION='{{.Version}}'
+PLATFORMS='{{.PlatformList}}'
+
+# tmp holds the downloaded binary until the atomic mv; the EXIT trap cleans
+# it up if the script aborts beforehand.
+tmp=''
+
+fail() {
+    echo "gssh-install: error: $*" >&2
+    exit 1
+}
+
+cleanup() {
+    if [ -n "$tmp" ]; then
+        rm -f "$tmp"
+    fi
+}
+
+usage() {
+    cat >&2 <<'USAGE_EOF'
+usage: client.sh [--os linux|darwin] [--arch amd64|arm64]
+                 [--bin-dir <dir>] [--pin]
+
+  --os        target operating system; defaults to `uname -s`
+  --arch      target architecture; defaults to `uname -m`
+  --bin-dir   install directory; defaults to $HOME/.local/bin
+  --pin       write the server's SPKI pin into the configuration
+              (opt-in; only available with an operator-controlled pin source)
+USAGE_EOF
+}
+
+# os_from_uname / arch_from_uname map uname onto the binary names; empty
+# output means "not supported".
+os_from_uname() {
+    case "$(uname -s)" in
+        Linux) echo linux ;;
+        Darwin) echo darwin ;;
+        *) echo '' ;;
+    esac
+}
+
+arch_from_uname() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo amd64 ;;
+        aarch64|arm64) echo arm64 ;;
+        *) echo '' ;;
+    esac
+}
+
+# sha_for_platform returns the expected SHA-256 (hex) of the binary; empty if
+# none is embedded for the platform.
+sha_for_platform() {
+    case "$1/$2" in
+{{- range .Clients}}
+        {{.OS}}/{{.Arch}}) echo '{{.SHA256}}' ;;
+{{- end}}
+        *) echo '' ;;
+    esac
+}
+
+# verify_sha checks the download. macOS ships shasum instead of sha256sum —
+# but the check is never silently skipped: without either tool we abort.
+verify_sha() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        echo "$1  $2" | sha256sum -c - >/dev/null 2>&1
+    elif command -v shasum >/dev/null 2>&1; then
+        echo "$1  $2" | shasum -a 256 -c - >/dev/null 2>&1
+    else
+        fail "neither sha256sum nor shasum found — the download cannot be verified"
+    fi
+}
+
+main() {
+    os=''
+    arch=''
+    bindir=''
+    want_pin=0
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --os) [ $# -ge 2 ] || fail "--os requires a value"; os="$2"; shift 2 ;;
+            --os=*) os="${1#--os=}"; shift ;;
+            --arch) [ $# -ge 2 ] || fail "--arch requires a value"; arch="$2"; shift 2 ;;
+            --arch=*) arch="${1#--arch=}"; shift ;;
+            --bin-dir) [ $# -ge 2 ] || fail "--bin-dir requires a value"; bindir="$2"; shift 2 ;;
+            --bin-dir=*) bindir="${1#--bin-dir=}"; shift ;;
+            --pin) want_pin=1; shift ;;
+            -h|--help) usage; return 0 ;;
+            *) usage; fail "unknown argument: $1" ;;
+        esac
+    done
+
+    trap cleanup EXIT
+
+    # 1. Preconditions. Running as root would install into root's home — a
+    #    footgun, not a feature: this client confers no privileges, it belongs
+    #    to the user who logs in with it.
+    [ "$(id -u)" != 0 ] || fail "please run as your normal user, not as root/sudo — the client is installed into your home directory"
+    # --pin without a pin would silently downgrade to an unpinned config;
+    # checked before anything is downloaded.
+    if [ "$want_pin" = 1 ] && [ -z "$PIN" ]; then
+        fail "--pin requested, but this server offers no pin: $PIN_HINT"
+    fi
+    command -v curl >/dev/null 2>&1 || fail "curl missing — please install it"
+    if [ -z "$bindir" ]; then
+        [ -n "${HOME:-}" ] || fail "\$HOME is not set — please pass --bin-dir"
+        bindir="$HOME/.local/bin"
+    fi
+    config_dir="${XDG_CONFIG_HOME:-${HOME:-}/.config}/guided-ssh"
+    config="$config_dir/config.yaml"
+
+    # 2. Determine the platform
+    if [ -z "$os" ]; then
+        os="$(os_from_uname)"
+        [ -n "$os" ] || fail "operating system $(uname -s) not supported — available: $PLATFORMS (set --os if needed)"
+    fi
+    if [ -z "$arch" ]; then
+        arch="$(arch_from_uname)"
+        [ -n "$arch" ] || fail "architecture $(uname -m) not supported — available: $PLATFORMS (set --arch if needed)"
+    fi
+    sha="$(sha_for_platform "$os" "$arch")"
+    [ -n "$sha" ] || fail "no gssh binary for $os/$arch — available: $PLATFORMS"
+
+    # 3. Download the binary and swap it atomically. The tempfile lives in the
+    #    target directory (same partition), otherwise the mv would be a
+    #    non-atomic cross-device copy; rename(2) also replaces a currently
+    #    running gssh without ETXTBSY.
+    echo "gssh-install: downloading gssh $VERSION ($os/$arch)"
+    mkdir -p "$bindir" || fail "creating $bindir failed"
+    tmp="$(mktemp "$bindir/.gssh.XXXXXX")" || fail "creating tempfile in $bindir failed"
+    curl -fsSL "$SERVER_URL/v1/clients/$os/$arch" -o "$tmp" || fail "download from $SERVER_URL/v1/clients/$os/$arch failed"
+    verify_sha "$sha" "$tmp" || fail "sha256 check failed — binary discarded"
+    chmod 0755 "$tmp"
+    mv -f "$tmp" "$bindir/gssh" || fail "installing $bindir/gssh failed"
+    tmp=''
+
+    # 4. Configuration — never overwritten: it may point at another server or
+    #    carry a pin the user set deliberately. Editing the YAML is the
+    #    interface, the binary is updated regardless.
+    if [ -e "$config" ]; then
+        echo "gssh-install: existing configuration kept: $config"
+    else
+        umask 077
+        mkdir -p "$config_dir" || fail "creating $config_dir failed"
+        {
+            echo "api_url: \"$SERVER_URL\""
+            echo "issuer: \"$ISSUER\""
+            echo "client_id: \"$CLIENT_ID\""
+            if [ "$want_pin" = 1 ]; then
+                echo "pin_sha256: \"$PIN\""
+            fi
+        } >"$config" || fail "writing $config failed"
+        chmod 0600 "$config"
+        echo "gssh-install: configuration written: $config"
+    fi
+
+    # 5. PATH hint — not an error: the binary is installed either way.
+    case ":${PATH:-}:" in
+        *":$bindir:"*) ;;
+        *)
+            echo "gssh-install: $bindir is not in PATH — add this line to your shell profile:"
+            echo "    export PATH=\"$bindir:\$PATH\""
+            ;;
+    esac
+
+    # 6. Next steps. `gssh login` is deliberately not auto-executed: stdin is
+    #    the curl pipe, and the browser handoff plus the ssh-agent belong to
+    #    the user's shell.
+    echo "gssh-install: done — gssh $VERSION installed at $bindir/gssh"
+    cat <<'NEXT_EOF'
+
+next steps:
+    gssh login          # sign in via SSO
+    gssh ssh <host>     # connect
+    gssh integrate      # optional: snippet for native ssh/scp/IDEs
+NEXT_EOF
+}
+
+main "$@"

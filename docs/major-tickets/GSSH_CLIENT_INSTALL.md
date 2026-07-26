@@ -640,14 +640,14 @@ Shared ground with the host install is documented there
       `internal/clientdist/bin/`
 
 ### Phase B — Public Endpoints
-- [ ] B1: client gate (binaries, public_url(+https), oidc_issuer,
+- [x] B1: client gate (binaries, public_url(+https), oidc_issuer,
       oidc_client_id; pin deliberately not a condition) + 503 body
-- [ ] B2: `GET /v1/clients` (manifest: version/ready/missing/pin/
+- [x] B2: `GET /v1/clients` (manifest: version/ready/missing/pin/
       pin_source/clients, regular limiter, `no-store`; pin populated only
       from `static`/`file` sources — never `dial`)
-- [ ] B3: `GET /v1/clients/{os}/{arch}` (stream, 404/503, `no-store`,
+- [x] B3: `GET /v1/clients/{os}/{arch}` (stream, 404/503, `no-store`,
       shared `DownloadRateLimit`)
-- [ ] B4: `GET /client.sh` — template (base URL, issuer, client ID,
+- [x] B4: `GET /client.sh` — template (base URL, issuer, client ID,
       per-platform hashes, optional pin — operator sources only) + script
       per specification
       (root refusal, os/arch detect incl. darwin, sha256sum/shasum, atomic
