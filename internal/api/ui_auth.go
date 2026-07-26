@@ -93,6 +93,10 @@ type uiAuthContext struct {
 // registerUIAuthRoutes attaches the web UI's login endpoints to the mux.
 // Without a UIAuth configuration, /v1/auth responds with 503 (diagnosable).
 func registerUIAuthRoutes(mux *http.ServeMux, deps Deps) {
+	if deps.DevUser != nil && deps.Store != nil {
+		registerDevUIAuthRoutes(mux, deps)
+		return
+	}
 	if deps.UIAuth == nil || deps.Store == nil {
 		mux.HandleFunc("/v1/auth/", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "ui login not configured (server-side oidc required)", http.StatusServiceUnavailable)

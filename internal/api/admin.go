@@ -107,6 +107,9 @@ type adminContext struct {
 	// (the gate guarantees it is set).
 	rollout       rolloutGate
 	publicBaseURL string
+	// devUser is the INSECURE developer mode's implicit identity
+	// (Deps.DevUser); nil in every real deployment.
+	devUser *auth.Claims
 }
 
 // registerAdminRoutes attaches the admin API to the mux. Without OIDC or
@@ -114,7 +117,9 @@ type adminContext struct {
 // with 503 (fail-closed, but diagnosable).
 func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 	anyRole := deps.AdminGroup != "" || deps.AuditorGroup != "" || deps.ReadOnlyGroup != ""
-	if deps.Admin == nil || deps.Verifier == nil || deps.Store == nil || !anyRole {
+	// In developer mode (DevUser) the OIDC verifier is optional — dev
+	// setups have no IdP; everything else stays fail-closed.
+	if deps.Admin == nil || (deps.Verifier == nil && deps.DevUser == nil) || deps.Store == nil || !anyRole {
 		mux.HandleFunc("/v1/admin/", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "admin api not configured (oidc and role group required)", http.StatusServiceUnavailable)
 		})
@@ -133,6 +138,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 		logger:        deps.Logger,
 		rollout:       newRolloutGate(deps),
 		publicBaseURL: deps.PublicBaseURL,
+		devUser:       deps.DevUser,
 	}
 	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(roleReadOnly, admin.handleListGrants))
 	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(roleAdmin, admin.handleCreateGrant))
@@ -205,7 +211,7 @@ func (a *adminContext) authorized(minRole string, next adminHandler) http.Handle
 // cross-site forms cannot set (CSRF protection in addition to
 // SameSite=Lax). false ⇒ an error response was written.
 func (a *adminContext) authenticate(w http.ResponseWriter, r *http.Request) (*auth.Claims, bool) {
-	if rawToken, ok := bearerToken(r); ok {
+	if rawToken, ok := bearerToken(r); ok && a.verifier != nil {
 		claims, err := a.verifier.Verify(r.Context(), rawToken)
 		if err != nil {
 			a.logger.Info("admin: token rejected", "error", err)
@@ -223,6 +229,16 @@ func (a *adminContext) authenticate(w http.ResponseWriter, r *http.Request) (*au
 			}
 			return claims, true
 		}
+	}
+	// INSECURE developer mode: no bearer token, no session — act as the
+	// dev user. The X-Requested-With check stays, so the CSRF posture is
+	// the same as with a real session (cross-site requests still fail).
+	if a.devUser != nil {
+		if r.Header.Get("X-Requested-With") == "" {
+			http.Error(w, "x-requested-with header missing", http.StatusForbidden)
+			return nil, false
+		}
+		return a.devUser, true
 	}
 	http.Error(w, "authorization missing (bearer token or ui session)", http.StatusUnauthorized)
 	return nil, false

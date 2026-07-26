@@ -72,9 +72,38 @@ truth):
 ```sh
 cd web
 npm ci
-npx ng serve --proxy-config proxy.conf.json   # API proxy to a running gssh-server
+npm start        # ng serve; proxy.conf.json is wired in angular.json
 ```
 
 `proxy.conf.json` forwards `/v1` to `http://localhost:8080`, so login and API
 calls work against a locally running `gssh-server`.
+
+### Developer mode (no IdP)
+
+For pure frontend work, the server can skip OIDC entirely: with
+`GSSH_DEV_UI_AUTH=insecure` every request without a bearer token acts as a
+logged-in admin (`dev`, all roles). Only the exact value `insecure` activates
+it — anything else fails startup. PostgreSQL and `GSSH_CA_MASTER_KEY` are
+still required; the OIDC/Dex variables are not:
+
+```sh
+docker run -d --name gssh-db \
+  -e POSTGRES_USER=gssh -e POSTGRES_PASSWORD=gssh -e POSTGRES_DB=gssh \
+  -p 5432:5432 postgres:16-alpine
+
+export GSSH_DB_HOST=localhost GSSH_DB_USER=gssh GSSH_DB_PASSWORD=gssh \
+       GSSH_DB_NAME=gssh GSSH_DB_SSLMODE=disable
+export GSSH_CA_MASTER_KEY="$(openssl rand -base64 32)"
+export GSSH_DEV_UI_AUTH=insecure
+
+go run ./cmd/gssh-server -listen :8080
+```
+
+Then `npm start` in `web/` — the UI at `http://localhost:4200` is signed in
+as `dev` immediately.
+
+**Security:** this disables authentication on the admin API of that server
+process. It is meant for a server bound to localhost with throwaway data;
+never set it on anything reachable by others. The `X-Requested-With` CSRF
+check stays active, so other websites cannot script your local API.
 </content>

@@ -61,6 +61,11 @@ type Deps struct {
 	// UIAuth enables the web UI's server-side OIDC login (/v1/auth/…,
 	// BFF); nil ⇒ endpoints respond with 503.
 	UIAuth *UIAuthConfig
+	// DevUser enables the INSECURE developer mode (GSSH_DEV_UI_AUTH):
+	// every request without a bearer token acts as this already
+	// logged-in user, /v1/auth/… skips the IdP entirely. Local frontend
+	// development only; nil ⇒ disabled.
+	DevUser *auth.Claims
 	// Agents provides the embedded gssh-agentd binaries of the
 	// one-command host install; nil or empty ⇒ rollout gate closed.
 	Agents AgentSource
