@@ -31,7 +31,22 @@ CORS, no separate deployment (ADR-003, ADR-020).
 
 ## Views
 
-- **Hosts**: status (last seen), tags, host certificate expiry.
+- **Hosts**: status (last seen), tags, host certificate expiry. Each enrolled
+  host has a per-row **Connect** dialog: the one-time `client.sh` install
+  line (de-emphasized, linking to Client setup), the `gssh ssh <name>` copy
+  line, and an expandable **DNS fallback** that renders
+  `gssh login --api-url https://<ip> --pin-sha256 <pin>` from a user-entered
+  IP — only when the client manifest carries an operator-controlled pin;
+  otherwise the section explains why (using `pin_source`), it never renders
+  an unpinned IP command (fail-closed, see
+  [README — client install](../README.md#client-install)).
+- **Client setup**: install page for the `gssh` client — the three-step flow
+  with the `curl … /client.sh | sh` one-liner, a two-step
+  download-inspect-run alternative, direct binary downloads per platform
+  (size, SHA-256 with copy button), and the manual `config.yaml` snippet.
+  If the server-side client gate is closed (`GET /v1/clients` reports
+  `missing` conditions), the page shows the reasons in plain language
+  instead of the instructions.
 - **Access rules**: grants including create/edit/delete (admin); mutations
   generate server-side audit events with an actor.
 - **CI & service accounts**: CI grants (CRUD, admin) and service accounts
@@ -94,6 +109,15 @@ Role variants without a backend, in the browser console:
 localStorage.setItem('gssh-mock-roles', 'readonly'); // or 'auditor,readonly'
 localStorage.setItem('gssh-mock-roles', '');         // logged-out view
 localStorage.removeItem('gssh-mock-roles');          // back to admin
+```
+
+The client manifest's pin state (connect dialog's DNS fallback, Client setup
+page) switches the same way:
+
+```js
+localStorage.setItem('gssh-mock-pin-source', 'dial'); // pin auto-derived ⇒ no IP command, dial hint
+localStorage.setItem('gssh-mock-pin-source', 'none'); // no pin source at all
+localStorage.removeItem('gssh-mock-pin-source');      // back to 'static' (pin offered)
 ```
 
 (reload after each change). Production builds ship with `mockApi: false` —

@@ -675,10 +675,10 @@ Shared ground with the host install is documented there
       no-source states)
 
 ### Phase E — Docs & E2E
-- [ ] E1: README (TL;DR flow, routes, shared download limiter note,
+- [x] E1: README (TL;DR flow, routes, shared download limiter note,
       security paragraph, IP-bridge semantics), DEVELOPER.md,
       docs/web-ui.md
-- [ ] E2: E2E smoke test (alpine, non-root, `client.sh` → installed binary
+- [x] E2: E2E smoke test (alpine, non-root, `client.sh` → installed binary
       + valid config → `gssh version`/`gssh status`; re-run keeps config;
       root aborts)
 

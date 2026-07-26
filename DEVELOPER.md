@@ -57,7 +57,7 @@ Configuration via environment variables:
 | `GSSH_PUBLIC_URL` | External public base URL (host rollout: `install_command` and pin dial); empty ⇒ `GSSH_UI_BASE_URL` |
 | `GSSH_PUBLIC_PIN` / `GSSH_PUBLIC_PIN_CERT_FILE` | Pin sources for the host rollout: base64 SPKI pin or PEM certificate; without either, the server dials its own public URL |
 | `GSSH_PUBLIC_PIN_REFRESH` | Refresh interval for the pin self-dial (Go duration, default 5m) |
-| `GSSH_AGENT_DOWNLOAD_RPM` | Binary downloads per client IP and minute (default 10, `0` = off) |
+| `GSSH_AGENT_DOWNLOAD_RPM` | Binary downloads per client IP and minute (default 10, `0` = off); one shared bucket covers agent (`/v1/agents/…`) and client (`/v1/clients/…`) downloads |
 
 Endpoints (phase 2 — sign endpoints follow from phase 3):
 
@@ -79,6 +79,9 @@ persisted to disk ([ADR-016](docs/adr/016-cli-gssh-agent-only.md)).
 ```sh
 gssh login               # SSO in the browser, certificate into the ssh-agent
 gssh login --device      # device flow (headless, no browser)
+gssh login --api-url https://<ip> --pin-sha256 <pin>
+                         # DNS fallback: ephemeral overrides, config file untouched
+                         # (README "Client install" — the pin replaces chain+hostname checks)
 gssh ssh <host> …        # like ssh, with auto-login if no certificate is present
 gssh status              # certificate status; exit code 1 without a valid certificate
 gssh logout              # remove guided-ssh entries from the agent
@@ -165,44 +168,57 @@ configuration, principals cache). Packages (deb/rpm via nfpm) and
 install script: [deploy/packaging/](deploy/packaging/), build with
 `make cross packages`.
 
-## Host rollout (`internal/agentdist`)
+## Embedded binaries (`internal/bindist`, `agentdist`, `clientdist`)
 
-The server serves the agent itself (one-command install, user-facing docs:
-[README](README.md#one-command-host-install)). `internal/agentdist` is the
-source for that:
+The server serves its own binaries: the host agent (one-command install,
+user-facing docs: [README](README.md#one-command-host-install)) and the
+`gssh` client ([README](README.md#client-install)). Three packages share the
+work:
 
-- `bin/` holds the agent binaries `gssh-agentd-<os>-<arch>`, embedded into the
-  server binary via `go:embed all:bin`. In the repo the directory is empty
-  (`.gitkeep`, gitignored) — it is populated only during the Docker build (stage
-  `agentbuild`, same `-ldflags` as the server ⇒ hard version lockstep).
-- `gssh-agentd.service` is the single unit source in the repo; both the deb/rpm
-  (`nfpm.yaml`) and the templated `install.sh` reference it.
-- `Source` (`New` / `NewFromFS`) provides the list, size, and hex SHA-256 of each
-  binary; `NewFromFS` exists for tests and E2E cases where the embed is empty.
+- `internal/bindist` is the generic source: `NewFromFS(fsys, prefix)` scans
+  an `fs.FS` for `<prefix><os>-<arch>` files and provides the list, size, and
+  hex SHA-256 of each binary (computed once, `sync.Once`). Non-matching names
+  and `.gitkeep` are skipped.
+- `internal/agentdist` embeds `bin/gssh-agentd-<os>-<arch>` (prefix
+  `gssh-agentd-`) and keeps its pre-extraction public API — call sites,
+  Dockerfile `COPY`, and `nfpm.yaml` are unchanged. `gssh-agentd.service`
+  stays here as the single unit source for both the deb/rpm and the templated
+  `install.sh`.
+- `internal/clientdist` embeds `bin/gssh-<os>-<arch>` (prefix `gssh-`) for
+  the client install. Separate embed directory by design: mixing the two
+  families would serve the wrong binary under the right name.
 
-**Dev build degradation:** a `go build`/`make build` outside the
-Docker build contains no binaries. The rollout gate then reports `binaries`
-as the missing condition: the manifest (`GET /v1/agents`) still responds with 200
-and shows the reason, while download, `GET /install.sh`, and token minting respond
-with `503`, and the UI button stays disabled. To embed locally:
+In the repo both `bin/` directories are empty (`.gitkeep`, gitignored) — they
+are populated only during the Docker build (stage `agentbuild`, same
+`-ldflags` as the server ⇒ hard version lockstep). `NewFromFS` exists for
+tests and E2E cases where the embed is empty.
+
+**Dev build degradation:** a `go build`/`make build` outside the Docker
+build contains no binaries. Each gate then reports `binaries` as the missing
+condition: the manifests (`GET /v1/agents`, `GET /v1/clients`) still respond
+with 200 and show the reason, while the downloads, `GET /install.sh`,
+`GET /client.sh`, and token minting respond with `503`, and the UI (Add host
+button, Client setup page) shows the missing state. To embed locally:
 
 ```sh
-make cross                                   # builds bin/gssh-agentd-linux-amd64, among others
+make cross                                   # builds bin/gssh-agentd-linux-amd64, bin/gssh-linux-amd64, …
 cp bin/gssh-agentd-linux-amd64 internal/agentdist/bin/
-make build                                   # server with the agent embedded
+cp bin/gssh-linux-amd64 internal/clientdist/bin/   # make cross output = embed names
+make build                                   # server with the binaries embedded
 ```
 
-E2E smoke test of the whole chain (token → `install.sh` → download → hash check →
-enroll → running agent) in the sshd fixture container:
+E2E smoke tests (testcontainers, Docker required):
 
 ```sh
+# host chain: token → install.sh → download → hash check → enroll → running agent
 go test -tags integration ./internal/agentd/ -run InstallScript
+# client chain: client.sh → download → hash check → binary + config.yaml → gssh version/status
+go test -tags integration ./internal/api/ -run ClientInstallScript
 ```
 
-The test builds the agent itself, wires it in via `agentdist.NewFromFS`, and
-uses a static pin source from the test TLS certificate. The
-`systemctl` branch does not run there (`--no-systemd`) — a deliberate, documented
-CI gap (see README).
+Both tests build the binary they serve themselves and wire it in via
+`NewFromFS`. The host test's `systemctl` branch does not run there
+(`--no-systemd`) — a deliberate, documented CI gap (see README).
 
 ## Development
 
