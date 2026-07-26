@@ -656,7 +656,7 @@ Shared ground with the host install is documented there
       handler/`sh -n` tests
 
 ### Phase C — CLI Login Overrides
-- [ ] C1: `gssh login --api-url` + `--pin-sha256` (ephemeral overrides,
+- [x] C1: `gssh login --api-url` + `--pin-sha256` (ephemeral overrides,
       ci-login flag pattern, `DecodePin` fail-fast before network I/O,
       config file untouched) + tests
 
