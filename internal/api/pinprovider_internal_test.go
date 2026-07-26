@@ -345,6 +345,56 @@ func TestPinProviderDialBackoff(t *testing.T) {
 	})
 }
 
+// TestPinProviderStatusIgnoriertClientAbbruch: der Lazy-Dial läuft mit einem
+// vom Request entkoppelten Context — ein (auch absichtlich) sofort
+// abgebrochener Request darf das gemeinsame Dial-Ergebnis nicht als
+// Fehlversuch cachen und damit das Backoff-Fenster verbrennen.
+func TestPinProviderStatusIgnoriertClientAbbruch(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	logger, _ := testLogger()
+	p := NewPinProvider(PinProviderConfig{DialURL: server.URL}, logger)
+	p.dialRoots = trustPool(server.Certificate())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	st := p.Status(ctx)
+	if want := pintls.FromCertificate(server.Certificate()); st.Pin != want {
+		t.Fatalf("status mit abgebrochenem request-context = %+v, erwartet pin %s", st, want)
+	}
+}
+
+// TestPinProviderRunDrosseltNicht: der Run-Loop ist der geplante Refresh —
+// jeder Tick dialt, unabhängig vom Fehler-Backoff der Request-Pfade und ohne
+// Fälligkeitsprüfung (die den Tick sonst regelmäßig knapp verfehlte).
+func TestPinProviderRunDrosseltNicht(t *testing.T) {
+	dialURL, dials := failingDialTarget(t, 0)
+	logger, _ := testLogger()
+	// Backoff im Default (10 s): mit Fälligkeitsprüfung wäre nach dem ersten
+	// Fehlversuch kein weiterer Tick „due" und der Loop dialte nie wieder.
+	p := NewPinProvider(PinProviderConfig{DialURL: dialURL, Refresh: 10 * time.Millisecond}, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		p.Run(ctx)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for dials() < 3 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if got := dials(); got < 3 {
+		t.Errorf("dials = %d, erwartet ≥ 3 (run-loop wird gedrosselt)", got)
+	}
+}
+
 // trustPool baut einen Root-Pool, der genau dieses Zertifikat akzeptiert.
 func trustPool(cert *x509.Certificate) *x509.CertPool {
 	pool := x509.NewCertPool()

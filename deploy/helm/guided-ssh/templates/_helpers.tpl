@@ -105,6 +105,15 @@ dieser Block steuert nur, welche Envs gesetzt werden. */}}
 {{- if not (has $source (list "dial" "file" "static")) -}}
 {{- fail (printf "hostRollout.pin.source muss \"dial\", \"file\" oder \"static\" sein (ist: %q)" $source) -}}
 {{- end -}}
+{{/* http lehnt auch das Server-Gate ab (public_url_https/agent_public_url_https) —
+hier scheitert es schon beim Rendern statt erst auf der Flotte. */}}
+{{- if and $rollout.agentPublicUrl (not (hasPrefix "https://" $rollout.agentPublicUrl)) -}}
+{{- fail (printf "hostRollout.agentPublicUrl muss ein https-URL sein (ist: %q)" $rollout.agentPublicUrl) -}}
+{{- end -}}
+{{- $publicURL := default .Values.config.oidc.uiBaseURL $rollout.publicUrl -}}
+{{- if and $publicURL (not (hasPrefix "https://" $publicURL)) -}}
+{{- fail (printf "hostRollout braucht eine https-Public-URL — hostRollout.publicUrl bzw. config.oidc.uiBaseURL ist %q" $publicURL) -}}
+{{- end -}}
 - name: GSSH_AGENT_PUBLIC_URL
   value: {{ required "hostRollout.enabled=true erfordert hostRollout.agentPublicUrl (externe mTLS-Agent-URL der Agenten, z. B. https://gssh-agent.example.com:8443 — wird bewusst nie abgeleitet)" $rollout.agentPublicUrl | quote }}
 {{- if $rollout.publicUrl }}

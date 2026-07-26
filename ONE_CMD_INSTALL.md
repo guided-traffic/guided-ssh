@@ -1139,3 +1139,45 @@ denselben Pfad. R3: Kategorien `no_public_url` / `chain_untrusted` /
 Manifest (OpenAPI + generierter Client) → Klartext unter dem disabled-Button.
 Verifiziert: `make lint`, `make test` (race), `make web-test` und der
 Docker-Integrationstest `internal/agentd` (install.sh im sshd-Container).
+
+---
+
+## Nacharbeiten aus dem Zweit-Review (2026-07-26)
+
+### R7 — [Mittel/Security] HTTPS-Zwang auf Public- und Agent-URL
+
+Das Gate prüfte nur *ob* die URLs gesetzt sind, nicht das Schema. Die
+Dial-Pin-Quelle erzwingt https implizit — bei Quelle **static**/**file** ging
+das Gate auch mit `http://…` auf und mintete `curl http://… | sudo sh`
+(Klartext-Transport hebelt Hash-Check und Pin aus; Widerspruch zu
+Sicherheitsmodell Punkt 1).
+
+**Fix:** Zwei neue Gate-Bedingungen `public_url_https` /
+`agent_public_url_https` (`rollout.go: isHTTPSURL`), OpenAPI-Enum + Client +
+UI-Labels erweitert, Helm-fail-fast (`hasPrefix "https://"`) auf
+`agentPublicUrl` und effektive Public-URL, README-Satz.
+
+### R8 — [Klein/Bug] Background-Refresh feuerte nur jedes zweite Intervall
+
+`Run` lief über `dialOnce`, dessen Fälligkeitsprüfung
+(`time.Since(checked) >= refresh`) jeder Tick um die Dial-Dauer knapp
+verfehlte — effektiv 2×Intervall; zusätzlich hätte der Fehler-Backoff den
+geplanten Refresh gedrosselt. **Fix:** `Run` dialt je Tick unconditional
+(`refreshDial` direkt unter `dialMu`); die Due-Prüfung bleibt allein im
+Lazy-Pfad der Requests.
+
+### R9 — [Klein/Robustheit] Lazy-Dial erbte den Request-Context
+
+Ein (auch absichtlich) sofort abgebrochener Request auf die
+unauthentifizierten Rollout-Routen brach den geteilten Dial ab, cachte
+`context canceled` als `dial_failed` und verbrannte das Backoff-Fenster —
+gezielt wiederholt hielt das das Gate zu. **Fix:** Lazy-Dial läuft mit
+`context.WithoutCancel(r.Context())`; das Timeout setzt `dialPin` ohnehin
+selbst.
+
+- [x] R7: https-Gate-Bedingungen + Helm-fail-fast + Doku
+- [x] R8: Run-Loop dialt unconditional je Tick
+- [x] R9: Lazy-Dial von Client-Abbrüchen entkoppelt
+
+Tests: Gate-Fälle für http/unparsbare URLs (`rollout_internal_test.go`),
+`TestPinProviderRunDrosseltNicht`, `TestPinProviderStatusIgnoriertClientAbbruch`.

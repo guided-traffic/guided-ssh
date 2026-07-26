@@ -81,6 +81,21 @@ func TestRolloutGateBedingungen(t *testing.T) {
 			mutate: func(d *Deps) { d.PublicBaseURL = "" },
 			want:   rolloutMissingPublicURL,
 		},
+		// http darf das Gate nie passieren: der install_command wäre sonst
+		// `curl http://… | sudo sh` — Klartext-Transport hebelt Hash-Check und
+		// Pin aus (beides schützt erst nach unverfälschter Script-Zustellung).
+		"agent-url nicht https": {
+			mutate: func(d *Deps) { d.AgentPublicURL = "http://agent.gssh.example.com" },
+			want:   rolloutMissingAgentURLHTTPS,
+		},
+		"public-url nicht https": {
+			mutate: func(d *Deps) { d.PublicBaseURL = "http://gssh.example.com" },
+			want:   rolloutMissingPublicURLHTTPS,
+		},
+		"public-url unparsbar": {
+			mutate: func(d *Deps) { d.PublicBaseURL = "https://%zz" },
+			want:   rolloutMissingPublicURLHTTPS,
+		},
 	}
 
 	for name, tc := range tests {

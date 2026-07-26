@@ -162,6 +162,12 @@ func (p *PinProvider) Status(ctx context.Context) PinStatus {
 
 // Run hält den gedialten Pin im Hintergrund frisch; für die statische und die
 // Datei-Quelle kehrt Run sofort zurück. Blockiert bis ctx endet.
+//
+// Bewusst ohne Fälligkeitsprüfung (kein dialOnce): der Tick *ist* der
+// geplante Refresh. Mit Due-Check verfehlte jeder Tick die Schwelle um die
+// Dauer des vorherigen Dials (checked liegt ε nach dem Tick-Start) — der
+// Hintergrund-Refresh liefe effektiv nur jedes zweite Intervall. Außerdem darf
+// der Fehler-Backoff der Request-Pfade den geplanten Refresh nicht drosseln.
 func (p *PinProvider) Run(ctx context.Context) {
 	if p.source != PinSourceDial {
 		return
@@ -169,7 +175,9 @@ func (p *PinProvider) Run(ctx context.Context) {
 	ticker := time.NewTicker(p.refresh())
 	defer ticker.Stop()
 	for {
-		p.dialOnce(ctx)
+		p.dialMu.Lock()
+		p.refreshDial(ctx)
+		p.dialMu.Unlock()
 		select {
 		case <-ctx.Done():
 			return
@@ -201,7 +209,12 @@ func (p *PinProvider) dialBackoff() time.Duration {
 func (p *PinProvider) dialStatus(ctx context.Context) PinStatus {
 	pin, errText, errCode, due := p.snapshot()
 	if due {
-		pin, errText, errCode = p.dialOnce(ctx)
+		// Ohne die Client-Abbrüche des Requests: ein sofort abgebrochener
+		// Request (unauthentifizierte Route!) würde sonst als „Dial
+		// fehlgeschlagen" gecacht und verbrennte das Backoff-Fenster — das
+		// Ergebnis gehört allen Aufrufern, nicht dem einen Request. Das
+		// Timeout setzt dialPin selbst (pinDialTimeout).
+		pin, errText, errCode = p.dialOnce(context.WithoutCancel(ctx))
 	}
 	if pin == "" {
 		return PinStatus{Err: errText, ErrCode: errCode}
@@ -238,8 +251,9 @@ func (p *PinProvider) dialOnce(ctx context.Context) (pin, errText, errCode strin
 // bleibt der letzte erfolgreich gelesene Pin aktiv (nur „noch nie ein Pin
 // gelesen" hält das Gate zu). Der Zeitstempel wird auch bei Fehlschlag gesetzt:
 // ein vorhandener Pin wird damit höchstens im Intervall, ein fehlender
-// höchstens im Backoff neu gedialt. Aufrufe laufen über dialOnce, das die
-// Fälligkeit unter dialMu erneut prüft.
+// höchstens im Backoff neu gedialt. Aufrufer halten dialMu: die Request-Pfade
+// via dialOnce (mit Fälligkeitsprüfung), der Run-Loop direkt (jeder Tick ist
+// ein geplanter Refresh).
 func (p *PinProvider) refreshDial(ctx context.Context) (pin, errText, errCode string) {
 	dialed, err := p.dialPin(ctx)
 

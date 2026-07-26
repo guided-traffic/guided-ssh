@@ -208,7 +208,9 @@ before reporting success. Flags: `--arch` (otherwise derived from `uname -m`),
 **Enable it** (all four conditions must hold, otherwise the button stays
 disabled and the endpoints answer `503` naming what is missing): agent binaries
 in the image (they are, in released images), an SPKI pin, `GSSH_AGENT_PUBLIC_URL`
-and a public base URL. With Helm:
+and a public base URL. Both URLs must be `https://` — plain-HTTP URLs never
+pass the gate (a cleartext `curl … | sudo sh` would defeat both the hash check
+and the pin). With Helm:
 
 ```sh
 helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \

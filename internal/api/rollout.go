@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/url"
 )
 
 // Bedingungen des Host-Rollouts. Fehlt eine, antworten die gateten Endpunkte
@@ -19,6 +20,15 @@ const (
 	rolloutMissingAgentURL = "agent_public_url"
 	// rolloutMissingPublicURL: weder GSSH_PUBLIC_URL noch GSSH_UI_BASE_URL.
 	rolloutMissingPublicURL = "public_url"
+	// rolloutMissingAgentURLHTTPS: Agent-URL gesetzt, aber kein https-URL.
+	rolloutMissingAgentURLHTTPS = "agent_public_url_https"
+	// rolloutMissingPublicURLHTTPS: Public-URL gesetzt, aber kein https-URL.
+	// Ohne https wäre `curl … | sudo sh` Klartext-HTTP: der SHA-256-Check im
+	// Script schützt dann nichts (ein MITM manipuliert Script samt Hashes),
+	// und der SPKI-Pin greift erst beim Enrollment — nicht bei der
+	// Root-Code-Ausführung durch das Script. Deshalb fail-closed statt
+	// http zuzulassen (Sicherheitsmodell: „Nur über HTTPS ausliefern").
+	rolloutMissingPublicURLHTTPS = "public_url_https"
 )
 
 // rolloutGate bündelt die vier Voraussetzungen des One-Command-Host-Installs.
@@ -61,13 +71,28 @@ func (g rolloutGate) status(ctx context.Context) rolloutStatus {
 	if st.Pin.Pin == "" {
 		st.Missing = append(st.Missing, rolloutMissingPin)
 	}
-	if g.agentPublicURL == "" {
+	switch {
+	case g.agentPublicURL == "":
 		st.Missing = append(st.Missing, rolloutMissingAgentURL)
+	case !isHTTPSURL(g.agentPublicURL):
+		st.Missing = append(st.Missing, rolloutMissingAgentURLHTTPS)
 	}
-	if g.publicBaseURL == "" {
+	switch {
+	case g.publicBaseURL == "":
 		st.Missing = append(st.Missing, rolloutMissingPublicURL)
+	case !isHTTPSURL(g.publicBaseURL):
+		st.Missing = append(st.Missing, rolloutMissingPublicURLHTTPS)
 	}
 	return st
+}
+
+// isHTTPSURL prüft, ob raw ein parsbarer https-URL mit Host ist. Die
+// Dial-Pin-Quelle erzwingt https ohnehin (dialPin) — diese Prüfung schließt
+// die Lücke für die statische und die Datei-Quelle, bei denen sonst ein
+// http-install_command das Gate passierte.
+func isHTTPSURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Hostname() != ""
 }
 
 // registerRolloutRoutes hängt die drei öffentlichen Rollout-Routen in den

@@ -24,6 +24,8 @@ const ROLLOUT_MISSING_LABELS: Record<string, string> = {
   pin: 'SPKI-Pin nicht ermittelt (GSSH_PUBLIC_PIN / Cert-Datei / Selbst-Dial)',
   agent_public_url: 'GSSH_AGENT_PUBLIC_URL fehlt',
   public_url: 'GSSH_PUBLIC_URL bzw. GSSH_UI_BASE_URL fehlt',
+  agent_public_url_https: 'GSSH_AGENT_PUBLIC_URL ist kein https-URL',
+  public_url_https: 'GSSH_PUBLIC_URL bzw. GSSH_UI_BASE_URL ist kein https-URL',
 };
 
 /**

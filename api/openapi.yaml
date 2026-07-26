@@ -672,8 +672,20 @@ components:
         rollout_ready: { type: boolean, description: false ⇒ Rollout-Endpunkte antworten mit 503 }
         missing:
           type: array
-          description: Fehlende Rollout-Bedingungen
-          items: { type: string, enum: [binaries, pin, agent_public_url, public_url] }
+          description: >-
+            Fehlende Rollout-Bedingungen. Die *_https-Einträge melden eine
+            gesetzte, aber nicht-https-URL — http passiert das Gate nie.
+          items:
+            type: string
+            enum:
+              [
+                binaries,
+                pin,
+                agent_public_url,
+                public_url,
+                agent_public_url_https,
+                public_url_https,
+              ]
         pin_source: { type: string, description: Aktive SPKI-Pin-Quelle (leer ⇒ kein Pin) }
         pin_error:
           type: string

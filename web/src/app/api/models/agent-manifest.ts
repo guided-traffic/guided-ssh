@@ -6,9 +6,9 @@ export interface AgentManifest {
   agents: Array<AgentBinary>;
 
   /**
-   * Fehlende Rollout-Bedingungen
+   * Fehlende Rollout-Bedingungen. Die *_https-Einträge melden eine gesetzte, aber nicht-https-URL — http passiert das Gate nie.
    */
-  missing: Array<'binaries' | 'pin' | 'agent_public_url' | 'public_url'>;
+  missing: Array<'binaries' | 'pin' | 'agent_public_url' | 'public_url' | 'agent_public_url_https' | 'public_url_https'>;
 
   /**
    * Grobe Kategorie des letzten Pin-Fehlers (leer ⇒ keiner). Kein Volltext — der steht nur im Server-Log.
