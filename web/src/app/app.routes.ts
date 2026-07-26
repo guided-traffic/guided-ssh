@@ -11,6 +11,12 @@ export const routes: Routes = [
     loadComponent: () => import('./features/hosts').then((m) => m.HostsPage),
   },
   {
+    path: 'client',
+    canActivate: [roleGuard],
+    data: { minRole: 'readonly' },
+    loadComponent: () => import('./features/client-setup').then((m) => m.ClientSetupPage),
+  },
+  {
     path: 'grants',
     canActivate: [roleGuard],
     data: { minRole: 'readonly' },

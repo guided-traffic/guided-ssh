@@ -25,6 +25,12 @@ export type { GetInstallScript$Params as GetInstallScript$Params } from './fn/ro
 export { getInstallScript as getInstallScript } from './fn/rollout/get-install-script';
 export type { CreateEnrollToken$Params as CreateEnrollToken$Params } from './fn/rollout/create-enroll-token';
 export { createEnrollToken as createEnrollToken } from './fn/rollout/create-enroll-token';
+export type { GetClientManifest$Params as GetClientManifest$Params } from './fn/client/get-client-manifest';
+export { getClientManifest as getClientManifest } from './fn/client/get-client-manifest';
+export type { DownloadClient$Params as DownloadClient$Params } from './fn/client/download-client';
+export { downloadClient as downloadClient } from './fn/client/download-client';
+export type { GetClientScript$Params as GetClientScript$Params } from './fn/client/get-client-script';
+export { getClientScript as getClientScript } from './fn/client/get-client-script';
 export type { ListGrants$Params as ListGrants$Params } from './fn/grants/list-grants';
 export { listGrants as listGrants } from './fn/grants/list-grants';
 export type { CreateGrant$Params as CreateGrant$Params } from './fn/grants/create-grant';

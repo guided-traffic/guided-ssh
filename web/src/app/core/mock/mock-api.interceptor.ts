@@ -12,6 +12,7 @@ import {
   AuditList,
   CiGrant,
   CiGrantRequest,
+  ClientManifest,
   EnrollTokenRequest,
   EnrollTokenResponse,
   Grant,
@@ -22,6 +23,7 @@ import {
   mockAgentManifest,
   mockAuditEvents,
   mockCiGrants,
+  mockClientManifest,
   mockGrants,
   mockGroups,
   mockHosts,
@@ -41,6 +43,11 @@ import {
  * Role variants: `localStorage.setItem('gssh-mock-roles', 'readonly')` (or
  * 'auditor,readonly', or '' for logged-out) + reload shows the UI as that
  * role; removing the key restores the full admin view.
+ *
+ * Pin variants: `localStorage.setItem('gssh-mock-pin-source', 'dial')` (or
+ * 'none', 'file', 'static') + reload switches the client manifest's pin
+ * state — the connect dialog's DNS fallback renders a command only with an
+ * operator-controlled source.
  */
 export const mockApiInterceptor: HttpInterceptorFn = (req, next) => {
   if (!req.url.startsWith("/v1/")) {
@@ -92,6 +99,9 @@ function route(
   }
   if (method === "GET" && path === "/v1/agents") {
     return respond(req, 200, mockAgentManifest);
+  }
+  if (method === "GET" && path === "/v1/clients") {
+    return respond(req, 200, clientManifestFixture());
   }
   if (method === "POST" && path === "/v1/admin/enroll-tokens") {
     return respond(
@@ -146,6 +156,27 @@ function sessionFixture(): typeof mockSession {
     return { authenticated: false };
   }
   return { ...mockSession, roles };
+}
+
+/**
+ * Client manifest with an optional pin-source override from localStorage
+ * (see file docs): `static`/`file` keep the pin, `dial` and `none` drop it —
+ * the three states the connect dialog's DNS fallback has to render.
+ */
+function clientManifestFixture(): ClientManifest {
+  const override = localStorage.getItem("gssh-mock-pin-source");
+  if (override === null) {
+    return mockClientManifest;
+  }
+  if (override === "static" || override === "file") {
+    return { ...mockClientManifest, pin_source: override };
+  }
+  // Everything else is a source that offers no pin — "none" ⇒ no source at all.
+  return {
+    ...mockClientManifest,
+    pin: "",
+    pin_source: override === "none" ? "" : override,
+  };
 }
 
 function enrollTokenFixture(

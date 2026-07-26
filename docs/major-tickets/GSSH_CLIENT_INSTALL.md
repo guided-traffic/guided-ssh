@@ -661,11 +661,14 @@ Shared ground with the host install is documented there
       config file untouched) + tests
 
 ### Phase D — Frontend
-- [ ] D1: "Client setup" page (three steps + one-liner, two-step
+- [x] D1: "Client setup" page (three steps + one-liner, two-step
       alternative, direct downloads with SHA-256, manual config snippet,
       missing-state display) + route + nav
-- [ ] D2: `api/openapi.yaml` + `make web-api`, mock-mode manifest
-- [ ] D3: Hosts `actions` column + connect dialog (install step separated
+- [x] D2: `api/openapi.yaml` + `make web-api`, mock-mode manifest
+      (`mockClientManifest`; pin state switchable via the
+      `gssh-mock-pin-source` localStorage key, mirroring the existing
+      `gssh-mock-roles` pattern)
+- [x] D3: Hosts `actions` column + connect dialog (install step separated
       from connect line, enrolled-only, pinned login-via-IP fallback with
       live-rendered command, fail-closed without pin incl.
       `pin_source`-specific explanation, mock covers operator-pin/dial/

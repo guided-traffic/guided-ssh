@@ -10,6 +10,8 @@ export type { AuthSession } from './models/auth-session';
 export type { Certificate } from './models/certificate';
 export type { CiGrant } from './models/ci-grant';
 export type { CiGrantRequest } from './models/ci-grant-request';
+export type { ClientBinary } from './models/client-binary';
+export type { ClientManifest } from './models/client-manifest';
 export type { EnrollRequest } from './models/enroll-request';
 export type { EnrollResponse } from './models/enroll-response';
 export type { EnrollTokenRequest } from './models/enroll-token-request';

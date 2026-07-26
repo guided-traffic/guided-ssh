@@ -3,6 +3,7 @@ import {
   AuditEvent,
   AuthSession,
   CiGrant,
+  ClientManifest,
   Grant,
   Group,
   Host,
@@ -124,6 +125,25 @@ export const mockAgentManifest: AgentManifest = {
       sha256: "b4a6…" + "f".repeat(58),
       size: 21_876_544,
     },
+  ],
+};
+
+/**
+ * Client install ready, with an operator-controlled pin — so the Client setup
+ * page and the connect dialog's DNS fallback are fully rendered by default.
+ * The other two pin states (dial, none) are reachable via the
+ * `gssh-mock-pin-source` override, see mock-api.interceptor.ts.
+ */
+export const mockClientManifest: ClientManifest = {
+  ready: true,
+  version: "v2.3.0",
+  pin_source: "static",
+  pin: "9nPmyRTjBQvKfBpB9OiE9YEfR9dPbGVoBSSlYqAr4X0=",
+  missing: [],
+  clients: [
+    { os: "darwin", arch: "arm64", sha256: "c5b7…" + "a".repeat(58), size: 8_178_432 },
+    { os: "linux", arch: "amd64", sha256: "d6c8…" + "b".repeat(58), size: 8_599_040 },
+    { os: "linux", arch: "arm64", sha256: "e7d9…" + "c".repeat(58), size: 7_968_256 },
   ],
 };
 
