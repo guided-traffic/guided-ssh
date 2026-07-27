@@ -323,18 +323,50 @@ authenticates agents by client certificate.
 > for a client certificate — every agent connection fails the handshake. What
 > the agent endpoint needs is raw TCP to port 8443.
 
-Four ways to deliver that raw TCP:
+Four ways to deliver that raw TCP. The ingress is **one** of them, not the
+required one — pick per environment:
 
 | Exposure | Values | Agent source IP seen by the server | `hostRollout.agentPublicUrl` |
 |---|---|---|---|
 | **In-cluster only** (default) | `agent.service.type: ClusterIP` | real | n/a |
-| **Dedicated IP** | `agent.service.type: LoadBalancer` (+ `agent.service.annotations` for LB class/IP) | LB-dependent (often SNAT'ed to a node IP); real via `agent.proxyProtocol` if the LB sends the header | explicit, `https://<host>:8443` |
-| **NodePort** behind an external LB/appliance | `agent.service.type: NodePort` | appliance-dependent; real via `agent.proxyProtocol` | explicit |
+| **Dedicated IP** | `agent.service.type: LoadBalancer` (+ `agent.service.annotations` for LB class/IP) | SNAT'ed to a node IP by default; real with `externalTrafficPolicy: Local`, or via `agent.proxyProtocol` if the LB sends the header (e.g. AWS NLB) | explicit, `https://<host>:8443` |
+| **NodePort** behind an external LB/appliance | `agent.service.type: NodePort` | as above; otherwise appliance-dependent, real via `agent.proxyProtocol` | explicit |
 | **TLS-passthrough ingress** | `agent.ingress.*` (below) | ingress controller pod IP; real via `agent.proxyProtocol` | derived from `agent.ingress.host` |
 
-Restoring the agent's real source IP for the audit log is the job of
+Two independent ways to get the agent's real source IP into the audit log:
+`agent.service.externalTrafficPolicy: Local` (below — no protocol involved,
+but only for LoadBalancer/NodePort) and
 [`agent.proxyProtocol`](#real-agent-source-ip-proxy-protocol-agentproxyprotocol)
-— it is transport-neutral and works for all three external variants.
+(transport-neutral, works for all three external variants). Neither is on by
+default.
+
+### Direct exposure (`agent.service`)
+
+`agent.service.type: LoadBalancer` gives the agent endpoint its own address —
+the simplest option where an external IP per service is cheap (cloud LB,
+MetalLB). Pin the IP or LB class through `agent.service.annotations`; the
+deprecated `loadBalancerIP` field is deliberately not templated.
+
+```yaml
+# values.yaml
+agent:
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.0.2.40
+    # kube-proxy would otherwise SNAT the connection to a node IP and the
+    # audit log would record that instead of the agent.
+    externalTrafficPolicy: Local
+```
+
+`externalTrafficPolicy: Local` skips the SNAT hop, so the server sees the
+agent's address **without** any PROXY protocol — the right choice for this
+scenario. The trade-off is standard Kubernetes behaviour: only nodes that
+actually run a gssh pod answer on that port, so the LB's health checks decide
+which nodes stay in rotation (with `Cluster`, every node answers and forwards
+internally). It is opt-in because switching an existing LoadBalancer service to
+`Local` changes those health-check semantics. The value applies to
+`LoadBalancer` and `NodePort` only — anything else fails at render time.
 
 ### TLS-passthrough ingress (`agent.ingress`)
 
@@ -771,6 +803,7 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `agent.enabled` | `true` | Agent API (mTLS) on port 8443 |
 | `agent.tlsNames` | `""` (= service DNS, plus `agent.ingress.host`) | SANs of the agent server certificate; an explicit value replaces the whole default list |
 | `agent.service.type` / `annotations` | `ClusterIP` / `{}` | Exposure of the agent port — see [Agent API](#agent-api-mtls) |
+| `agent.service.externalTrafficPolicy` | `""` (= `Cluster`) | `Local` keeps the agent's real source IP without PROXY protocol; only valid for `LoadBalancer`/`NodePort` |
 | `agent.ingress.enabled` | `false` | TLS-**passthrough** ingress for the agent port; requires `agent.enabled` and `agent.service.enabled` |
 | `agent.ingress.className` | `""` | Ingress class of the passthrough-capable controller (may differ from `ingress.className`) |
 | `agent.ingress.host` | `""` (required with `enabled`) | Public agent hostname, bare DNS name; feeds the certificate SANs and `hostRollout.agentPublicUrl` |

@@ -227,6 +227,13 @@ agent:
     type: ClusterIP
     port: 8443
     annotations: {}
+    # Only valid for LoadBalancer/NodePort (the API server rejects it on a
+    # ClusterIP). "Local" skips the SNAT hop of kube-proxy, so the server sees
+    # the agent's real source IP WITHOUT PROXY protocol — the natural choice
+    # for the dedicated-IP scenario. Trade-off: only nodes running a gssh pod
+    # answer, so the LB health checks decide the reachable set. Empty = the
+    # Kubernetes default (Cluster).
+    externalTrafficPolicy: ""
   # Second ingress for the agent mTLS endpoint. Requires an ingress
   # controller doing TLS passthrough (SNI-based routing, raw TCP to the
   # service) — the gssh server terminates mTLS itself; a TLS-terminating

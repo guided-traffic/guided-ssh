@@ -152,6 +152,23 @@ user can null them. */}}
 {{- include "guided-ssh.validateRules" . -}}
 {{- include "guided-ssh.validateAgentIngress" . -}}
 {{- include "guided-ssh.validateAgentProxy" . -}}
+{{- include "guided-ssh.validateAgentService" . -}}
+{{- end }}
+
+{{/* externalTrafficPolicy exists only on NodePort/LoadBalancer Services — the
+API server rejects it on a ClusterIP. Failing at render time keeps that mistake
+in CI instead of surfacing it in the apply step of a GitOps rollout. */}}
+{{- define "guided-ssh.validateAgentService" -}}
+{{- with .Values.agent.service -}}
+{{- with .externalTrafficPolicy -}}
+{{- if not (has . (list "Cluster" "Local")) -}}
+{{- fail (printf "agent.service.externalTrafficPolicy must be \"Cluster\" or \"Local\" (got: %q)" .) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .externalTrafficPolicy (not (has .type (list "LoadBalancer" "NodePort"))) -}}
+{{- fail (printf "agent.service.externalTrafficPolicy only applies to LoadBalancer or NodePort services — agent.service.type is %q" .type) -}}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/* PROXY protocol guard: the setting only configures the agent listener, so

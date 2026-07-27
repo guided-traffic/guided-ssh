@@ -248,6 +248,32 @@ fails "proxy protocol: enabled with agent.enabled=false" \
   "requires agent.enabled=true" \
   --set agent.proxyProtocol.enabled=true --set agent.enabled=false
 
+# --- agent service externalTrafficPolicy (AGENT_INGRESS WP6) ---------------
+# Existing LoadBalancer deployments must render exactly as before the value
+# existed — Local changes LB health-check semantics, so it stays opt-in.
+case_name="agent service: no externalTrafficPolicy unless set"
+if render_tpl templates/service-agent.yaml "$case_name" \
+  --set agent.service.type=LoadBalancer; then
+  hasnt "$case_name" "externalTrafficPolicy"
+fi
+
+case_name="agent service: externalTrafficPolicy rendered when set"
+if render_tpl templates/service-agent.yaml "$case_name" \
+  --set agent.service.type=LoadBalancer \
+  --set agent.service.externalTrafficPolicy=Local; then
+  has "$case_name" "type: LoadBalancer"
+  has "$case_name" "externalTrafficPolicy: Local"
+fi
+
+fails "agent service: externalTrafficPolicy on a ClusterIP" \
+  "only applies to LoadBalancer or NodePort" \
+  --set agent.service.externalTrafficPolicy=Local
+
+fails "agent service: unknown externalTrafficPolicy" \
+  'must be "Cluster" or "Local"' \
+  --set agent.service.type=LoadBalancer \
+  --set agent.service.externalTrafficPolicy=local
+
 if [ "$failures" -eq 0 ]; then
   echo "helm render checks passed"
 else
