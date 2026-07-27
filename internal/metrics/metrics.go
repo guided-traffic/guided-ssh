@@ -37,6 +37,18 @@ var (
 		Help: "Failed reconciliations of a declarative rules file (GitOps).",
 	}, []string{"domain"})
 
+	// TLSHandshakeErrors counts connections that never completed the TLS
+	// handshake, by listener (api/agent/metrics) and class. "transport"
+	// means the peer reset or closed the connection without speaking TLS —
+	// TCP health checks of the ingress dominate here, which is why that
+	// class is only logged at debug level. "tls" means a real handshake
+	// failure such as a missing or invalid client certificate on the mTLS
+	// agent listener, and is worth alerting on.
+	TLSHandshakeErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gssh_tls_handshake_errors_total",
+		Help: "Connections that failed before completing the TLS handshake.",
+	}, []string{"listener", "class"})
+
 	// AgentHeartbeats counts agent contacts (mTLS requests that stamp
 	// last_seen_at).
 	AgentHeartbeats = promauto.NewCounter(prometheus.CounterOpts{

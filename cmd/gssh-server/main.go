@@ -111,6 +111,13 @@ const (
 	// views, audit log incl. export); admin includes auditor.
 	envAuditorGroup = "GSSH_AUDITOR_GROUP"
 
+	// Minimum level of the structured log: debug | info | warn | error;
+	// empty ⇒ info. Debug additionally surfaces connections that died before
+	// the TLS handshake (see errorlog.go) — noisy behind an ingress that
+	// TCP-health-checks the agent listener, useful when an agent's mTLS
+	// connection is being diagnosed.
+	envLogLevel = "GSSH_LOG_LEVEL"
+
 	// OIDC client of the server itself (confidential, WITH a client secret):
 	// the server performs the UI login (BFF: authorization code + PKCE +
 	// secret, session cookie). Client ID and secret must be set together;
@@ -344,7 +351,12 @@ func run(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 
-	logger := slog.New(slog.NewJSONHandler(stdout, nil))
+	level, err := logLevelFromEnv()
+	if err != nil {
+		fmt.Fprintf(stderr, "gssh-server: %v\n", err)
+		return 2
+	}
+	logger := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: level}))
 	if err := serve(logger, *listen, *agentListen, *metricsListen); err != nil {
 		logger.Error("server start failed", "error", err)
 		return 1
@@ -592,6 +604,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 			Rules:          rules,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ErrorLog:          serverErrorLog(logger, "api"),
 	}
 
 	errCh := make(chan error, 3)
@@ -618,7 +631,12 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	if metricsListen != "" {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("GET /metrics", metrics.Handler())
-		metricsServer = &http.Server{Addr: metricsListen, Handler: metricsMux, ReadHeaderTimeout: 10 * time.Second}
+		metricsServer = &http.Server{
+			Addr:              metricsListen,
+			Handler:           metricsMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ErrorLog:          serverErrorLog(logger, "metrics"),
+		}
 		go func() { errCh <- metricsServer.ListenAndServe() }()
 		logger.Info("metrics endpoint started", "listen", metricsListen)
 	}
@@ -679,6 +697,10 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 		},
 		ReadHeaderTimeout: 10 * time.Second,
+		// The ingress TCP-health-checks this listener, so every check produces
+		// a failed handshake; serverErrorLog keeps that noise at debug level
+		// while real mTLS rejections stay visible. See errorlog.go.
+		ErrorLog: serverErrorLog(logger, "agent"),
 	}, nil
 }
 
