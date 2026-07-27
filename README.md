@@ -1,6 +1,9 @@
 # gssh — guided-ssh
 
-![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fguided-traffic%2Fguided-ssh%2Fmain%2F.github%2Fbadges%2Fcoverage.json)
+[![Build Status](https://github.com/guided-traffic/guided-ssh/actions/workflows/release.yml/badge.svg)](https://github.com/guided-traffic/guided-ssh/actions)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/guided-traffic/guided-ssh/main/.github/badges/coverage.json)](https://github.com/guided-traffic/guided-ssh)
+[![Go Report Card](https://goreportcard.com/badge/github.com/guided-traffic/guided-ssh)](https://goreportcard.com/report/github.com/guided-traffic/guided-ssh)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 **SSH access without key sprawl.** gssh (short for *guided-ssh*) replaces
 static `authorized_keys` files with short-lived SSH certificates issued by a
