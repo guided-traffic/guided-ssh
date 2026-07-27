@@ -2,8 +2,8 @@
 # Second ingress, only for the agent mTLS API: the controller must route by
 # SNI and pass the raw TCP stream through (annotations below) — the gssh
 # server terminates mTLS itself, so a TLS-terminating ingress breaks the
-# client-certificate handshake. Deliberately no tls: block: there is no
-# controller certificate on a passthrough vhost.
+# client-certificate handshake. Deliberately no TLS section either: there is
+# no controller certificate on a passthrough vhost.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
