@@ -173,6 +173,7 @@ spec:
             {{- end }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_AUDIT_WEBHOOK_URL" "value" .Values.config.auditStream.webhookURL) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_AUDIT_STREAM_INTERVAL" "value" .Values.config.auditStream.interval) | nindent 12 }}
+            {{- include "guided-ssh.rulesEnv" . | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_SIGN_RATE_PER_MINUTE" "value" .Values.config.rateLimit.perMinute) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_SIGN_FAIL_PER_MINUTE" "value" .Values.config.rateLimit.failPerMinute) | nindent 12 }}
             {{- if .Values.config.rateLimit.trustProxy }}
@@ -214,7 +215,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- $publicPinFile := and .Values.hostRollout.enabled (eq (default "dial" .Values.hostRollout.pin.source) "file") }}
-          {{- if or (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile }}
+          {{- $hostRules := .Values.config.rules.host.existingConfigMap }}
+          {{- $ciRules := .Values.config.rules.ci.existingConfigMap }}
+          {{- if or (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile $hostRules $ciRules }}
           volumeMounts:
             {{- if eq (include "guided-ssh.caMode" .) "self-managed" }}
             - name: ca-keys
@@ -228,8 +231,20 @@ spec:
               mountPath: {{ include "guided-ssh.publicPinDir" . }}
               readOnly: true
             {{- end }}
+            {{- if $hostRules }}
+            # Also without subPath — a subPath mount never sees ConfigMap
+            # updates, which would freeze the rules at pod start.
+            - name: host-rules
+              mountPath: {{ include "guided-ssh.rulesDir" (dict "domain" "host") }}
+              readOnly: true
+            {{- end }}
+            {{- if $ciRules }}
+            - name: ci-rules
+              mountPath: {{ include "guided-ssh.rulesDir" (dict "domain" "ci") }}
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if or .Values.internalDatabase.enabled (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile }}
+      {{- if or .Values.internalDatabase.enabled (eq (include "guided-ssh.caMode" .) "self-managed") $publicPinFile $hostRules $ciRules }}
       volumes:
         {{- if .Values.internalDatabase.enabled }}
         # Ephemeral: pod restart = empty database (test environment).
@@ -266,6 +281,25 @@ spec:
             items:
               - key: tls.crt
                 path: tls.crt
+        {{- end }}
+        {{- if $hostRules }}
+        # items: projection onto the fixed file name — the env var stays
+        # independent of the key, and the mount keeps receiving ConfigMap
+        # updates (the server re-reads the file every 30 s).
+        - name: host-rules
+          configMap:
+            name: {{ $hostRules }}
+            items:
+              - key: {{ .Values.config.rules.host.key }}
+                path: rules.yaml
+        {{- end }}
+        {{- if $ciRules }}
+        - name: ci-rules
+          configMap:
+            name: {{ $ciRules }}
+            items:
+              - key: {{ .Values.config.rules.ci.key }}
+                path: rules.yaml
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

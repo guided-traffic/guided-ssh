@@ -300,18 +300,42 @@ rules. Both follow D3's rationale; the flux-example files are unaffected.
   at `RulesWriteForbidden`; its description names the role case (text/plain)
   so the role gate stays documented.
 
-### Phase 4 — Helm chart
+### Phase 4 — Helm chart ✅
 
-- [ ] `values.yaml`: `config.rules` block (D8) with doc comments.
-- [ ] `deployment.yaml`: env wiring via `guided-ssh.env`, conditional
-      volumes/mounts with `items:` projection, no subPath (D8).
-- [ ] `validateValues`: fail on `manualProvision: true` + any
-      `existingConfigMap` (D8).
-- [ ] Chart tests (`templates/tests/`) + `helm template` golden checks for:
-      defaults, manualProvision on, host-only ConfigMap, both ConfigMaps,
-      custom key, invalid combination fails.
-- [ ] Chart README: new "Rules provisioning (GitOps)" section + migration
-      note for the default flip (D2).
+- [x] `values.yaml`: `config.rules` block (D8) with doc comments.
+- [x] `deployment.yaml`: env wiring via the new `guided-ssh.rulesEnv` helper,
+      conditional volumes/mounts with `items:` projection onto the fixed file
+      name `rules.yaml`, no subPath (D8).
+- [x] `validateValues`: calls `guided-ssh.validateRules` — fails on
+      `manualProvision: true` + any `existingConfigMap`, and on an
+      `existingConfigMap` with an empty `key` (D8).
+- [x] Chart test
+      ([test-rules-provisioning.yaml](../../deploy/helm/guided-ssh/templates/tests/test-rules-provisioning.yaml)):
+      compares the server's `/v1/ui/config` editability flags against the
+      values. `helm template` golden checks in
+      [hack/helm-render-test.sh](../../hack/helm-render-test.sh) (`make
+      helm-test`, wired into the CI `helm-lint` job) for: defaults,
+      manualProvision on, host-only ConfigMap, both ConfigMaps, custom key,
+      and the two invalid combinations.
+- [x] Chart README: "Rules provisioning (GitOps)" section, values-table rows
+      and the "in-app rule editing is off by default" migration section (D2).
+
+**Decisions made while implementing:**
+
+- The env helper is a dedicated `guided-ssh.rulesEnv` rather than three
+  `guided-ssh.env` calls: `GSSH_MANUAL_RULES` is a boolean flag ("true" or
+  absent), and the two file paths are derived from the ConfigMap names
+  instead of being values of their own.
+- Extra guard beyond D8: an `existingConfigMap` with an empty `key` fails the
+  render too — otherwise the volume would project an empty key and the pod
+  would crash-loop on a missing file.
+- The render checks are a shell script (`hack/helm-render-test.sh`), not Go:
+  they need no cluster and no build, so CI runs them next to `ct lint`. The
+  script fetches the postgresql dependency on a fresh checkout (`charts/` is
+  not committed).
+- The chart test pod reads the values, so `GSSH_MANUAL_RULES` set through
+  `config.extraEnv` (the documented mixed-mode escape hatch) makes it report
+  a false failure — noted in the template's comment.
 
 ### Phase 5 — docs & examples
 
@@ -392,7 +416,8 @@ UI editing is disabled while a domain is file-owned.
 - [ ] Broken ConfigMap content at runtime: last state stays active, error
       metric increments, server keeps signing.
 - [ ] Broken path/content at startup: pod crash-loops with a clear message.
-- [ ] `helm template` fails on `manualProvision: true` + `existingConfigMap`.
+- [x] `helm template` fails on `manualProvision: true` + `existingConfigMap`
+      (covered by `make helm-test`).
 - [ ] Existing flux-example CronJob flow still works unmodified.
 
 ---

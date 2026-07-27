@@ -413,6 +413,104 @@ and minute; `0` disables the limiter. The manifest and the binary are public —
 the enrollment token gates the enrollment, not the download. `X-Forwarded-For`
 handling is inherited from `config.rateLimit.trustProxy`.
 
+## Rules provisioning (GitOps)
+
+Access rules (host grants) and CI rules are expected to be managed
+declaratively. `config.rules` has two independent switches: whether in-app
+editing is allowed at all, and where each domain gets its rules from.
+
+| `config.rules.manualProvision` | `existingConfigMap` of the domain | CRUD API | `…/apply` API | UI editing |
+|---|---|---|---|---|
+| `false` (default) | unset | 403 `manual_rules_disabled` | allowed | hidden |
+| `true` | unset | allowed | allowed | shown |
+| any | set | 403 `rules_file_managed` | 403 `rules_file_managed` | hidden |
+
+The two domains are independent: host rules can come from a ConfigMap while
+CI rules stay on the `…/apply` path. Reading is never gated — the rules pages
+stay visible for admins and auditors, only without Add/Edit/Delete.
+
+The chart refuses `manualProvision: true` together with any
+`existingConfigMap` at render time: a file-owned domain rejects every API
+write, so the buttons would be dead UI. Mixed mode (one domain hand-edited,
+the other Git-owned) is deliberately not offered by the chart — set
+`GSSH_MANUAL_RULES` via `config.extraEnv` if you really need it.
+
+### ConfigMap sources
+
+The chart does **not** create the rules ConfigMaps — they are maintained
+separately (kustomize `configMapGenerator`, Flux, plain manifest). The file
+schema is the one `gssh-admin apply` uses, split per domain:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gssh-host-rules
+data:
+  host-rules.yaml: |
+    grants:
+      - group: deployers
+        tags:
+          env: prod
+        principals: [deploy]
+        sudo: false
+        max_validity: 8h
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gssh-ci-rules
+data:
+  ci-rules.yaml: |
+    ci_grants:
+      - project: infra/ansible
+        ref: main
+        protected_only: true
+        tags:
+          env: prod
+        principals: [deploy]
+        max_validity: 1h
+```
+
+```yaml
+# values.yaml
+config:
+  rules:
+    manualProvision: false   # default; shown for clarity
+    host:
+      existingConfigMap: gssh-host-rules
+      key: host-rules.yaml   # default key; set if your ConfigMap uses another
+    ci:
+      existingConfigMap: gssh-ci-rules
+      key: ci-rules.yaml
+```
+
+Each ConfigMap is mounted as its own volume with an `items:` projection onto
+`/etc/guided-ssh/rules/<domain>/rules.yaml`, read-only and **without
+`subPath`** — a subPath mount never receives ConfigMap updates. The
+`GSSH_HOST_RULES_FILE` / `GSSH_CI_RULES_FILE` env vars are derived from it.
+
+Behavior of a file-owned domain:
+
+- **Startup**: file missing or invalid ⇒ the server exits. A wrong key name
+  or broken YAML is a deployment bug and shows up as a crash loop.
+- **Runtime**: the file is re-applied every 30 s. Together with the kubelet's
+  ConfigMap sync, an edit propagates within roughly 1–2 minutes. The loop is
+  also drift correction: rules changed out of band in the database are
+  reverted on the next tick.
+- An **empty list** (`grants: []`) deletes all rules of that domain; a file
+  *without* the `grants:` key is a validation error, not "delete everything".
+- A file that turns invalid at runtime keeps the last applied state, logs the
+  error and increments `gssh_rules_file_sync_errors_total{domain}` — a bad
+  rules push must not stop certificate signing.
+- Applies are audited with the actor `system:rules-file`.
+- Host entries without an explicit `issuer:` fall back to
+  `config.oidc.issuer` (the API path takes it from the admin's token, which
+  the reconciler does not have). Without either, the startup apply fails.
+
+`helm test` renders a pod that compares the server's `/v1/ui/config`
+editability flags against these values.
+
 ## Metrics
 
 `/metrics` listens on its own port (9090) and is not exposed through the
@@ -446,6 +544,9 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `config.ci.issuer` / `audience` | `""` | GitLab CI issuer; empty ⇒ `/v1/sign/ci` disabled |
 | `config.groups.admin/auditor` | `""` | IdP role groups (admin ⊃ auditor; empty ⇒ role granted to nobody) |
 | `config.keycloak.*` | `""` | Group sync via Keycloak admin API |
+| `config.rules.manualProvision` | `false` | In-app rule editing (UI + CRUD API); see [Rules provisioning](#rules-provisioning-gitops) |
+| `config.rules.host.existingConfigMap` / `ci.existingConfigMap` | `""` | ConfigMap with the declarative rules of that domain (chart-external); set ⇒ the domain rejects all API writes |
+| `config.rules.host.key` / `ci.key` | `host-rules.yaml` / `ci-rules.yaml` | Key inside that ConfigMap |
 | `config.rateLimit.trustProxy` | `true` | Client IP from `X-Forwarded-For` (behind ingress) |
 | `agent.enabled` / `agent.tlsNames` | `true` / service DNS | Agent API (mTLS) |
 | `hostRollout.enabled` | `false` | One-command host install; `true` requires the values below |
@@ -508,6 +609,30 @@ Semantic changes:
 - The **web-UI login is rejected** for users with neither the admin nor the
   auditor role (previously a role-less session was created); the login page
   explains the missing role. An empty group value grants the role to nobody.
+
+## Migration: in-app rule editing is off by default
+
+**Breaking change on upgrade.** Rule editing in the web UI (and the CRUD API
+behind it) used to be available to every admin. It is now opt-in and disabled
+by default:
+
+| Before | After |
+|---|---|
+| Add/Edit/Delete for grants and CI rules always visible to admins | visible only with `config.rules.manualProvision: true` |
+| `POST`/`PUT`/`DELETE` on `/v1/admin/grants…` and `/v1/admin/ci-grants…` open to admins | 403 `manual_rules_disabled` unless `manualProvision` is set |
+
+To keep the previous behavior, set:
+
+```yaml
+config:
+  rules:
+    manualProvision: true
+```
+
+Unaffected: reading rules, and the declarative `…/apply` path
+(`gssh-admin apply`, the sync CronJob) — those keep working with the new
+default. See [Rules provisioning](#rules-provisioning-gitops) for the full
+matrix and the ConfigMap-based alternative.
 
 ## Chart release (GitHub Pages)
 

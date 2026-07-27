@@ -88,6 +88,31 @@ self-managed setup on start. */}}
 {{- end }}
 {{- end }}
 
+{{/* Mount directory and file path of a declarative rules file. The key inside
+the ConfigMap is projected onto the fixed file name rules.yaml, so the env
+value stays independent of the key name. */}}
+{{- define "guided-ssh.rulesDir" -}}/etc/guided-ssh/rules/{{ .domain }}{{- end }}
+{{- define "guided-ssh.rulesFile" -}}{{ include "guided-ssh.rulesDir" . }}/rules.yaml{{- end }}
+
+{{/* Rules provisioning env (GSSH_MANUAL_RULES + the per-domain file paths).
+A configured ConfigMap makes that domain file-owned server-side; the
+mutually-exclusive check lives in guided-ssh.validateValues. */}}
+{{- define "guided-ssh.rulesEnv" -}}
+{{- $rules := .Values.config.rules -}}
+{{- if $rules.manualProvision }}
+- name: GSSH_MANUAL_RULES
+  value: "true"
+{{- end }}
+{{- if $rules.host.existingConfigMap }}
+- name: GSSH_HOST_RULES_FILE
+  value: {{ include "guided-ssh.rulesFile" (dict "domain" "host") | quote }}
+{{- end }}
+{{- if $rules.ci.existingConfigMap }}
+- name: GSSH_CI_RULES_FILE
+  value: {{ include "guided-ssh.rulesFile" (dict "domain" "ci") | quote }}
+{{- end }}
+{{- end }}
+
 {{/* Fail fast on values keys renamed or removed by config restructurings
 (server/client OIDC split, readonly-role removal), so an upgrade with stale
 values stops at render time with a migration hint instead of silently
@@ -113,6 +138,29 @@ user can null them. */}}
 {{- end -}}
 {{- if $legacy -}}
 {{- fail (printf "these values were renamed or removed — set: %s (migration notes in the chart README)" (join ", " $legacy)) -}}
+{{- end -}}
+{{- include "guided-ssh.validateRules" . -}}
+{{- end }}
+
+{{/* One writer per rule domain: a domain fed from a rules file rejects every
+API write, so in-app editing next to it would only produce dead UI. The chart
+therefore refuses the combination outright instead of letting the file win
+silently (the server-side gate does allow it — mixed mode stays reachable via
+config.extraEnv for anyone who really needs it). */}}
+{{- define "guided-ssh.validateRules" -}}
+{{- with .Values.config.rules -}}
+{{- $files := list -}}
+{{- if .host.existingConfigMap }}{{- $files = append $files "config.rules.host.existingConfigMap" }}{{- end -}}
+{{- if .ci.existingConfigMap }}{{- $files = append $files "config.rules.ci.existingConfigMap" }}{{- end -}}
+{{- if and .manualProvision $files -}}
+{{- fail (printf "config.rules.manualProvision=true is mutually exclusive with %s — a rules file owns its domain and rejects every API write, so in-app editing would be dead UI (chart README: Rules provisioning)" (join ", " $files)) -}}
+{{- end -}}
+{{- if and .host.existingConfigMap (not .host.key) -}}
+{{- fail "config.rules.host.key must name the key inside config.rules.host.existingConfigMap (default: host-rules.yaml)" -}}
+{{- end -}}
+{{- if and .ci.existingConfigMap (not .ci.key) -}}
+{{- fail "config.rules.ci.key must name the key inside config.rules.ci.existingConfigMap (default: ci-rules.yaml)" -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 

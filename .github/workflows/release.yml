@@ -318,6 +318,8 @@ jobs:
         uses: helm/chart-testing-action@v2
       - name: Chart-Lint (ct)
         run: ct lint --config .github/ct.yaml
+      - name: Chart render checks
+        run: make helm-test
 
   coverage-report:
     name: Combined Coverage Report

@@ -1,0 +1,41 @@
+{{- $rules := .Values.config.rules }}
+{{- $hostEditable := and $rules.manualProvision (not $rules.host.existingConfigMap) }}
+{{- $ciEditable := and $rules.manualProvision (not $rules.ci.existingConfigMap) }}
+# Closes the loop between the chart values and the running server: the
+# server computes the editability flags from its own env, so a mis-wired
+# GSSH_MANUAL_RULES / GSSH_*_RULES_FILE shows up here instead of only as a
+# UI that silently keeps (or loses) its Add/Edit/Delete buttons.
+# Caveat: setting those variables through config.extraEnv bypasses the
+# values used below — this test then reports a false failure.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "guided-ssh.fullname" . }}-test-rules
+  labels:
+    {{- include "guided-ssh.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: rules-provisioning
+      image: busybox:1.37
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          cfg=$(wget -q -O- http://{{ include "guided-ssh.fullname" . }}:{{ .Values.service.port }}/v1/ui/config)
+          echo "$cfg"
+          echo "$cfg" | grep -q '"grants_editable":{{ $hostEditable }}'
+          echo "$cfg" | grep -q '"ci_grants_editable":{{ $ciEditable }}'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 65532
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault

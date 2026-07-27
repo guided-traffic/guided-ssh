@@ -16,7 +16,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.date=$(DATE)
 
 .PHONY: all build cross packages test cover test-unit-coverage test-integration-coverage \
-	e2e loadtest lint fmt gosec vuln cyclo image clean web web-api web-test
+	e2e helm-test loadtest lint fmt gosec vuln cyclo image clean web web-api web-test
 
 # Target platforms of the user CLI gssh (plan phase 4)
 CROSS_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
@@ -78,6 +78,10 @@ test-integration-coverage:
 ## ansible optional). Switches: E2E_KEEP=1, E2E_SKIP_BUILD=1, E2E_CLUSTER=name
 e2e:
 	go test -tags e2e -count=1 -timeout 45m -v ./test/e2e
+
+## helm-test: `helm template` golden checks of the chart (helm needed, no cluster)
+helm-test:
+	hack/helm-render-test.sh
 
 ## loadtest: load test of the sign endpoint (Docker needed for Postgres);
 ## target via GSSH_LOAD_TARGET_RATE (default 50 certificates/s)
