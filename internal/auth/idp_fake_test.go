@@ -29,6 +29,11 @@ type fakeIDP struct {
 	// lastCodeVerifier is the PKCE verifier last seen during the code
 	// exchange.
 	lastCodeVerifier atomic.Value
+	// lastAuthScope is the scope parameter last seen at /auth.
+	lastAuthScope atomic.Value
+	// scopesSupported is published in the discovery document when non-nil;
+	// set it before the flow is built.
+	scopesSupported []string
 }
 
 const (
@@ -50,14 +55,18 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, map[string]any{
+		discovery := map[string]any{
 			"issuer":                                idp.Issuer(),
 			"authorization_endpoint":                idp.Issuer() + "/auth",
 			"token_endpoint":                        idp.Issuer() + "/token",
 			"jwks_uri":                              idp.Issuer() + "/keys",
 			"device_authorization_endpoint":         idp.Issuer() + "/device",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
-		})
+		}
+		if idp.scopesSupported != nil {
+			discovery["scopes_supported"] = idp.scopesSupported
+		}
+		writeJSON(t, w, discovery)
 	})
 	mux.HandleFunc("GET /keys", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
@@ -66,6 +75,7 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	})
 	mux.HandleFunc("GET /auth", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		idp.lastAuthScope.Store(q.Get("scope"))
 		redirect, err := url.Parse(q.Get("redirect_uri"))
 		if err != nil {
 			http.Error(w, "redirect_uri missing", http.StatusBadRequest)

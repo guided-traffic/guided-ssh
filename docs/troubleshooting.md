@@ -32,6 +32,25 @@ taken from the code (as of Phase 13). Background:
   use a fresh token — the groups used at issuance come from the token
   claims).
 
+### 403 — "no access grants … the token carries no groups claim"
+
+- **Cause**: the ID token contains no `groups` at all, so no grant can
+  match. Almost always the client did not request the `groups` scope: a
+  `scopes:` line in `~/.config/guided-ssh/config.yaml` that omits it, or an
+  IdP client that does not release the claim. Without a `scopes:` key the
+  CLI asks for `openid profile email groups` on its own (it drops `groups`
+  only if the issuer's discovery publishes a `scopes_supported` list
+  without it, see [`internal/auth/flow.go`](../internal/auth/flow.go)).
+- **Diagnosis**: server log (`sign/user: no grants`) shows an empty
+  `groups`; the authorize URL printed by `gssh login` shows the requested
+  `scope`; `curl -s <issuer>/.well-known/openid-configuration | jq
+  .scopes_supported` shows what the IdP advertises.
+- **Fix**: remove a narrowing `scopes:` line from the config (or set
+  `scopes: [openid, profile, email, groups]`), and give the IdP client a
+  groups mapper — Dex: `groups` is served on request; Keycloak: a `groups`
+  client scope assigned to the CLI client, otherwise Keycloak answers an
+  unrequestable scope with `invalid_scope`.
+
 ### 403 — "user is disabled"
 
 - **Cause**: the group sync has marked the user as inactive (offboarding).
@@ -79,6 +98,17 @@ taken from the code (as of Phase 13). Background:
 
 - No valid guided-ssh certificate in the agent — intentionally scriptable.
   `gssh login` (or `--if-needed` in the Match-exec integration).
+
+### Settings from config.yaml are gone after an install
+
+- **Cause**: `client.sh` rewrites `~/.config/guided-ssh/config.yaml` with
+  the values of the server it was fetched from — that is what makes a
+  re-install the way to switch environments. Hand-added keys (`validity`,
+  `scopes`) are not carried over.
+- **Fix**: the previous file is right next to it as `config.yaml.bak`; copy
+  the keys you need back. A `pin_sha256` for the *same* `api_url` survives
+  the rewrite automatically; a pin belonging to another server is dropped
+  with a warning (it would not match the new server anyway).
 
 ## Host login fails (certificate present, sshd rejects it)
 

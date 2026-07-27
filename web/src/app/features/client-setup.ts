@@ -118,8 +118,10 @@ export function manualConfig(baseUrl: string, config: UiConfig | null): string {
             </div>
             <p class="hint-text dim">
               Installs <code>gssh {{ m.version }}</code> into <code>~/.local/bin</code> and
-              writes <code>~/.config/guided-ssh/config.yaml</code> — an existing
-              configuration is kept.
+              writes <code>~/.config/guided-ssh/config.yaml</code> with this server's
+              values — an existing configuration is replaced (kept as
+              <code>config.yaml.bak</code>), so re-running the command is also how you
+              switch environments.
             </p>
 
             <details>

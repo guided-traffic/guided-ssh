@@ -101,6 +101,9 @@ api_url: https://gssh.example.com
 issuer: https://idp.example.com/realms/example
 client_id: gssh-cli
 # optional:
+# scopes: [openid, profile, email, groups]
+#   default; groups is what grants are matched on, so it is only dropped
+#   when the issuer's discovery advertises scopes without it (auth.defaultScopes)
 # pin_sha256: <base64 SHA-256 of the server SPKI — replaces the CA check>
 # validity: 8h        # desired validity (server policy maximum takes precedence)
 ```

@@ -55,6 +55,19 @@ const defaultUserValidity = 16 * time.Hour
 // hosts); stays under the policy limit of 5 minutes.
 const signBackdate = time.Minute
 
+// noGrantsMessage explains a refused certificate. A token entirely without
+// groups is far more often a client that did not request the groups scope
+// than a user without access — grants are matched by group, so the hint
+// points at the likely cause instead of at a phantom authz problem.
+func noGrantsMessage(groups []string) string {
+	if len(groups) == 0 {
+		return "no access grants for this user — the token carries no groups claim; " +
+			"check that the client requests the `groups` scope (config.yaml: scopes) " +
+			"and that the IdP releases it — certificate will not be issued"
+	}
+	return "no access grants for this user — certificate will not be issued"
+}
+
 // userExtensions are the default extensions of user certificates.
 func userExtensions() map[string]string {
 	return map[string]string{
@@ -112,7 +125,7 @@ func handleSignUser(certAuthority *ca.CA, verifier TokenVerifier, mapper *auth.M
 		}
 		if len(userGrants) == 0 {
 			logger.Info("sign/user: no grants", "subject", claims.Subject, "groups", claims.Groups)
-			http.Error(w, "no access grants for this user — certificate will not be issued", http.StatusForbidden)
+			http.Error(w, noGrantsMessage(claims.Groups), http.StatusForbidden)
 			return
 		}
 

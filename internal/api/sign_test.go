@@ -309,6 +309,30 @@ func TestSignUserRejectedWithoutGrant(t *testing.T) {
 	if !strings.Contains(string(body), "grants") {
 		t.Errorf("error message without a reference to grants: %s", body)
 	}
+	// A token that does carry groups must not get the scope hint — it would
+	// point at the wrong cause.
+	if strings.Contains(string(body), "groups claim") {
+		t.Errorf("scope hint although the token carries groups: %s", body)
+	}
+}
+
+// TestSignUserWithoutGroupsHintsAtScope: a token entirely without groups is
+// almost always a client that never requested the groups scope — the 403
+// says so instead of suggesting a missing grant.
+func TestSignUserWithoutGroupsHintsAtScope(t *testing.T) {
+	fs := newFakeAuthStore()
+	fs.noGrants = true
+	claims := testClaims()
+	claims.Groups = nil
+	srv := newSignServer(t, fs, &fakeVerifier{token: testToken, claims: claims})
+
+	status, body := postSign(t, srv.URL, testToken, map[string]any{"public_key": testPublicKey(t)})
+	if status != http.StatusForbidden {
+		t.Fatalf("without groups: status %d (expected 403): %s", status, body)
+	}
+	if !strings.Contains(string(body), "groups") || !strings.Contains(string(body), "scope") {
+		t.Errorf("403 without a hint at the groups scope: %s", body)
+	}
 }
 
 func TestSignUserValidityCappedByGrant(t *testing.T) {

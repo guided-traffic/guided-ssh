@@ -77,6 +77,17 @@ sha_for_platform() {
     esac
 }
 
+# config_value reads a top-level scalar out of an existing config.yaml:
+# first match wins, surrounding quotes and trailing blanks are stripped.
+# Deliberately not a YAML parser — it only has to recognize the lines this
+# script itself writes.
+config_value() {
+    sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" "$2" 2>/dev/null \
+        | head -n 1 \
+        | tr -d '\r' \
+        | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
 # verify_sha checks the download. macOS ships shasum instead of sha256sum —
 # but the check is never silently skipped: without either tool we abort.
 verify_sha() {
@@ -153,25 +164,57 @@ main() {
     mv -f "$tmp" "$bindir/gssh" || fail "installing $bindir/gssh failed"
     tmp=''
 
-    # 4. Configuration — never overwritten: it may point at another server or
-    #    carry a pin the user set deliberately. Editing the YAML is the
-    #    interface, the binary is updated regardless.
-    if [ -e "$config" ]; then
-        echo "gssh-install: existing configuration kept: $config"
-    else
-        umask 077
-        mkdir -p "$config_dir" || fail "creating $config_dir failed"
-        {
-            echo "api_url: \"$SERVER_URL\""
-            echo "issuer: \"$ISSUER\""
-            echo "client_id: \"$CLIENT_ID\""
-            if [ "$want_pin" = 1 ]; then
-                echo "pin_sha256: \"$PIN\""
-            fi
-        } >"$config" || fail "writing $config failed"
-        chmod 0600 "$config"
-        echo "gssh-install: configuration written: $config"
+    # 4. Configuration — always rewritten from this server's values, so an
+    #    install is also how you switch environments: after it, the client
+    #    talks to the server it was just installed from, never to a leftover
+    #    issuer/API of another instance. The previous file is kept as
+    #    <config>.bak, so manual additions (validity, scopes) can be copied
+    #    back.
+    #
+    #    Exception, on purpose: a pin the user set for THIS server survives
+    #    the rewrite — dropping it silently would downgrade a pinned client
+    #    to plain WebPKI. A pin for another api_url is not carried over: it
+    #    belongs to a different server and would only break the connection.
+    umask 077
+    mkdir -p "$config_dir" || fail "creating $config_dir failed"
+    pin=''
+    if [ "$want_pin" = 1 ]; then
+        pin="$PIN"
     fi
+    if [ -e "$config" ]; then
+        old_api_url="$(config_value api_url "$config")"
+        old_pin="$(config_value pin_sha256 "$config")"
+        cp -p "$config" "$config.bak" || fail "backing up $config to $config.bak failed"
+        if [ -n "$old_pin" ] && [ -z "$pin" ]; then
+            case "$old_pin" in
+                # base64 only — anything else would end up unescaped in a
+                # double-quoted YAML scalar.
+                *[!A-Za-z0-9+/=]*)
+                    echo "gssh-install: previous pin_sha256 is not base64 — dropped" >&2 ;;
+                *)
+                    if [ "$old_api_url" = "$SERVER_URL" ]; then
+                        pin="$old_pin"
+                        echo "gssh-install: keeping the configured pin for $SERVER_URL"
+                    else
+                        echo "gssh-install: warning: the previous configuration pinned $old_api_url — that pin does not apply to $SERVER_URL and was dropped" >&2
+                    fi ;;
+            esac
+        fi
+        if [ -n "$old_api_url" ] && [ "$old_api_url" != "$SERVER_URL" ]; then
+            echo "gssh-install: switching configuration from $old_api_url to $SERVER_URL"
+        fi
+        echo "gssh-install: existing configuration replaced (previous: $config.bak)"
+    fi
+    {
+        echo "api_url: \"$SERVER_URL\""
+        echo "issuer: \"$ISSUER\""
+        echo "client_id: \"$CLIENT_ID\""
+        if [ -n "$pin" ]; then
+            echo "pin_sha256: \"$pin\""
+        fi
+    } >"$config" || fail "writing $config failed"
+    chmod 0600 "$config"
+    echo "gssh-install: configuration written: $config"
 
     # 5. PATH hint — not an error: the binary is installed either way.
     case ":${PATH:-}:" in
