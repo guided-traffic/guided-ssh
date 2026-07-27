@@ -313,15 +313,114 @@ migrates idempotently on startup, with the same lock).
 
 ## Agent API (mTLS)
 
-Host agents (`gssh-agentd`) speak mTLS on port 8443. TLS terminates in the
-application — **no** HTTP ingress, instead:
+Host agents (`gssh-agentd`) speak mTLS on port 8443, served by
+`<fullname>-agent` (Service, and — when enabled — Ingress). TLS terminates in
+the **server**: it presents a certificate from the internal mTLS CA and
+authenticates agents by client certificate.
 
-- `agent.service.type=LoadBalancer` (the default service is ClusterIP), or
-- an ingress controller with TLS passthrough (e.g. ingress-nginx
-  `--enable-ssl-passthrough`).
+> **Anything that terminates TLS in front of it breaks the agent path.** A
+> normal (TLS-terminating) ingress presents its own certificate and never asks
+> for a client certificate — every agent connection fails the handshake. What
+> the agent endpoint needs is raw TCP to port 8443.
 
-`agent.tlsNames` must contain the DNS name agents use to reach the server
-(default: cluster-internal service name).
+Four ways to deliver that raw TCP:
+
+| Exposure | Values | Agent source IP seen by the server | `hostRollout.agentPublicUrl` |
+|---|---|---|---|
+| **In-cluster only** (default) | `agent.service.type: ClusterIP` | real | n/a |
+| **Dedicated IP** | `agent.service.type: LoadBalancer` (+ `agent.service.annotations` for LB class/IP) | LB-dependent (often SNAT'ed to a node IP) | explicit, `https://<host>:8443` |
+| **NodePort** behind an external LB/appliance | `agent.service.type: NodePort` | appliance-dependent | explicit |
+| **TLS-passthrough ingress** | `agent.ingress.*` (below) | ingress controller pod IP | derived from `agent.ingress.host` |
+
+### TLS-passthrough ingress (`agent.ingress`)
+
+An ingress controller that does **SSL/TLS passthrough** routes on the SNI of
+the ClientHello and forwards the raw stream — the TLS session stays end-to-end
+between agent and server, so mTLS works unchanged and the controller never
+holds the agent-facing private key. This costs no extra LoadBalancer IP: the
+agent hostname points at the same address as the API/UI ingress.
+
+```yaml
+# values.yaml
+agent:
+  ingress:
+    enabled: true
+    # Class of the passthrough-capable controller — may differ from
+    # ingress.className (the API/UI ingress terminates TLS normally).
+    className: haproxy
+    # Bare DNS name; scheme, port, path or a wildcard fail at render time.
+    host: gssh-agent.example.com
+    annotations:
+      haproxy-ingress.github.io/ssl-passthrough: "true"
+```
+
+Passthrough is switched on per controller, by annotation — the chart stays
+controller-agnostic and renders a plain `networking.k8s.io/v1` Ingress
+(one rule, path `/`, backend `<fullname>-agent:agent`):
+
+| Controller | Annotation | Notes |
+|---|---|---|
+| haproxy-ingress (jcmoraisjr) | `haproxy-ingress.github.io/ssl-passthrough: "true"` | routes on the Ingress rule host |
+| haproxytech kubernetes-ingress | `haproxy.org/ssl-passthrough: "true"` | switches the whole frontend to SNI inspection |
+| ingress-nginx | `nginx.ingress.kubernetes.io/ssl-passthrough: "true"` | controller must run with `--enable-ssl-passthrough` |
+
+Quote the value (`"true"`) — an unquoted YAML boolean is not what the
+controllers match on. Traefik and Gateway API are not templated: bring your
+own `IngressRouteTCP` / `TLSRoute` (passthrough mode) against the same
+Service.
+
+The Ingress deliberately carries **no `tls:` block**: there is no controller
+certificate on a passthrough vhost, and a `secretName` would make some
+controllers start terminating — the exact failure mode described above.
+
+**One hostname, three consumers.** With `agent.ingress.enabled` the host
+becomes the single source of truth and feeds two derivations:
+
+| Derived | Value | Overridden by |
+|---|---|---|
+| `GSSH_AGENT_TLS_NAMES` | default SANs **+** `agent.ingress.host` | explicit `agent.tlsNames` (replaces the whole list) |
+| `GSSH_AGENT_PUBLIC_URL` | `https://<agent.ingress.host>` — no port, the passthrough entry is the controller's 443 | explicit `hostRollout.agentPublicUrl` |
+
+An agent URL on any other port (e.g. a LoadBalancer on `:8443`) therefore
+stays an explicit `hostRollout.agentPublicUrl`. A **disabled** `agent.ingress`
+derives nothing, even with a host set.
+
+**Verify a rollout** — the endpoint must answer with the *internal CA's*
+certificate, not the ingress wildcard:
+
+```bash
+openssl s_client -connect gssh-agent.example.com:443 \
+  -servername gssh-agent.example.com </dev/null 2>/dev/null |
+  openssl x509 -noout -issuer -ext subjectAltName
+```
+
+A wildcard/Let's Encrypt issuer here means the passthrough annotation is not
+in effect — the controller is terminating.
+
+**Known limitation — source IP.** With passthrough the server sees the ingress
+controller's pod IP, not the agent's; agent-side audit entries record that IP.
+Agent authentication is mTLS, not IP-based, so this weakens no access control.
+PROXY protocol support to restore the real address is planned
+([design](../../../docs/major-tickets/AGENT_INGRESS.md)) — until then the
+controller must **not** be configured to send PROXY headers: the listener
+would read them as garbage TLS bytes. (`config.rateLimit.trustProxy` is
+HTTP-header based and does not apply to this raw TLS listener.)
+
+**NetworkPolicy.** With `networkPolicy.enabled=true`, agent traffic now
+arrives from the controller's pods rather than an LB — `networkPolicy.agentFrom`
+takes the peers:
+
+```yaml
+networkPolicy:
+  enabled: true
+  agentFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-haproxy
+```
+
+Design rationale, feasibility and the full rollout checklist:
+[docs/major-tickets/AGENT_INGRESS.md](../../../docs/major-tickets/AGENT_INGRESS.md).
 
 ## Host rollout (one-command install)
 
@@ -346,10 +445,27 @@ helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
   --set config.publicURL=https://gssh.example.com
 ```
 
-`agentPublicUrl` is never derived — a wrong agent URL would land unnoticed in
-the `config.yaml` of every enrolled host. `config.publicURL` is the server's
-external public URL (also used for the UI login redirect and the client
-install) and must be https here.
+`agentPublicUrl` is only ever derived from `agent.ingress.host` (see
+[Agent API](#agent-api-mtls)) — an operator-declared public name whose Ingress
+is exactly the path agents take. Nothing else is guessed: a wrong agent URL
+would land unnoticed in the `config.yaml` of every enrolled host. With a
+passthrough ingress the whole block collapses to one hostname:
+
+```bash
+helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
+  --set hostRollout.enabled=true \
+  --set config.publicURL=https://gssh.example.com \
+  --set agent.ingress.enabled=true \
+  --set agent.ingress.className=haproxy \
+  --set agent.ingress.host=gssh-agent.example.com \
+  --set-string 'agent.ingress.annotations.haproxy-ingress\.github\.io/ssl-passthrough=true'
+# ⇒ Ingress gssh-agent.example.com → agent Service, that name in the
+#   certificate SANs, and https://gssh-agent.example.com in every install
+#   command — no separate agentPublicUrl.
+```
+
+`config.publicURL` is the server's external public URL (also used for the UI
+login redirect and the client install) and must be https here.
 
 ### Which pin source (`hostRollout.pin.source`)
 
@@ -548,9 +664,15 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `config.rules.host.existingConfigMap` / `ci.existingConfigMap` | `""` | ConfigMap with the declarative rules of that domain (chart-external); set ⇒ the domain rejects all API writes |
 | `config.rules.host.key` / `ci.key` | `host-rules.yaml` / `ci-rules.yaml` | Key inside that ConfigMap |
 | `config.rateLimit.trustProxy` | `true` | Client IP from `X-Forwarded-For` (behind ingress) |
-| `agent.enabled` / `agent.tlsNames` | `true` / service DNS | Agent API (mTLS) |
+| `agent.enabled` | `true` | Agent API (mTLS) on port 8443 |
+| `agent.tlsNames` | `""` (= service DNS, plus `agent.ingress.host`) | SANs of the agent server certificate; an explicit value replaces the whole default list |
+| `agent.service.type` / `annotations` | `ClusterIP` / `{}` | Exposure of the agent port — see [Agent API](#agent-api-mtls) |
+| `agent.ingress.enabled` | `false` | TLS-**passthrough** ingress for the agent port; requires `agent.enabled` and `agent.service.enabled` |
+| `agent.ingress.className` | `""` | Ingress class of the passthrough-capable controller (may differ from `ingress.className`) |
+| `agent.ingress.host` | `""` (required with `enabled`) | Public agent hostname, bare DNS name; feeds the certificate SANs and `hostRollout.agentPublicUrl` |
+| `agent.ingress.annotations` | `{}` | Controller-specific passthrough annotations (no defaults — see the table above) |
 | `hostRollout.enabled` | `false` | One-command host install; `true` requires the values below |
-| `hostRollout.agentPublicUrl` | `""` (required with `enabled`) | External mTLS agent URL written into every enrolled host |
+| `hostRollout.agentPublicUrl` | `""` (required with `enabled`, unless derived from `agent.ingress.host`) | External mTLS agent URL written into every enrolled host |
 | `hostRollout.pin.source` | `dial` | `dial` / `file` / `static` — see [Which pin source](#which-pin-source-hostrolloutpinsource) |
 | `hostRollout.pin.static` / `certSecretName` | `""` | Required for `source=static` / `source=file` |
 | `hostRollout.pin.refreshInterval` | `5m` | Refresh interval of the pin self-dial (`source=dial`) |
