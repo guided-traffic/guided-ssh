@@ -740,20 +740,10 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger) (*api.UIAuthConfig, e
 	if err != nil {
 		return nil, err
 	}
-	scopes := defaultUIScopes
-	if raw := os.Getenv(envServerOIDCScopes); raw != "" {
-		scopes = strings.Split(raw, ",")
-		for i := range scopes {
-			scopes[i] = strings.TrimSpace(scopes[i])
-		}
-	}
-	sessionTTL := defaultUISessionTTL
-	if raw := os.Getenv(envUISessionTTL); raw != "" {
-		parsed, err := time.ParseDuration(raw)
-		if err != nil || parsed <= 0 {
-			return nil, fmt.Errorf("%s: invalid duration %q (expected a go-duration > 0)", envUISessionTTL, raw)
-		}
-		sessionTTL = parsed
+	scopes := uiScopes()
+	sessionTTL, err := uiSessionTTL()
+	if err != nil {
+		return nil, err
 	}
 	logger.Info("ui login configured (server-side oidc)", "issuer", issuer, "client_id", clientID, "session_ttl", sessionTTL)
 	return &api.UIAuthConfig{
@@ -768,6 +758,35 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger) (*api.UIAuthConfig, e
 		BaseURL:    publicBaseURL(),
 		SessionTTL: sessionTTL,
 	}, nil
+}
+
+// uiScopes returns the OIDC scopes of the UI login: the comma-separated
+// GSSH_SERVER_OIDC_SCOPES if set, otherwise defaultUIScopes.
+func uiScopes() []string {
+	raw := os.Getenv(envServerOIDCScopes)
+	if raw == "" {
+		return defaultUIScopes
+	}
+	scopes := strings.Split(raw, ",")
+	for i := range scopes {
+		scopes[i] = strings.TrimSpace(scopes[i])
+	}
+	return scopes
+}
+
+// uiSessionTTL returns the lifetime of the UI session from
+// GSSH_UI_SESSION_TTL; unset falls back to defaultUISessionTTL, an
+// unparsable or non-positive value is a startup error.
+func uiSessionTTL() (time.Duration, error) {
+	raw := os.Getenv(envUISessionTTL)
+	if raw == "" {
+		return defaultUISessionTTL, nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s: invalid duration %q (expected a go-duration > 0)", envUISessionTTL, raw)
+	}
+	return parsed, nil
 }
 
 // setupDevUIAuth parses GSSH_DEV_UI_AUTH and builds the developer mode's
