@@ -140,6 +140,30 @@ user can null them. */}}
 {{- fail (printf "these values were renamed or removed — set: %s (migration notes in the chart README)" (join ", " $legacy)) -}}
 {{- end -}}
 {{- include "guided-ssh.validateRules" . -}}
+{{- include "guided-ssh.validateAgentIngress" . -}}
+{{- end }}
+
+{{/* Agent ingress guards: the Ingress needs the agent Service as backend, and
+SNI routing needs a bare DNS host. A host with scheme/port/path or a wildcard
+would render an Ingress the API server rejects — and later silently produce a
+broken certificate SAN and a broken derived agent URL. */}}
+{{- define "guided-ssh.validateAgentIngress" -}}
+{{- with .Values.agent.ingress -}}
+{{- if .enabled -}}
+{{- if not $.Values.agent.enabled -}}
+{{- fail "agent.ingress.enabled=true requires agent.enabled=true — without the agent API there is nothing to route to" -}}
+{{- end -}}
+{{- if not $.Values.agent.service.enabled -}}
+{{- fail "agent.ingress.enabled=true requires agent.service.enabled=true — the Ingress backend is the agent Service" -}}
+{{- end -}}
+{{- if not .host -}}
+{{- fail "agent.ingress.enabled=true requires agent.ingress.host (public agent DNS name — a passthrough controller routes on its SNI)" -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" .host) -}}
+{{- fail (printf "agent.ingress.host must be a bare lowercase DNS name — no scheme, port, path or wildcard (got: %q)" .host) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/* One writer per rule domain: a domain fed from a rules file rejects every

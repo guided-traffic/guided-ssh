@@ -217,12 +217,30 @@ agent:
   # public DNS name, e.g. "gssh-agent.example.com".
   tlsNames: ""
   # Separate service for the agent API; for agents outside the cluster,
-  # set type to LoadBalancer — mTLS requires TLS passthrough, not a
-  # normal ingress.
+  # set type to LoadBalancer — or expose it through agent.ingress below
+  # (TLS passthrough). A TLS-terminating ingress does NOT work.
   service:
     enabled: true
     type: ClusterIP
     port: 8443
+    annotations: {}
+  # Second ingress for the agent mTLS endpoint. Requires an ingress
+  # controller doing TLS passthrough (SNI-based routing, raw TCP to the
+  # service) — the gssh server terminates mTLS itself; a TLS-terminating
+  # ingress breaks the client-certificate handshake.
+  ingress:
+    enabled: false
+    # Class of the passthrough-capable controller (may differ from
+    # ingress.className).
+    className: ""
+    # Public agent hostname (mandatory when enabled), bare DNS name —
+    # no scheme, port, path or wildcard.
+    host: ""
+    # Passthrough is switched on per controller, e.g.
+    #   haproxy-ingress.github.io/ssl-passthrough: "true"   (jcmoraisjr)
+    #   haproxy.org/ssl-passthrough: "true"                 (haproxytech)
+    #   nginx.ingress.kubernetes.io/ssl-passthrough: "true" (ingress-nginx,
+    #     controller needs --enable-ssl-passthrough)
     annotations: {}
 
 hostRollout:
