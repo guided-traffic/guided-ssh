@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/pires/go-proxyproto"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -106,6 +109,43 @@ func TestParseTags(t *testing.T) {
 	}
 	if _, err := parseTags("=value"); err == nil {
 		t.Error("expected an error (empty key)")
+	}
+}
+
+// TestAgentListenerPlain: without the opt-in the agent listener stays a plain
+// TCP listener — a PROXY header would be read as TLS bytes.
+func TestAgentListenerPlain(t *testing.T) {
+	t.Setenv(envAgentProxyProtocol, "")
+	listener, err := agentListener(context.Background(), slog.New(slog.DiscardHandler), "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("agentListener: %v", err)
+	}
+	defer listener.Close()
+	if _, wrapped := listener.(*proxyproto.Listener); wrapped {
+		t.Error("proxy protocol wrapper active without the opt-in")
+	}
+}
+
+func TestAgentListenerProxyProtocol(t *testing.T) {
+	t.Setenv(envAgentProxyProtocol, "true")
+	t.Setenv(envAgentProxyTrusted, "10.42.0.0/16")
+	listener, err := agentListener(context.Background(), slog.New(slog.DiscardHandler), "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("agentListener: %v", err)
+	}
+	defer listener.Close()
+	if _, wrapped := listener.(*proxyproto.Listener); !wrapped {
+		t.Errorf("listener is %T, want a proxyproto.Listener", listener)
+	}
+}
+
+// TestAgentListenerBadTrustEntry: a broken trust entry must stop startup, not
+// leave the server running with an empty trust set.
+func TestAgentListenerBadTrustEntry(t *testing.T) {
+	t.Setenv(envAgentProxyProtocol, "true")
+	t.Setenv(envAgentProxyTrusted, "10.42.0.0/99")
+	if _, err := agentListener(context.Background(), slog.New(slog.DiscardHandler), "127.0.0.1:0"); err == nil {
+		t.Fatal("expected an error (malformed CIDR in the trust list)")
 	}
 }
 

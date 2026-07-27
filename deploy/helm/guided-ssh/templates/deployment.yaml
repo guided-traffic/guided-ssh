@@ -166,6 +166,11 @@ spec:
             {{- if .Values.agent.enabled }}
             - name: GSSH_AGENT_TLS_NAMES
               value: {{ include "guided-ssh.agentTLSNames" . | quote }}
+            {{- if .Values.agent.proxyProtocol.enabled }}
+            - name: GSSH_AGENT_PROXY_PROTOCOL
+              value: "true"
+            {{- include "guided-ssh.env" (dict "name" "GSSH_AGENT_PROXY_TRUSTED" "value" (join "," .Values.agent.proxyProtocol.trusted)) | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- if .Values.config.auditStream.logs }}
             - name: GSSH_AUDIT_STREAM

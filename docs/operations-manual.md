@@ -62,6 +62,8 @@ All values from `cmd/gssh-server/main.go`; mapped 1:1 in the Helm chart via
 | `GSSH_KC_CLIENT_SECRET` | empty | client secret of the sync client |
 | `GSSH_KC_SYNC_INTERVAL` | `5m` | sync interval (Go duration) |
 | `GSSH_AGENT_TLS_NAMES` | `localhost,127.0.0.1` | SANs of the agent API's mTLS server certificate (comma-separated) |
+| `GSSH_AGENT_PROXY_PROTOCOL` | empty | `true` ⇒ PROXY protocol (v1/v2) on the agent listener, so the audit log records the agent's real IP instead of the proxy's. Must be enabled **before** the proxy starts sending the header (and disabled after it stops) — otherwise the endpoint breaks |
+| `GSSH_AGENT_PROXY_TRUSTED` | empty | who may send a PROXY header: comma-separated CIDRs, IPs, or DNS names (headless Service of the proxy pods; re-resolved every 15s, unresolvable at startup ⇒ startup error). Empty with the feature on ⇒ the header is required from **every** connection |
 | `GSSH_ADMIN_GROUP` | empty | IdP group of admins; empty ⇒ no admin mutations (fail-closed) |
 | `GSSH_AUDITOR_GROUP` | empty | IdP group of auditors: all read views plus audit log read/export; admin includes this role. Both groups empty ⇒ admin API fully disabled; an empty group grants the role to nobody, and the web-UI login rejects users without any role |
 | `GSSH_SERVER_OIDC_CLIENT_ID` | empty | confidential OIDC client of the server itself (server-side UI login/BFF); set together with the secret, must differ from `GSSH_CLIENT_OIDC_CLIENT_ID` (startup error otherwise) |

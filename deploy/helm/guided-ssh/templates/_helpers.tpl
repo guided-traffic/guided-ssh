@@ -52,12 +52,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}
 
-{{/* SANs of the agent mTLS certificate (default: cluster-internal service name) */}}
+{{/* SANs of the agent mTLS certificate (default: cluster-internal service
+names). An enabled agent.ingress adds its public host: agents connect through
+it, so the certificate has to carry that name — otherwise the passthrough path
+fails verification. Explicit agent.tlsNames wins unchanged. */}}
 {{- define "guided-ssh.agentTLSNames" -}}
 {{- if .Values.agent.tlsNames }}
 {{- .Values.agent.tlsNames }}
 {{- else }}
-{{- printf "%s-agent.%s.svc,%s-agent.%s.svc.cluster.local" (include "guided-ssh.fullname" .) .Release.Namespace (include "guided-ssh.fullname" .) .Release.Namespace }}
+{{- $fullname := include "guided-ssh.fullname" . }}
+{{- $names := list (printf "%s-agent.%s.svc" $fullname .Release.Namespace) (printf "%s-agent.%s.svc.cluster.local" $fullname .Release.Namespace) }}
+{{- with .Values.agent.ingress }}
+{{- if and .enabled .host }}
+{{- $names = append $names .host }}
+{{- end }}
+{{- end }}
+{{- join "," $names }}
 {{- end }}
 {{- end }}
 
@@ -140,6 +150,59 @@ user can null them. */}}
 {{- fail (printf "these values were renamed or removed — set: %s (migration notes in the chart README)" (join ", " $legacy)) -}}
 {{- end -}}
 {{- include "guided-ssh.validateRules" . -}}
+{{- include "guided-ssh.validateAgentIngress" . -}}
+{{- include "guided-ssh.validateAgentProxy" . -}}
+{{- include "guided-ssh.validateAgentService" . -}}
+{{- end }}
+
+{{/* externalTrafficPolicy exists only on NodePort/LoadBalancer Services — the
+API server rejects it on a ClusterIP. Failing at render time keeps that mistake
+in CI instead of surfacing it in the apply step of a GitOps rollout. */}}
+{{- define "guided-ssh.validateAgentService" -}}
+{{- with .Values.agent.service -}}
+{{- with .externalTrafficPolicy -}}
+{{- if not (has . (list "Cluster" "Local")) -}}
+{{- fail (printf "agent.service.externalTrafficPolicy must be \"Cluster\" or \"Local\" (got: %q)" .) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .externalTrafficPolicy (not (has .type (list "LoadBalancer" "NodePort"))) -}}
+{{- fail (printf "agent.service.externalTrafficPolicy only applies to LoadBalancer or NodePort services — agent.service.type is %q" .type) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* PROXY protocol guard: the setting only configures the agent listener, so
+without the agent API it would be silently dead config. Whether the component
+in front actually sends the header is deliberately NOT derived from
+agent.ingress — that annotation is operator-managed and the rollout order
+matters (see README). */}}
+{{- define "guided-ssh.validateAgentProxy" -}}
+{{- if and .Values.agent.proxyProtocol.enabled (not .Values.agent.enabled) -}}
+{{- fail "agent.proxyProtocol.enabled=true requires agent.enabled=true — the PROXY protocol reader only wraps the agent listener" -}}
+{{- end -}}
+{{- end }}
+
+{{/* Agent ingress guards: the Ingress needs the agent Service as backend, and
+SNI routing needs a bare DNS host. A host with scheme/port/path or a wildcard
+would render an Ingress the API server rejects — and later silently produce a
+broken certificate SAN and a broken derived agent URL. */}}
+{{- define "guided-ssh.validateAgentIngress" -}}
+{{- with .Values.agent.ingress -}}
+{{- if .enabled -}}
+{{- if not $.Values.agent.enabled -}}
+{{- fail "agent.ingress.enabled=true requires agent.enabled=true — without the agent API there is nothing to route to" -}}
+{{- end -}}
+{{- if not $.Values.agent.service.enabled -}}
+{{- fail "agent.ingress.enabled=true requires agent.service.enabled=true — the Ingress backend is the agent Service" -}}
+{{- end -}}
+{{- if not .host -}}
+{{- fail "agent.ingress.enabled=true requires agent.ingress.host (public agent DNS name — a passthrough controller routes on its SNI)" -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" .host) -}}
+{{- fail (printf "agent.ingress.host must be a bare lowercase DNS name — no scheme, port, path or wildcard (got: %q)" .host) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/* One writer per rule domain: a domain fed from a rules file rejects every
@@ -192,8 +255,21 @@ here it already fails at render time instead of only out on the fleet. */}}
 {{- if not (hasPrefix "https://" .Values.config.publicURL) -}}
 {{- fail (printf "hostRollout needs an https public URL — config.publicURL is %q" .Values.config.publicURL) -}}
 {{- end -}}
+{{/* Only agent.ingress.host may be derived from: it is an operator-declared
+public name and its Ingress is exactly the path agents take (entry = the
+controller's 443, hence no port). Internal service names stay off limits — they
+would be rolled out to the fleet and be silently wrong. A non-443 exposure
+(e.g. LoadBalancer :8443) still needs the explicit value. */}}
+{{- $agentURL := $rollout.agentPublicUrl -}}
+{{- if not $agentURL -}}
+{{- with .Values.agent.ingress -}}
+{{- if and .enabled .host -}}
+{{- $agentURL = printf "https://%s" .host -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 - name: GSSH_AGENT_PUBLIC_URL
-  value: {{ required "hostRollout.enabled=true requires hostRollout.agentPublicUrl (external mTLS agent URL of the agents, e.g. https://gssh-agent.example.com:8443 — deliberately never derived)" $rollout.agentPublicUrl | quote }}
+  value: {{ required "hostRollout.enabled=true requires hostRollout.agentPublicUrl (external mTLS agent URL of the agents, e.g. https://gssh-agent.example.com:8443) — or enable agent.ingress with a host, then https://<agent.ingress.host> is derived" $agentURL | quote }}
 {{- if eq $source "static" }}
 - name: GSSH_PUBLIC_PIN
   value: {{ required "hostRollout.pin.source=static requires hostRollout.pin.static (base64 SPKI pin, openssl snippet in the README)" $rollout.pin.static | quote }}

@@ -292,7 +292,10 @@ func agentHost(w http.ResponseWriter, r *http.Request, deps AgentDeps) (*store.H
 
 // remoteIP is the agent's source address without the port. mTLS means a
 // direct TCP connection (no L7 proxy can sit in between), so RemoteAddr is
-// genuinely the agent's egress address — no forwarded headers to consider.
+// genuinely the peer's address — no forwarded headers to consider. Behind an
+// L4 proxy (passthrough ingress, LB) that peer is the proxy; the address is
+// restored at the listener via GSSH_AGENT_PROXY_PROTOCOL, guarded by a trust
+// policy so only the proxy itself may rewrite it (internal/proxytrust).
 func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

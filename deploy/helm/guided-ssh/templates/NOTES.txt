@@ -22,6 +22,14 @@ Agent API (mTLS): service {{ include "guided-ssh.fullname" . }}-agent, port {{ .
   SANs of the server certificate: {{ include "guided-ssh.agentTLSNames" . }}
   For agents outside the cluster: set agent.service.type=LoadBalancer and
   agent.tlsNames to the public DNS name.
+{{- if and .Values.agent.proxyProtocol.enabled (not .Values.agent.proxyProtocol.trusted) }}
+
+*** WARNING: agent.proxyProtocol.enabled=true with an empty                 ***
+*** agent.proxyProtocol.trusted list — a PROXY header is now REQUIRED from  ***
+*** EVERY connection. Agents that connect directly (not through a proxy     ***
+*** that sends the header) will fail. List the trusted senders (CIDRs, IPs, ***
+*** or the headless Service of the ingress controller pods).                ***
+{{- end }}
 {{- end }}
 
 Generate the first enrollment token:

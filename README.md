@@ -282,6 +282,12 @@ helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
   --set config.publicURL=https://gssh.example.com
 ```
 
+Exposing the agent endpoint through a **TLS-passthrough ingress** instead of a
+dedicated LoadBalancer IP replaces `agentPublicUrl` with a single
+`agent.ingress.host` — that one hostname then feeds the ingress rule, the
+agent certificate SANs, and the install command
+([chart README](deploy/helm/guided-ssh/README.md#tls-passthrough-ingress-agentingress)).
+
 This is `curl … | sudo sh` — read the security model before enabling it:
 what protects the pipeline (templated hashes, mandatory pinning, one-time
 tokens), the accepted residual risks, and why script and deb/rpm installs

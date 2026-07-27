@@ -31,3 +31,27 @@ spec:
         - secretName: guided-ssh-tls
           hosts:
             - gssh.staging.example.com
+    # Agent mTLS endpoint (port 8443) through a second, TLS-PASSTHROUGH
+    # ingress — no extra LoadBalancer IP. The controller must pass the raw
+    # stream through (SNI routing); a terminating ingress breaks the agent's
+    # client-certificate handshake. ingress-nginx additionally needs
+    # --enable-ssl-passthrough on the controller itself.
+    # The host below also lands in the agent certificate's SANs and, with
+    # hostRollout.enabled, becomes https://<host> in every install command.
+    # agent:
+    #   ingress:
+    #     enabled: true
+    #     className: nginx
+    #     host: gssh-agent.staging.example.com
+    #     annotations:
+    #       nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    #   # Real agent source IP in the audit log: the controller prepends a
+    #   # PROXY header, the server trusts it only from the listed senders.
+    #   # Roll this out FIRST, the controller's send-proxy annotation second —
+    #   # the reverse order breaks the agent endpoint (chart README).
+    #   proxyProtocol:
+    #     enabled: true
+    #     trusted:
+    #       # Headless Service of the controller pods — a ClusterIP name would
+    #       # resolve to an address that never appears as a source.
+    #       - haproxy-pods.ingress.svc.cluster.local

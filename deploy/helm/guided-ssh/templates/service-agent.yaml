@@ -1,6 +1,7 @@
 {{- if and .Values.agent.enabled .Values.agent.service.enabled }}
-# Separate service for the agent API (mTLS): agents outside the cluster
-# need TLS passthrough — hence no ingress, but usually a LoadBalancer instead.
+# Separate service for the agent API (mTLS): agents outside the cluster need
+# raw TCP to this port — a LoadBalancer, or a passthrough Ingress in front of
+# it (agent.ingress, templates/ingress-agent.yaml). Nothing may terminate TLS.
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,6 +14,9 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.agent.service.type }}
+  {{- with .Values.agent.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
   ports:
     - name: agent
       port: {{ .Values.agent.service.port }}

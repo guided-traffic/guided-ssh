@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/pires/go-proxyproto"
 	"golang.org/x/oauth2"
 
 	"github.com/guided-traffic/guided-ssh/internal/agentdist"
@@ -36,6 +37,7 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/clientdist"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
+	"github.com/guided-traffic/guided-ssh/internal/proxytrust"
 	"github.com/guided-traffic/guided-ssh/internal/rulespec"
 	"github.com/guided-traffic/guided-ssh/internal/rulesync"
 	"github.com/guided-traffic/guided-ssh/internal/store"
@@ -87,6 +89,14 @@ const (
 
 	// Agent API (Phase 5): SANs of the mTLS server certificate, comma-separated.
 	envAgentTLSNames = "GSSH_AGENT_TLS_NAMES" // default: localhost,127.0.0.1
+
+	// PROXY protocol on the agent listener (AGENT_INGRESS, D5): restores the
+	// agent's real source IP behind a passthrough ingress or an LB. Default
+	// off — enabling it while nothing in front sends the header (or the other
+	// way round) breaks the endpoint, so it is an explicit opt-in that must be
+	// rolled out before the sender's send-proxy setting.
+	envAgentProxyProtocol = "GSSH_AGENT_PROXY_PROTOCOL" // "true" enables the PROXY protocol reader
+	envAgentProxyTrusted  = "GSSH_AGENT_PROXY_TRUSTED"  // comma-separated CIDRs, IPs or DNS names; empty ⇒ header required from everyone
 
 	// Admin API (Phase 6): IdP group of the admins; empty ⇒ admin API disabled.
 	envAdminGroup = "GSSH_ADMIN_GROUP"
@@ -594,7 +604,11 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 		if err != nil {
 			return err
 		}
-		go func() { errCh <- agentServer.ListenAndServeTLS("", "") }()
+		agentLn, err := agentListener(ctx, logger, agentListen)
+		if err != nil {
+			return err
+		}
+		go func() { errCh <- agentServer.ServeTLS(agentLn, "", "") }()
 		logger.Info("agent api started (mtls)", "listen", agentListen)
 	}
 
@@ -665,6 +679,48 @@ func newAgentServer(ctx context.Context, certAuthority *ca.CA, st *store.Store, 
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 		},
 		ReadHeaderTimeout: 10 * time.Second,
+	}, nil
+}
+
+// agentProxyHeaderTimeout bounds the pre-TLS phase of a connection on the
+// agent listener: a peer that opens a connection and then stalls holds a
+// goroutine and an fd only for this long before the header read gives up.
+const agentProxyHeaderTimeout = 5 * time.Second
+
+// agentListener opens the TCP listener of the agent API. With
+// GSSH_AGENT_PROXY_PROTOCOL=true it is wrapped in the PROXY protocol reader
+// (v1+v2, before TLS — the header precedes the TLS bytes, so it composes with
+// a passthrough ingress) so RemoteAddr carries the agent's real address
+// instead of the proxy's. Who may send a header is decided per connection by
+// the trust policy from GSSH_AGENT_PROXY_TRUSTED; an unresolvable DNS entry
+// there aborts startup rather than leaving the server with an empty trust set.
+func agentListener(ctx context.Context, logger *slog.Logger, addr string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if os.Getenv(envAgentProxyProtocol) != "true" {
+		return listener, nil
+	}
+	trust, err := proxytrust.New(ctx, proxytrust.Config{
+		Trusted: strings.Split(os.Getenv(envAgentProxyTrusted), ","),
+		Logger:  logger,
+	})
+	if err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("%s: %w", envAgentProxyTrusted, err)
+	}
+	go trust.Run(ctx)
+	if trust.Empty() {
+		logger.Warn("proxy protocol enabled without trusted senders — a PROXY header is now required from EVERY connection; agents connecting directly will fail",
+			"env", envAgentProxyTrusted)
+	} else {
+		logger.Info("proxy protocol enabled on the agent listener", "trusted", os.Getenv(envAgentProxyTrusted))
+	}
+	return &proxyproto.Listener{
+		Listener:          listener,
+		ConnPolicy:        trust.ConnPolicy,
+		ReadHeaderTimeout: agentProxyHeaderTimeout,
 	}, nil
 }
 
