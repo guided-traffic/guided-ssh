@@ -13,7 +13,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHART="$REPO_ROOT/deploy/helm/guided-ssh"
 RELEASE="gssh"
 # Minimum for a renderable chart (test database ⇒ no DB secret needed).
-BASE=(--set secrets.ca.existingSecret=gssh-ca --set internalDatabase.enabled=true)
+# --namespace is pinned: without it helm takes the namespace from
+# HELM_NAMESPACE or the current kube context, and the service-DNS assertions
+# (<fullname>-agent.<ns>.svc) would depend on the caller's environment.
+BASE=(--namespace default --set secrets.ca.existingSecret=gssh-ca --set internalDatabase.enabled=true)
 
 failures=0
 out=""
