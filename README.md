@@ -8,6 +8,45 @@ central CA: users log in through your existing identity provider, CI pipelines
 exchange their OIDC job token for a certificate, and every access is
 auditable — nothing long-lived to distribute, rotate, or leak.
 
+## Trust model
+
+Trust flows through the CA, not through distributed keys: the server only
+signs a certificate after SSO and a grant check, the certificate lives briefly
+in the `ssh-agent`, and the host validates it against the CA — no
+`authorized_keys` anywhere.
+
+```mermaid
+flowchart LR
+  IDP["Identity provider<br/>(OIDC SSO)"]
+  subgraph WS["Your workstation"]
+    CLI["gssh login"]
+    AGENT["ssh-agent<br/>certificate ≤ 16 h<br/>never on disk"]
+    SSH["ssh deploy@web-01<br/>(native ssh)"]
+  end
+  subgraph SRV["gssh-server"]
+    GR["grant check<br/>group × host tag × user"]
+    CA["SSH certificate<br/>authority"]
+  end
+  subgraph HOST["SSH host"]
+    SSHD["sshd<br/>trusts the user CA —<br/>no authorized_keys"]
+  end
+
+  CLI -- "① single sign-on" --> IDP
+  CLI -- "② ID token + fresh public key" --> GR
+  GR -- "only if a grant matches" --> CA
+  CA -- "③ short-lived certificate" --> AGENT
+  SSH -- "④ certificate presented,<br/>validated against the CA" --> SSHD
+
+  classDef user fill:#DCEEFB,stroke:#4098D7,color:#1F2933
+  classDef idp fill:#F2EBFE,stroke:#8662C7,color:#1F2933
+  classDef server fill:#E3F9E5,stroke:#57AE5B,color:#1F2933
+  classDef host fill:#FFF3C4,stroke:#F0B429,color:#1F2933
+  class CLI,AGENT,SSH user
+  class IDP idp
+  class GR,CA server
+  class SSHD host
+```
+
 ## Key features
 
 - 🔑 **Short-lived certificates instead of static keys** — key pair and
