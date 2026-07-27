@@ -112,6 +112,49 @@ taken from the code (as of Phase 13). Background:
 
 ## Host login fails (certificate present, sshd rejects it)
 
+### Enrolled, grants correct, `sshd -T` looks right — still `Permission denied (publickey)`
+
+- **Cause**: the running sshd never read the guided-ssh snippet. sshd
+  parses its configuration exactly once, at startup; per-connection children
+  are forks of the listener and inherit the already-parsed configuration.
+  A host enrolled while sshd was running — with a version that did not
+  reload it (before the reload became part of enrollment) — has neither
+  `TrustedUserCAKeys` nor `AuthorizedPrincipalsCommand` in memory. It
+  rejects the user certificate as signed by an untrusted CA and falls back
+  to `authorized_keys`, which a purpose-built account usually does not have.
+- **Diagnosis**: every obvious check reports healthy here, so use ones that
+  look at the *process*, not at the files:
+
+  ```sh
+  # What the running daemon actually serves — a plain host key type means
+  # the snippet is not loaded, "…-cert-v01@openssh.com" means it is.
+  ssh -o HostKeyAlgorithms=ssh-ed25519-cert-v01@openssh.com \
+      -o StrictHostKeyChecking=no -o BatchMode=yes localhost true
+  # ⇒ "no matching host key type found" ⇒ stale sshd
+
+  # Listener start time vs. snippet mtime, and whether it was ever reloaded:
+  systemctl show ssh --property=ExecMainStartTimestamp
+  stat -c '%y' /etc/ssh/sshd_config.d/guided-ssh.conf
+  journalctl -u ssh | grep -i 'received sighup'
+  ```
+
+  What does **not** help: `sshd -T -C user=…` reads the files fresh from
+  disk and prints the complete, correct guided-ssh block regardless of what
+  the process has loaded — the most misleading signal in the chain.
+  `gssh-agentd principals -user <name>` also returns the right principals:
+  that path is intact, it is simply never invoked. And the host's auth log
+  showing only `Connection closed by authenticating user … [preauth]`
+  without a `Failed publickey` line proves nothing about the client — sshd
+  rejects at the offer stage and logs nothing there, even at
+  `LogLevel VERBOSE`.
+- **Fix**: `systemctl reload ssh` (or `sshd`, depending on the
+  distribution). Then re-enroll the host: enrollment now validates,
+  reloads, and verifies the running daemon, and it persists
+  `reload_command` — without it the next certificate renewal writes a
+  certificate that sshd never picks up, and the same silent failure returns
+  one certificate lifetime later
+  ([enrollment-guide.md](enrollment-guide.md), §7).
+
 ### AuthorizedPrincipalsCommand returns nothing — fail-closed
 
 - **Cause**: the API is unreachable **and** the principals cache is older
@@ -175,6 +218,40 @@ taken from the code (as of Phase 13). Background:
 
 - **Cause**: `/etc/ssh/ssh_host_ed25519_key.pub` is missing.
 - **Fix**: run `ssh-keygen -A`, or point `--ssh-key` at an existing key.
+
+### "… does not include /etc/ssh/sshd_config.d/guided-ssh.conf"
+
+- **Cause**: the main `sshd_config` has no `Include` covering the snippet
+  directory, or the only one sits inside a `Match` block (it would then not
+  apply to every login). The check runs before the first network call, so
+  the token is not spent.
+- **Fix**: add the line from the error message as the **first** line of
+  `sshd_config` (sshd keeps the first value it obtains for a keyword) and
+  re-run. guided-ssh deliberately does not edit that file.
+
+### "sshd rejected the generated configuration (rolled back …)"
+
+- **Cause**: `sshd -t` failed over the freshly written snippet — usually a
+  pre-existing error in `sshd_config` that only surfaces now, or a state
+  directory path sshd cannot use.
+- **Diagnosis**: the message carries sshd's own output; `sshd -t` reproduces
+  it. The snippet has already been removed (restored), sshd stays usable.
+- **Fix**: repair the reported line, then enroll again.
+
+### "reloading sshd (…) failed" / "still serves a plain host key"
+
+- **Cause**: the reload command exited non-zero, or the running daemon still
+  answers with a plain host key afterwards — the configuration is on disk
+  but not in memory, which is exactly the failure that used to stay silent.
+  A socket-activated sshd (`ssh.socket`) is a common cause: `ssh.service` is
+  inactive, so `systemctl reload` has nothing to reload.
+- **Diagnosis**: run the printed reload command by hand; `systemctl status
+  ssh ssh.socket`; check that the `Include` sits before every `Match` block.
+- **Fix**: pass the working command via `--reload-command`, or `--no-reload`
+  where reloads belong to config management or the image build (each
+  connection of a socket-activated sshd reads the configuration fresh, so
+  nothing needs reloading there — but then set `reload_command` yourself if
+  host certificate renewals should reach a long-running daemon).
 
 ## Agent issues
 

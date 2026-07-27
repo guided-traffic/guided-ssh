@@ -73,6 +73,8 @@ type fakeAPI struct {
 	renewCalls    atomic.Int32
 	mtlsCalls     atomic.Int32
 	mtlsErr       error
+	beatCalls     atomic.Int32
+	beatErr       error
 
 	sessionsMu   sync.Mutex
 	sessions     []sessionEventWire
@@ -95,6 +97,11 @@ func (f *fakeAPI) Principals(_ context.Context, user string) ([]string, error) {
 func (f *fakeAPI) Bundle(context.Context) (string, error) {
 	f.bundleCalls.Add(1)
 	return f.bundle, nil
+}
+
+func (f *fakeAPI) Heartbeat(context.Context) error {
+	f.beatCalls.Add(1)
+	return f.beatErr
 }
 
 func (f *fakeAPI) SendSessions(_ context.Context, events []sessionEventWire) error {
@@ -331,6 +338,44 @@ func TestDaemonSocketAndHelper(t *testing.T) {
 	}
 }
 
+// TestDaemonHeartbeat: an idle agent must still be visible — the other loops
+// only reach the API once an hour (bundle) or at 2/3 of a certificate's
+// lifetime. A failing heartbeat is pure observability and must not touch the
+// authorization path.
+func TestDaemonHeartbeat(t *testing.T) {
+	api := &fakeAPI{
+		principals: map[string][]string{"deploy": {"alice"}},
+		bundle:     "ssh-ed25519 AAAA ca\n",
+		renewCert:  testSignedHostCert(t, 0),
+		beatErr:    errors.New("server unreachable"),
+	}
+	d := newTestDaemon(t, api)
+	d.cfg.HeartbeatInterval = Duration(20 * time.Millisecond)
+	_ = os.WriteFile(d.cfg.SSHKeyPath, []byte("ssh-ed25519 AAAA host"), 0o600)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	waitForSocket(t, d.cfg.SocketPath)
+
+	// At startup, then every interval.
+	deadline := time.Now().Add(2 * time.Second)
+	for api.beatCalls.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := api.beatCalls.Load(); got < 2 {
+		t.Errorf("heartbeats = %d, expected one at startup and at least one on the ticker", got)
+	}
+	if got, err := d.principals(ctx, "deploy"); err != nil || len(got) != 1 {
+		t.Errorf("failing heartbeat disturbed the principals path: %v %v", got, err)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("daemon: %v", err)
+	}
+}
+
 func TestPrintPrincipalsWithoutDaemon(t *testing.T) {
 	stateDir := t.TempDir()
 	cfg := &Config{
@@ -400,9 +445,10 @@ func TestRunCLI(t *testing.T) {
 	}
 }
 
-// TestEnrollAgainstFakeServer: complete enroll flow against an HTTP fake —
-// checks the written files and snippet content.
-func TestEnrollAgainstFakeServer(t *testing.T) {
+// fakeEnrollServer answers POST /v1/enroll like the real server (token
+// "tok-1"; anything else ⇒ 403).
+func fakeEnrollServer(t *testing.T) *httptest.Server {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/enroll" {
 			http.NotFound(w, r)
@@ -427,22 +473,39 @@ func TestEnrollAgainstFakeServer(t *testing.T) {
 		})
 	}))
 	t.Cleanup(server.Close)
+	return server
+}
+
+// TestEnrollAgainstFakeServer: complete enroll flow against an HTTP fake —
+// checks the written files, the snippet content, and that enrollment
+// activates the configuration instead of only writing it.
+func TestEnrollAgainstFakeServer(t *testing.T) {
+	server := fakeEnrollServer(t)
 
 	stateDir := t.TempDir()
-	sshDir := t.TempDir()
+	sshDir := testSSHDir(t)
 	keyPath := filepath.Join(sshDir, "ssh_host_ed25519_key.pub")
 	if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA host\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	reloadMarker := filepath.Join(t.TempDir(), "reloaded")
 
 	var stdout bytes.Buffer
 	err := Enroll(context.Background(), EnrollOptions{
 		ServerURL: server.URL, AgentURL: "https://gssh:8443", Token: "tok-1",
 		Hostname: "web1.example.com", StateDir: stateDir, SSHDir: sshDir, SSHKeyPath: keyPath,
-		Tags: map[string]string{"env": "prod"},
+		Tags:          map[string]string{"env": "prod"},
+		ReloadCommand: "touch " + reloadMarker,
+		sshdBinary:    stubSSHD(t, "1", 0), // nothing listening ⇒ probe inconclusive
 	}, &stdout)
 	if err != nil {
 		t.Fatalf("Enroll: %v", err)
+	}
+
+	// The reload really ran, and it is persisted for the renewal path — an
+	// empty reload_command leaves sshd on the old certificate after renewal.
+	if _, err := os.Stat(reloadMarker); err != nil {
+		t.Errorf("enrollment did not reload sshd: %v", err)
 	}
 
 	// State files.
@@ -454,6 +517,9 @@ func TestEnrollAgainstFakeServer(t *testing.T) {
 	cfg, err := LoadConfig(stateDir)
 	if err != nil || cfg.HostID != "11111111-2222-3333-4444-555555555555" {
 		t.Errorf("config: %+v %v", cfg, err)
+	}
+	if cfg.ReloadCommand == "" {
+		t.Error("reload_command not persisted — renewals would leave sshd on the old certificate")
 	}
 
 	// sshd files.
@@ -480,10 +546,102 @@ func TestEnrollAgainstFakeServer(t *testing.T) {
 	}
 }
 
+// TestEnrollWithoutInclude: without the Include the snippet would never be
+// read — enrollment must fail before the token is spent.
+func TestEnrollWithoutInclude(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	t.Cleanup(server.Close)
+
+	sshDir := t.TempDir()
+	if err := os.WriteFile(SSHDConfigPath(sshDir), []byte("PasswordAuthentication no\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Enroll(context.Background(), EnrollOptions{
+		ServerURL: server.URL, AgentURL: "https://gssh:8443", Token: "tok-1",
+		Hostname: "web1.example.com", StateDir: t.TempDir(), SSHDir: sshDir,
+		SSHKeyPath: filepath.Join(sshDir, "ssh_host_ed25519_key.pub"),
+	}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "Include") {
+		t.Fatalf("expected Include error, got %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Errorf("the token was spent despite the failure (%d requests)", requests.Load())
+	}
+}
+
+// TestEnrollKeepsPreviousReloadCommand: re-enrolling on a host whose init
+// system is no longer detectable must not silently drop the reload command —
+// renewals would stop reaching sshd one certificate lifetime later.
+func TestEnrollKeepsPreviousReloadCommand(t *testing.T) {
+	server := fakeEnrollServer(t)
+	sshDir := testSSHDir(t)
+	stateDir := t.TempDir()
+	keyPath := filepath.Join(sshDir, "ssh_host_ed25519_key.pub")
+	if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA host\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// State of an earlier enrollment.
+	paths := Paths{StateDir: stateDir}
+	previous := &Config{
+		AgentURL: "https://gssh:8443", HostID: "old", HostName: "web1.example.com",
+		SSHKeyPath: keyPath, ReloadCommand: "true",
+	}
+	previous.applyDefaults(paths)
+	if err := writeConfig(paths, previous); err != nil {
+		t.Fatal(err)
+	}
+
+	// No service manager on PATH ⇒ nothing detected; sh stays reachable so
+	// the carried-over command can still run.
+	binDir := t.TempDir()
+	if err := os.Symlink("/bin/sh", filepath.Join(binDir, "sh")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	err := Enroll(context.Background(), EnrollOptions{
+		ServerURL: server.URL, AgentURL: "https://gssh:8443", Token: "tok-1",
+		Hostname: "web1.example.com", StateDir: stateDir, SSHDir: sshDir, SSHKeyPath: keyPath,
+		sshdBinary: stubSSHD(t, "1", 0),
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	cfg, err := LoadConfig(stateDir)
+	if err != nil || cfg.ReloadCommand != "true" {
+		t.Fatalf("reload_command = %q (%v), want the carried-over value", cfg.ReloadCommand, err)
+	}
+}
+
+// TestEnrollRollsBackInvalidConfig: a snippet sshd rejects would take the
+// daemon down on its next restart — it must not survive the failure.
+func TestEnrollRollsBackInvalidConfig(t *testing.T) {
+	server := fakeEnrollServer(t)
+	sshDir := testSSHDir(t)
+	keyPath := filepath.Join(sshDir, "ssh_host_ed25519_key.pub")
+	if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA host\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Enroll(context.Background(), EnrollOptions{
+		ServerURL: server.URL, AgentURL: "https://gssh:8443", Token: "tok-1",
+		Hostname: "web1.example.com", StateDir: t.TempDir(), SSHDir: sshDir, SSHKeyPath: keyPath,
+		NoReload:   true,
+		sshdBinary: stubSSHD(t, "1", 1), // sshd -t rejects the configuration
+	}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "rolled back") {
+		t.Fatalf("expected rollback error, got %v", err)
+	}
+	if _, statErr := os.Stat(SnippetPath(sshDir)); !os.IsNotExist(statErr) {
+		t.Errorf("snippet survived an invalid configuration: %v", statErr)
+	}
+}
+
 func TestEnrollWithoutHostKey(t *testing.T) {
 	err := Enroll(context.Background(), EnrollOptions{
 		ServerURL: "http://127.0.0.1:1", AgentURL: "https://x", Token: "t",
-		Hostname: "h", StateDir: t.TempDir(), SSHDir: t.TempDir(),
+		Hostname: "h", StateDir: t.TempDir(), SSHDir: testSSHDir(t),
 		SSHKeyPath: filepath.Join(t.TempDir(), "missing.pub"),
 	}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "ssh-host-key") {

@@ -17,6 +17,14 @@ import { HostConnectDialog } from './host-connect-dialog';
 const CERT_WARN_DAYS = 7;
 
 /**
+ * Liveness thresholds for `last_seen_at`. The agent heartbeats every minute
+ * (`heartbeat_interval`), so a few missed beats are the earliest honest
+ * signal — anything coarser would render a long-dead agent green.
+ */
+const SEEN_OK_MINUTES = 3;
+const SEEN_WARN_MINUTES = 15;
+
+/**
  * Plain-text explanations for the rollout gate's conditions (see internal/api/rollout.go).
  * The button is deliberately disabled rather than hidden — the operator
  * should be able to see why the one-command install isn't available right now.
@@ -266,8 +274,11 @@ export class HostsPage implements OnInit {
     if (!host.last_seen_at) {
       return 'muted';
     }
-    const ageHours = (Date.now() - new Date(host.last_seen_at).getTime()) / 3.6e6;
-    return ageHours < 24 ? 'ok' : 'warn';
+    const ageMinutes = (Date.now() - new Date(host.last_seen_at).getTime()) / 6e4;
+    if (ageMinutes < SEEN_OK_MINUTES) {
+      return 'ok';
+    }
+    return ageMinutes < SEEN_WARN_MINUTES ? 'warn' : 'danger';
   }
 
   certLabel(host: Host): string {

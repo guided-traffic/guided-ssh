@@ -30,7 +30,9 @@ The Angular frontend is exempt from the coverage gate; its logic stays deliberat
   - **Postgres** — repository layer, migrations, append-only trigger (`audit_events`)
   - **Keycloak** — OIDC flows, token validation, group sync
   - **sshd host** (container with sshd) — enrollment, `AuthorizedPrincipalsCommand`,
-    login with a user certificate
+    login with a user certificate. sshd is deliberately started **before**
+    enrollment: the certificate logins in that test only pass if enrollment
+    reloads the running daemon itself, nothing in the test does it by hand
 - Runs on every push/PR on the self-hosted runner (Docker available).
 
 ### E2E (kind)

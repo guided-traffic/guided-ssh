@@ -56,8 +56,14 @@ func usage(w io.Writer) {
 commands:
   enroll --server url --agent-url url --token t [--hostname n] [--tags k=v,…]
          [--pin b64] [--require-pin] [--state-dir d] [--ssh-dir d] [--ssh-key path]
-         [--session-audit]
-         register the host: fetch certificates, write sshd configuration;
+         [--session-audit] [--reload-command cmd] [--no-reload]
+         register the host: fetch certificates, write sshd configuration,
+         validate it (sshd -t) and reload sshd — a running sshd would
+         otherwise keep serving its old configuration;
+         --reload-command overrides the detected reload (and is persisted
+         for certificate renewals), --no-reload skips the reload itself and
+         leaves it to the operator (the configuration stays inactive until
+         then); both together = persist the command, don't run it now;
          --session-audit additionally enables session/sudo audit (pam_exec);
          --require-pin aborts without --pin (protects against operator mistakes)
   run [--state-dir d]
@@ -112,6 +118,8 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	sshDir := fs.String("ssh-dir", DefaultSSHDir, "sshd configuration directory")
 	sshKey := fs.String("ssh-key", "", "ssh host public key (default: <ssh-dir>/ssh_host_ed25519_key.pub)")
 	sessionAudit := fs.Bool("session-audit", false, "enable host session/sudo audit (pam_exec hooks, opt-in)")
+	reloadCommand := fs.String("reload-command", "", "command that reloads sshd (default: detected from the init system)")
+	noReload := fs.Bool("no-reload", false, "don't reload sshd (immutable images, config management) — the configuration stays inactive until you do")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -129,7 +137,8 @@ func runEnrollCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		ServerURL: *server, AgentURL: *agentURL, Token: *token,
 		Hostname: *hostname, Tags: tags, PinSHA256: *pin,
 		StateDir: *stateDir, SSHDir: *sshDir, SSHKeyPath: *sshKey,
-		SessionAudit: *sessionAudit,
+		SessionAudit:  *sessionAudit,
+		ReloadCommand: *reloadCommand, NoReload: *noReload,
 	}
 	if err := Enroll(ctx, opts, stdout); err != nil {
 		fmt.Fprintf(stderr, "gssh-agentd: enrollment failed: %v\n", err)

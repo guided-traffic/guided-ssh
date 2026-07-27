@@ -1,7 +1,14 @@
 #!/bin/bash
-# Waits for enrollment (the test runs `gssh-agentd enroll` via exec), then
-# starts the agent and sshd.
+# sshd starts *before* enrollment — that is the real-world case and the one
+# that used to fail silently: a listener has parsed its configuration once, at
+# startup, and never sees the guided-ssh snippet unless enrollment reloads it.
+# The agent follows as soon as enrollment has written its state.
 set -e
+
+/usr/sbin/sshd -D -e &
+# Only report readiness once the listener exists: enrollment derives its
+# reload command from the pid file.
+while [ ! -f /run/sshd.pid ]; do sleep 0.1; done
 echo "entrypoint ready"
 
 while [ ! -f /var/lib/guided-ssh/config.yaml ]; do sleep 0.2; done
@@ -12,9 +19,4 @@ echo "enrollment detected — starting agentd"
 AGENTD=/usr/local/bin/gssh-agentd
 [ -x "$AGENTD" ] || AGENTD=/usr/bin/gssh-agentd
 
-"$AGENTD" run &
-
-while [ ! -S /var/lib/guided-ssh/agentd.sock ]; do sleep 0.2; done
-echo "agentd ready — starting sshd"
-
-exec /usr/sbin/sshd -D -e
+exec "$AGENTD" run

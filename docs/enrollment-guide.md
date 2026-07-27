@@ -17,8 +17,11 @@ failure modes: [troubleshooting.md](troubleshooting.md).
   Include /etc/ssh/sshd_config.d/*.conf
   ```
 
-  (the default on most distributions; without the include, the
-  generated snippet has no effect).
+  (the default on most distributions). Enrollment checks this **before**
+  the first network call and aborts naming the exact line if it is missing
+  — without the include the generated snippet has no effect, and the token
+  stays unused. An `Include` inside a `Match` block does not count: it
+  would not apply to every login. The file is never edited automatically.
 - Network access to the gssh server: the public API (`POST /v1/enroll`) and
   the agent API (mTLS, port 8443 — TLS passthrough/LoadBalancer, see the
   chart README).
@@ -85,6 +88,8 @@ All flags:
 | `--ssh-dir` | `/etc/ssh` | sshd configuration directory |
 | `--ssh-key` | `<ssh-dir>/ssh_host_ed25519_key.pub` | SSH host public key whose certificate is maintained |
 | `--session-audit` | off | enable host session/sudo audit (pam_exec hooks, opt-in, ADR-021) |
+| `--reload-command` | detected | command that reloads sshd; persisted as `reload_command` for renewals |
+| `--no-reload` | off | don't reload sshd — the configuration stays inactive until you do |
 
 What enrollment writes (idempotent; a re-enrollment with a new token
 overwrites it):
@@ -128,11 +133,44 @@ session optional pam_exec.so quiet /usr/bin/gssh-agentd pam-session -state-dir /
 `optional` + helper exit code 0 ⇒ fail-open: the hook never blocks login
 or sudo.
 
+### Activating the configuration
+
+sshd parses its configuration exactly once, at startup — per-connection
+children are forks of the listener and inherit what was already parsed.
+Writing the snippet therefore changes nothing for a daemon that is already
+running, and `sshd -T` will not show that: it reads the files fresh from
+disk. Enrollment closes that gap itself:
+
+1. `sshd -t` over the written configuration. A rejection rolls the snippet
+   back and fails enrollment — a broken snippet would take sshd down on its
+   next restart.
+2. The reload command runs (`--reload-command`, otherwise detected:
+   `systemctl reload ssh|sshd`, `rc-service sshd reload`, or
+   `kill -HUP $(cat <pidfile>)`). A failed reload fails enrollment. The
+   resolved command is persisted as `reload_command` so certificate
+   renewals reach the running daemon too.
+3. The running daemon is asked for its host key over a local SSH
+   handshake — with the snippet loaded it answers with the guided-ssh host
+   certificate, without it with a plain key. This is the only check that
+   tells "on disk" from "in memory"; comparing the listener's start time
+   does not, because sshd re-execs on SIGHUP and keeps its start time.
+   A plain key after a reload fails enrollment; an unreachable sshd (image
+   build, service not started yet) is reported and accepted.
+
+`--no-reload` skips steps 2 and 3 (including the detection) for hosts where
+reloads belong to config management or the image build. The configuration
+then stays inactive until *you* reload sshd. Combine it with
+`--reload-command` to persist a command for certificate renewals without
+running it now; otherwise `reload_command` stays empty and renewed host
+certificates will not reach sshd on their own either.
+
+An existing `reload_command` from a previous enrollment is never dropped:
+if neither flag is given and detection finds nothing, the old value is
+carried over.
+
 ## 5. Start the service and verify
 
 ```sh
-sshd -t                              # check configuration
-systemctl reload sshd                # sshd reads HostCertificate only at start/reload
 systemctl enable --now gssh-agentd
 ```
 
@@ -163,8 +201,16 @@ The daemon handles:
 
 - **Renewing the host certificate** at 2/3 of its lifetime (30-day validity;
   check interval `renew_interval`, default 5 m) via `POST /v1/agent/renew`.
-  Afterwards `reload_command` runs, if configured — sshd reads the
-  `HostCertificate` only at start.
+  Afterwards `reload_command` runs — sshd reads the `HostCertificate` only
+  at start/reload. With an empty `reload_command` sshd keeps presenting the
+  old certificate from memory until someone reloads it by hand; once that
+  one expires, clients hit host key verification failures.
+- **Heartbeat** every `heartbeat_interval` (default 1 m) via
+  `GET /v1/agent/heartbeat` — the server stamps `last_seen_at` from the mTLS
+  identity, which is what makes a dead agent distinguishable from an idle
+  one in the UI. The request and the response are both empty; a failing
+  heartbeat is logged and otherwise ignored (it must never touch the
+  authorization path).
 - **Rotating the mTLS client certificate** at 2/3 of its lifetime (1 year): a
   fresh key pair + CSR over the still-valid mTLS channel
   (`POST /v1/agent/renew-mtls`), atomic file swap, switchover without
@@ -196,7 +242,8 @@ adjustable; requires `systemctl restart gssh-agentd` afterwards):
 | `cache_ttl` | `5m` | how long cached principals remain valid during an API outage (fail-closed afterwards) |
 | `bundle_interval` | `1h` | refresh interval of the CA bundle |
 | `renew_interval` | `5m` | check interval for certificate/mTLS renewal |
-| `reload_command` | empty | command to run after a new host certificate, e.g. `systemctl reload sshd` |
+| `heartbeat_interval` | `1m` | how often the agent reports liveness (`last_seen_at`) |
+| `reload_command` | detected at enrollment | command to run after a new host certificate, e.g. `systemctl reload ssh` (empty only with `--no-reload`) |
 | `session_audit` | `false` | session/sudo audit (only meaningfully set via `enroll --session-audit`) |
 
 Note on `cache_ttl`: higher values bridge longer API outages, but also
@@ -209,8 +256,16 @@ Generate a new token and run `gssh-agentd enroll` again — all files are
 overwritten (new mTLS key pair, new host certificate, fresh configuration);
 an existing `socket-token` is preserved. Needed e.g. when the mTLS
 certificate has expired (the agent was down for a long time) or the server
-URL changes. Afterwards run `systemctl restart gssh-agentd` and
-`systemctl reload sshd`.
+URL changes. sshd is reloaded by the enrollment itself; afterwards run
+`systemctl restart gssh-agentd`.
+
+Re-enrollment is also the repair path for hosts enrolled **before**
+enrollment reloaded sshd: those wrote a correct configuration that the
+running daemon never read (see
+[troubleshooting.md](troubleshooting.md#enrolled-grants-correct-sshd--t-looks-right--still-permission-denied-publickey)).
+A plain `systemctl reload sshd` fixes the immediate symptom; re-enrolling
+additionally fills in the missing `reload_command`, without which the next
+certificate renewal repeats the problem.
 
 ## 8. Uninstallation
 

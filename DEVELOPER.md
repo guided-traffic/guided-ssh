@@ -158,7 +158,8 @@ after which login is refused.
 gssh-server enroll-token -tags env=prod,role=web -ttl 24h
 
 # 2. Register on the host (writes sshd_config.d/guided-ssh.conf,
-#    host certificate and CA bundle; uses the existing sshd host key)
+#    host certificate and CA bundle; uses the existing sshd host key,
+#    then validates, reloads, and verifies the running sshd)
 gssh-agentd enroll --server https://gssh.example.com \
   --agent-url https://gssh.example.com:8443 --token gssh-et-…
 
@@ -170,6 +171,16 @@ State lives under `/var/lib/guided-ssh/` (mTLS client certificate,
 configuration, principals cache). Packages (deb/rpm via nfpm) and
 install script: [deploy/packaging/](deploy/packaging/), build with
 `make cross packages`.
+
+Making the configuration effective is part of enrollment
+([internal/agentd/sshd.go](internal/agentd/sshd.go)): sshd parses its
+configuration once at startup, so a written snippet means nothing to a
+running listener — and `sshd -T` cannot show the difference, because it
+reads from disk. Enrollment therefore verifies the `Include`, runs
+`sshd -t`, reloads via a detected command (persisted as `reload_command`
+for renewals), and then asks the running daemon for its host key: a
+certificate proves the snippet is in memory, a plain key proves it is not.
+`--no-reload` opts out for immutable images.
 
 ## Embedded binaries (`internal/bindist`, `agentdist`, `clientdist`)
 

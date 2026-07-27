@@ -137,7 +137,7 @@ the Prometheus Operator):
 |---|---|---|
 | `gssh_certificates_issued_total` | `requester` (user/ci/host), `cert_type` (user/host) | successfully issued SSH certificates |
 | `gssh_http_responses_total` | `code` | HTTP responses by status code (API and agent endpoints) |
-| `gssh_agent_heartbeats_total` | — | agent contacts (successful mTLS requests, stamp `last_seen_at`) |
+| `gssh_agent_heartbeats_total` | — | agent contacts (successful mTLS requests, stamp `last_seen_at`); every agent contributes at least one per `heartbeat_interval` (default 1 m) via `GET /v1/agent/heartbeat` |
 | `gssh_tls_handshake_errors_total` | `listener` (api/agent/metrics), `class` (transport/tls) | connections that never completed the TLS handshake. `transport` = the peer reset or closed the connection without speaking TLS (TCP health checks of the ingress land here and are logged at debug only); `tls` = a real handshake failure, e.g. a missing or invalid client certificate on the agent listener |
 
 `GET /healthz` is the liveness/readiness probe (chart default).
@@ -154,7 +154,10 @@ Useful alerts:
 - **Agent heartbeats stop**:
   `rate(gssh_agent_heartbeats_total[15m]) == 0` for enrolled hosts ⇒
   agent API unreachable (service/load balancer/mTLS); hosts then run on
-  the fail-closed cache (logins fail after `cache_ttl`).
+  the fail-closed cache (logins fail after `cache_ttl`). The metric is
+  aggregate — for a single dead agent, use `last_seen_at` per host (Hosts
+  page, or the `hosts` table); it must not lag by more than a few
+  `heartbeat_interval`s.
 - **No issuances**: `rate(gssh_certificates_issued_total[1h]) == 0`
   during normal working hours ⇒ check the sign path.
 

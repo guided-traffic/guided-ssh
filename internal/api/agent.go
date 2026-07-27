@@ -102,6 +102,7 @@ func NewAgent(deps AgentDeps) http.Handler {
 		mux.HandleFunc("POST /v1/agent/sessions", agentSessions(deps))
 	}
 	mux.HandleFunc("GET /v1/agent/bundle/user", agentBundleUser(deps))
+	mux.HandleFunc("GET /v1/agent/heartbeat", agentHeartbeat(deps))
 
 	// Response counter by status code for the error rate metric (phase 11).
 	return metrics.Middleware(mux)
@@ -226,6 +227,21 @@ func agentBundleUser(deps AgentDeps) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(bundle))
+	}
+}
+
+// agentHeartbeat is the agent's liveness signal: an idle agent otherwise
+// only shows up once per hour (CA bundle refresh), which makes a dead agent
+// indistinguishable from a healthy one. agentHost does all the work —
+// identity check plus last_seen_at — so the request carries no body and the
+// response none either: nothing the agent sends may influence the record
+// (last_seen_addr comes from the connection, deliberately).
+func agentHeartbeat(deps AgentDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := agentHost(w, r, deps); !ok {
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

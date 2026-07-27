@@ -138,6 +138,9 @@ func TestAPIClientRoundtrip(t *testing.T) {
 	mux.HandleFunc("GET /v1/agent/bundle/user", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ssh-ed25519 AAAA ca\n"))
 	})
+	mux.HandleFunc("GET /v1/agent/heartbeat", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 	client := newTestAgentAPI(t, mux)
 	ctx := context.Background()
 
@@ -152,6 +155,9 @@ func TestAPIClientRoundtrip(t *testing.T) {
 	bundle, err := client.Bundle(ctx)
 	if err != nil || bundle != "ssh-ed25519 AAAA ca\n" {
 		t.Errorf("Bundle: %q %v", bundle, err)
+	}
+	if err := client.Heartbeat(ctx); err != nil {
+		t.Errorf("Heartbeat: %v", err)
 	}
 }
 
@@ -177,6 +183,11 @@ func TestAPIClientErrorCases(t *testing.T) {
 	}
 	if _, err := client.Bundle(ctx); err == nil {
 		t.Error("bundle 500: expected error")
+	}
+	// No handler registered ⇒ 404; a heartbeat against an older server must
+	// report an error rather than pass silently.
+	if err := client.Heartbeat(ctx); err == nil {
+		t.Error("heartbeat 404: expected error")
 	}
 }
 

@@ -234,6 +234,33 @@ func TestAgentPrincipals(t *testing.T) {
 	}
 }
 
+// TestAgentHeartbeat: the heartbeat only stamps last_seen_at (via agentHost)
+// and returns 204 — no body in either direction, and no identity without a
+// client certificate.
+func TestAgentHeartbeat(t *testing.T) {
+	hosts := newFakeHostStore()
+	host := enrolledHost(hosts)
+	handler := newAgentHandler(t, hosts)
+
+	rec := httptest.NewRecorder()
+	req := agentRequest(http.MethodGet, "/v1/agent/heartbeat", "", host.ID.String())
+	req.RemoteAddr = "10.1.2.3:54321"
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("heartbeat: %d %q", rec.Code, rec.Body.String())
+	}
+	// The recorded address comes from the connection, not from the agent.
+	if hosts.lastSeenAddr != "10.1.2.3" {
+		t.Errorf("last_seen_addr = %q", hosts.lastSeenAddr)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, agentRequest(http.MethodGet, "/v1/agent/heartbeat", "", ""))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("heartbeat without a client certificate = %d", rec.Code)
+	}
+}
+
 func TestAgentBundle(t *testing.T) {
 	hosts := newFakeHostStore()
 	host := enrolledHost(hosts)
