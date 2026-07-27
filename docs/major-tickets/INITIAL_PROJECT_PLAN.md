@@ -309,6 +309,8 @@ web UI is read-mostly (management primarily via CLI/API, GitOps-friendly).
       → Angular 21 + Material 21 (M3 dark, glass look); OIDC bootstrap via
       `GET /v1/ui/config`; role groups `GSSH_ADMIN_GROUP`/`GSSH_AUDITOR_GROUP`/
       `GSSH_READONLY_GROUP` (admin ⊃ auditor ⊃ readonly, fail-closed; ADR-020)
+      — readonly later merged into auditor (two roles, `GSSH_READONLY_GROUP`
+      removed; login without any role is rejected)
 - [x] Switched UI login to server-side OIDC (BFF): the server performs
       Authorization Code + PKCE with a client secret (`/v1/auth/login|callback|
       logout|me`, `internal/api/ui_auth.go`); the session is an HttpOnly cookie

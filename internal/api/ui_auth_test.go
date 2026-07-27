@@ -243,6 +243,41 @@ func TestUIAuthLoginCallbackFlow(t *testing.T) {
 	}
 }
 
+// TestUIAuthCallbackNoRole: a user with neither the admin nor the auditor
+// role must not get a session — the callback rejects the login, clears any
+// previous session, and redirects with a clear error marker for the SPA.
+func TestUIAuthCallbackNoRole(t *testing.T) {
+	tokens := newFakeTokenEndpoint(t)
+	srv := newUIAuthServer(t, newFakeAuthStore(), tokens, claimsWithGroups("nobody", "dev"))
+
+	authorizeURL, stateCookie := startLogin(t, srv, "/audit")
+	resp := finishLogin(t, srv, authorizeURL.Query().Get("state"), stateCookie)
+	if resp.StatusCode != http.StatusFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("callback status = %d (%s), expected 302", resp.StatusCode, body)
+	}
+	// Fixed error target — the requested redirect (/audit) must not win.
+	if got := resp.Header.Get("Location"); got != "/?login_error=no_role" {
+		t.Errorf("callback redirect = %q, expected /?login_error=no_role", got)
+	}
+	// No session is minted; a previous session is actively cleared so the
+	// SPA shows the error instead of an old shell.
+	if idx := slices.IndexFunc(resp.Cookies(), func(c *http.Cookie) bool {
+		return c.Name == "gssh_session" && c.Value != ""
+	}); idx >= 0 {
+		t.Error("rejected login must not set a session")
+	}
+	if idx := slices.IndexFunc(resp.Cookies(), func(c *http.Cookie) bool {
+		return c.Name == "gssh_session" && c.MaxAge < 0
+	}); idx < 0 {
+		t.Error("rejected login must clear a previous session cookie")
+	}
+	status, me := getMe(t, srv, nil)
+	if status != http.StatusOK || me["authenticated"] != false {
+		t.Errorf("me after rejected login = %d %v, expected authenticated=false", status, me)
+	}
+}
+
 func TestUIAuthCallbackStateMismatch(t *testing.T) {
 	tokens := newFakeTokenEndpoint(t)
 	srv := newUIAuthServer(t, newFakeAuthStore(), tokens, adminClaims())

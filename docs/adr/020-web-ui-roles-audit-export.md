@@ -23,6 +23,12 @@ reliably streamed to external systems?
    same groups purely for display purposes (`/v1/ui/config` returns the
    group names).
 
+   > **Superseded (readonly-role removal):** the readonly role was merged
+   > into auditor — two roles remain (`admin ⊃ auditor`,
+   > `GSSH_READONLY_GROUP` removed), and a web-UI login without any role is
+   > rejected by the server instead of minting a role-less session. See
+   > [docs/web-ui.md](../web-ui.md).
+
 2. **Bootstrap via `GET /v1/ui/config` (public).** The SPA loads the issuer,
    client ID (`GSSH_UI_OIDC_CLIENT_ID`, default `GSSH_OIDC_CLIENT_ID`), and
    role groups at runtime — a single build for all environments, no secrets

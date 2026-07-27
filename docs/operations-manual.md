@@ -63,8 +63,7 @@ All values from `cmd/gssh-server/main.go`; mapped 1:1 in the Helm chart via
 | `GSSH_KC_SYNC_INTERVAL` | `5m` | sync interval (Go duration) |
 | `GSSH_AGENT_TLS_NAMES` | `localhost,127.0.0.1` | SANs of the agent API's mTLS server certificate (comma-separated) |
 | `GSSH_ADMIN_GROUP` | empty | IdP group of admins; empty ⇒ no admin mutations (fail-closed) |
-| `GSSH_AUDITOR_GROUP` | empty | IdP group of auditors (read/export the audit log) |
-| `GSSH_READONLY_GROUP` | empty | IdP group for read-only views; all three groups empty ⇒ admin API fully disabled |
+| `GSSH_AUDITOR_GROUP` | empty | IdP group of auditors: all read views plus audit log read/export; admin includes this role. Both groups empty ⇒ admin API fully disabled; an empty group grants the role to nobody, and the web-UI login rejects users without any role |
 | `GSSH_SERVER_OIDC_CLIENT_ID` | empty | confidential OIDC client of the server itself (server-side UI login/BFF); set together with the secret, must differ from `GSSH_CLIENT_OIDC_CLIENT_ID` (startup error otherwise) |
 | `GSSH_SERVER_OIDC_CLIENT_SECRET` | empty | client secret of the server's OIDC client; ID and secret both empty ⇒ `/v1/auth` (UI login) disabled |
 | `GSSH_SERVER_OIDC_SCOPES` | `openid,profile,email,groups` | scopes of the server-side UI login (comma-separated) |

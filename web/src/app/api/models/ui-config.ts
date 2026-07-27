@@ -14,5 +14,4 @@ export interface UiConfig {
    */
   oidc_client_id: string;
   oidc_issuer: string;
-  readonly_group: string;
 }

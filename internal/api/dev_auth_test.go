@@ -71,7 +71,7 @@ func TestDevModeMeReportsAdmin(t *testing.T) {
 	if !me.Authenticated || me.Username != "dev" {
 		t.Errorf("me = %+v (expected authenticated dev user)", me)
 	}
-	for _, role := range []string{"admin", "auditor", "readonly"} {
+	for _, role := range []string{"admin", "auditor"} {
 		if !slices.Contains(me.Roles, role) {
 			t.Errorf("role %q missing: %v", role, me.Roles)
 		}

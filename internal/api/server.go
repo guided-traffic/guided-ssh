@@ -49,13 +49,11 @@ type Deps struct {
 	// AdminGroup is the IdP group whose members may fully use the admin
 	// API; empty ⇒ no mutations possible (fail-closed).
 	AdminGroup string
-	// AuditorGroup may, in addition to the read-only views, read and
-	// export the audit log; AdminGroup includes this role.
+	// AuditorGroup covers all read access: the resource views (hosts,
+	// grants, users, service accounts) and reading/exporting the audit
+	// log; AdminGroup includes this role. If both groups are empty, the
+	// entire admin API stays disabled and the web-UI login rejects everyone.
 	AuditorGroup string
-	// ReadOnlyGroup may read the resource views (hosts, grants, users,
-	// service accounts); auditor and admin include this role. If all
-	// three groups are empty, the entire admin API stays disabled.
-	ReadOnlyGroup string
 	// UIConfig is served unauthenticated under /v1/ui/config and
 	// bootstraps the web UI (OIDC discovery + role mapping in the frontend).
 	UIConfig UIConfig
@@ -109,11 +107,10 @@ type ClientSource interface {
 // OIDCClientID describe the clients' public OIDC client (CLI setup page,
 // client.sh) — never the server's confidential login client.
 type UIConfig struct {
-	OIDCIssuer    string `json:"oidc_issuer"`
-	OIDCClientID  string `json:"oidc_client_id"`
-	AdminGroup    string `json:"admin_group"`
-	AuditorGroup  string `json:"auditor_group"`
-	ReadOnlyGroup string `json:"readonly_group"`
+	OIDCIssuer   string `json:"oidc_issuer"`
+	OIDCClientID string `json:"oidc_client_id"`
+	AdminGroup   string `json:"admin_group"`
+	AuditorGroup string `json:"auditor_group"`
 }
 
 // New builds the HTTP handler.
@@ -150,7 +147,6 @@ func New(deps Deps) http.Handler {
 		cfg := deps.UIConfig
 		cfg.AdminGroup = deps.AdminGroup
 		cfg.AuditorGroup = deps.AuditorGroup
-		cfg.ReadOnlyGroup = deps.ReadOnlyGroup
 		writeJSON(w, http.StatusOK, cfg)
 	})
 

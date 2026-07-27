@@ -21,12 +21,15 @@ CORS, no separate deployment (ADR-003, ADR-020).
   | Role | IdP group (env) | Permissions |
   |---|---|---|
   | Admin | `GSSH_ADMIN_GROUP` | everything, including mutations (grants, CI grants, service-account kill switch) |
-  | Auditor | `GSSH_AUDITOR_GROUP` | audit view + export, all read views |
-  | Read-only | `GSSH_READONLY_GROUP` | read views (hosts, grants, CI, users) |
+  | Auditor | `GSSH_AUDITOR_GROUP` | all read views (hosts, grants, CI, users) plus audit view + export |
 
-  Higher roles include lower ones (admin ⊃ auditor ⊃ readonly). The UI only
-  hides elements — roles are enforced server-side on every request. If all
-  three groups are empty, the entire admin API stays disabled (503).
+  Admin includes auditor (admin ⊃ auditor). An empty group grants the role
+  to nobody. The UI only hides elements — roles are enforced server-side on
+  every request. If both groups are empty, the entire admin API stays
+  disabled (503). **A login without any role is rejected** by the server
+  (`/v1/auth/callback` redirects with `login_error=no_role`, no session is
+  created) and the login page states that neither the admin nor the auditor
+  role is assigned.
 
 - **Server's OIDC client**: `GSSH_SERVER_OIDC_CLIENT_ID` +
   `GSSH_SERVER_OIDC_CLIENT_SECRET` — a **confidential** client in the IdP
@@ -113,9 +116,9 @@ so create/edit/delete behave realistically until reload.
 Role variants without a backend, in the browser console:
 
 ```js
-localStorage.setItem('gssh-mock-roles', 'readonly'); // or 'auditor,readonly'
-localStorage.setItem('gssh-mock-roles', '');         // logged-out view
-localStorage.removeItem('gssh-mock-roles');          // back to admin
+localStorage.setItem('gssh-mock-roles', 'auditor'); // read-only view
+localStorage.setItem('gssh-mock-roles', '');        // logged-out view
+localStorage.removeItem('gssh-mock-roles');         // back to admin
 ```
 
 (reload after each change). Production builds ship with `mockApi: false` —

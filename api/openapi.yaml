@@ -8,9 +8,10 @@ info:
     Angular API client is generated from it (`make web-api`).
 
     Authentication: OIDC ID token as bearer token. Roles of the admin API
-    (phase 8): `admin` (everything), `auditor` (read/export audit + read),
-    `readonly` (read resources); roles are mapped to IdP groups and are
-    inclusive of one another (admin ⊃ auditor ⊃ readonly).
+    (phase 8): `admin` (everything), `auditor` (all read access incl.
+    audit read/export); roles are mapped to IdP groups and are inclusive
+    of one another (admin ⊃ auditor). An empty group grants the role to
+    nobody; without any role the web-UI login is rejected.
   version: "1.0"
   license:
     name: Apache-2.0
@@ -293,7 +294,7 @@ paths:
   /v1/admin/grants:
     get:
       tags: [grants]
-      summary: List access rules (role readonly)
+      summary: List access rules (role auditor)
       operationId: listGrants
       responses:
         "200":
@@ -329,7 +330,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       tags: [grants]
-      summary: Read access rule (role readonly)
+      summary: Read access rule (role auditor)
       operationId: getGrant
       responses:
         "200":
@@ -389,7 +390,7 @@ paths:
   /v1/admin/ci-grants:
     get:
       tags: [ci-grants]
-      summary: List CI access rules (role readonly)
+      summary: List CI access rules (role auditor)
       operationId: listCiGrants
       responses:
         "200":
@@ -421,7 +422,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       tags: [ci-grants]
-      summary: Read CI access rule (role readonly)
+      summary: Read CI access rule (role auditor)
       operationId: getCiGrant
       responses:
         "200":
@@ -481,7 +482,7 @@ paths:
   /v1/admin/hosts:
     get:
       tags: [directory]
-      summary: Hosts with tags and certificate expiry (role readonly)
+      summary: Hosts with tags and certificate expiry (role auditor)
       operationId: listHosts
       responses:
         "200":
@@ -495,7 +496,7 @@ paths:
   /v1/admin/users:
     get:
       tags: [directory]
-      summary: Users with groups (role readonly)
+      summary: Users with groups (role auditor)
       operationId: listUsers
       responses:
         "200":
@@ -509,7 +510,7 @@ paths:
   /v1/admin/groups:
     get:
       tags: [directory]
-      summary: IdP groups (role readonly)
+      summary: IdP groups (role auditor)
       operationId: listGroups
       responses:
         "200":
@@ -523,7 +524,7 @@ paths:
   /v1/admin/service-accounts:
     get:
       tags: [directory]
-      summary: Service accounts / CI identities (role readonly)
+      summary: Service accounts / CI identities (role auditor)
       operationId: listServiceAccounts
       responses:
         "200":
@@ -562,7 +563,7 @@ paths:
   /v1/admin/certificates:
     get:
       tags: [directory]
-      summary: Most recently issued certificates (role readonly)
+      summary: Most recently issued certificates (role auditor)
       operationId: listCertificates
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
@@ -669,7 +670,7 @@ components:
         username: { type: string }
         roles:
           type: array
-          items: { type: string, enum: [admin, auditor, readonly] }
+          items: { type: string, enum: [admin, auditor] }
 
     UiConfig:
       type: object
@@ -677,7 +678,7 @@ components:
         Public bootstrap configuration. The OIDC fields describe the clients'
         public OIDC client (consumed by the client-setup page and client.sh) —
         never the server's confidential login client.
-      required: [oidc_issuer, oidc_client_id, admin_group, auditor_group, readonly_group]
+      required: [oidc_issuer, oidc_client_id, admin_group, auditor_group]
       properties:
         oidc_issuer: { type: string }
         oidc_client_id:
@@ -688,7 +689,6 @@ components:
             on bearer tokens.
         admin_group: { type: string }
         auditor_group: { type: string }
-        readonly_group: { type: string }
 
     SignRequest:
       type: object

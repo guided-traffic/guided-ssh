@@ -11,7 +11,7 @@ import { Role, SessionService } from './session.service';
  * '' → 'hosts' → guard (roles still empty) → UrlTree('/') → '' → 'hosts' → …
  * The guard must therefore (a) only decide after session.init(), and
  * (b) never redirect to '/' — only to '/hosts', if that is safely
- * reachable (readonly present), otherwise cancel navigation (false).
+ * reachable (auditor present), otherwise cancel navigation (false).
  */
 
 class FakeSession {
@@ -43,25 +43,25 @@ const runGuard = async (session: FakeSession, minRole: Role) => {
 
 describe('roleGuard', () => {
   it('without roles: cancels (false) instead of redirecting to "/" — no infinite redirect', async () => {
-    const result = await runGuard(new FakeSession([]), 'readonly');
+    const result = await runGuard(new FakeSession([]), 'auditor');
     expect(result).toBe(false);
   });
 
   it('waits for session.init() before checking roles', async () => {
-    const session = new FakeSession(['admin', 'auditor', 'readonly']);
-    const result = await runGuard(session, 'readonly');
+    const session = new FakeSession(['admin', 'auditor']);
+    const result = await runGuard(session, 'auditor');
     expect(session.initCalls).toBeGreaterThan(0);
     expect(result).toBe(true);
   });
 
-  it('insufficient role: redirects to /hosts (readonly is enough there), never to "/"', async () => {
-    const result = await runGuard(new FakeSession(['readonly']), 'auditor');
+  it('insufficient role: redirects to /hosts (auditor is enough there), never to "/"', async () => {
+    const result = await runGuard(new FakeSession(['auditor']), 'admin');
     expect(result).toBeInstanceOf(UrlTree);
     expect(String(result)).toBe('/hosts');
   });
 
   it('sufficient role: access allowed', async () => {
-    const result = await runGuard(new FakeSession(['auditor', 'readonly']), 'auditor');
+    const result = await runGuard(new FakeSession(['auditor']), 'auditor');
     expect(result).toBe(true);
   });
 });

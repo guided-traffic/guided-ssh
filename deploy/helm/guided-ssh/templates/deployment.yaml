@@ -152,7 +152,6 @@ spec:
             {{- include "guided-ssh.env" (dict "name" "GSSH_CI_AUDIENCE" "value" .Values.config.ci.audience) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_ADMIN_GROUP" "value" .Values.config.groups.admin) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_AUDITOR_GROUP" "value" .Values.config.groups.auditor) | nindent 12 }}
-            {{- include "guided-ssh.env" (dict "name" "GSSH_READONLY_GROUP" "value" .Values.config.groups.readOnly) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_KC_BASE_URL" "value" .Values.config.keycloak.baseURL) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_KC_REALM" "value" .Values.config.keycloak.realm) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_KC_CLIENT_ID" "value" .Values.config.keycloak.clientID) | nindent 12 }}

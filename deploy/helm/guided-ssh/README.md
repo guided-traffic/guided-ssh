@@ -444,7 +444,7 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `config.oidc.server.existingSecretKey` | `client-secret` | Key inside the server OIDC secret |
 | `config.oidc.server.scopes` | `""` (= `openid,profile,email,groups`) | Scopes of the server-side UI login |
 | `config.ci.issuer` / `audience` | `""` | GitLab CI issuer; empty ⇒ `/v1/sign/ci` disabled |
-| `config.groups.admin/auditor/readOnly` | `""` | IdP role groups |
+| `config.groups.admin/auditor` | `""` | IdP role groups (admin ⊃ auditor; empty ⇒ role granted to nobody) |
 | `config.keycloak.*` | `""` | Group sync via Keycloak admin API |
 | `config.rateLimit.trustProxy` | `true` | Client IP from `X-Forwarded-For` (behind ingress) |
 | `agent.enabled` / `agent.tlsNames` | `true` / service DNS | Agent API (mTLS) |
@@ -492,6 +492,22 @@ Semantic changes on top of the renames:
 - `/v1/ui/config` and `/client.sh` now always advertise the clients' public
   client to CLI installs (previously they leaked the UI client ID when one
   was configured).
+
+### readonly role removed
+
+The `readonly` role was merged into `auditor` (now the read role for all
+views plus the audit log). As above, old keys fail at render/startup time:
+
+| Old | New |
+|---|---|
+| `config.groups.readOnly` (`GSSH_READONLY_GROUP`) | removed — assign the group to `config.groups.auditor` instead |
+
+Semantic changes:
+
+- Endpoints that accepted the readonly role now require auditor.
+- The **web-UI login is rejected** for users with neither the admin nor the
+  auditor role (previously a role-less session was created); the login page
+  explains the missing role. An empty group value grants the role to nobody.
 
 ## Chart release (GitHub Pages)
 

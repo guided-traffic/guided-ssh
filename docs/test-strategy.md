@@ -107,7 +107,7 @@ the same scenario twice.
 | 5 Host agent | Enrollment with valid/invalid/consumed token; certificate renewal at 2/3 validity; `AuthorizedPrincipalsCommand`: cache hit, cache TTL expired + API down ⇒ fail-closed; sshd login E2E in a container |
 | 6 Grants | Group×tag evaluation at issuance and host ACL; additive grants (no deny); YAML import idempotent; group removed ⇒ login fails |
 | 7 GitLab CI | GitLab token claims (`project_path`, `ref_protected`, …) mapped to CI grants; validity ≤ 1 h enforced; key ID contains pipeline/job; simulated GitLab OIDC ⇒ certificate ⇒ Ansible ping |
-| 8 Web UI | API contracts via OpenAPI-generated clients; roles from claims (admin/auditor/read-only); audit filter; admin change produces an audit event |
+| 8 Web UI | API contracts via OpenAPI-generated clients; roles from claims (admin/auditor); audit filter; admin change produces an audit event |
 | 9 Session audit | Session start/end and sudo events reported; spool buffers during API outage; correlation via cert serial |
 | 10 Hardening | Rate limit engages; replay/audience-confusion/clock-skew negative tests; fuzzing sign endpoints; KMS signer against SoftHSM |
 | 11 Helm | `helm test`/chart-testing; migration job with lock; probes; deployment with `existingSecret` |

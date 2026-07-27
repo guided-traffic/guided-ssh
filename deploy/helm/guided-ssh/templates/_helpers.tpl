@@ -88,11 +88,12 @@ self-managed setup on start. */}}
 {{- end }}
 {{- end }}
 
-{{/* Fail fast on values keys removed by the server/client OIDC split, so an
-upgrade with stale values stops at render time with a migration hint instead
-of silently dropping auth configuration. hasKey (not truthiness) also catches
-keys left behind with empty values; the parent maps are checked via `with`
-because a user can null them. */}}
+{{/* Fail fast on values keys renamed or removed by config restructurings
+(server/client OIDC split, readonly-role removal), so an upgrade with stale
+values stops at render time with a migration hint instead of silently
+dropping auth configuration. hasKey (not truthiness) also catches keys left
+behind with empty values; the parent maps are checked via `with` because a
+user can null them. */}}
 {{- define "guided-ssh.validateValues" -}}
 {{- $legacy := list -}}
 {{- with .Values.config -}}
@@ -103,12 +104,15 @@ because a user can null them. */}}
 {{- if hasKey . "uiExistingSecretKey" }}{{- $legacy = append $legacy "config.oidc.uiExistingSecretKey (now config.oidc.server.existingSecretKey)" }}{{- end -}}
 {{- if hasKey . "uiBaseURL" }}{{- $legacy = append $legacy "config.oidc.uiBaseURL (now config.publicURL)" }}{{- end -}}
 {{- end -}}
+{{- with .groups -}}
+{{- if hasKey . "readOnly" }}{{- $legacy = append $legacy "config.groups.readOnly (removed — the auditor role covers read access)" }}{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- with .Values.hostRollout -}}
 {{- if hasKey . "publicUrl" }}{{- $legacy = append $legacy "hostRollout.publicUrl (now config.publicURL)" }}{{- end -}}
 {{- end -}}
 {{- if $legacy -}}
-{{- fail (printf "the server/client oidc split moved these values — set: %s (migration notes in the chart README)" (join ", " $legacy)) -}}
+{{- fail (printf "these values were renamed or removed — set: %s (migration notes in the chart README)" (join ", " $legacy)) -}}
 {{- end -}}
 {{- end }}
 

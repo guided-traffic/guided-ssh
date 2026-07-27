@@ -141,14 +141,13 @@ config:
     issuer: ""
     # GSSH_CI_AUDIENCE (empty = default guided-ssh)
     audience: ""
-  # Role groups of the IdP.
+  # Role groups of the IdP (admin ⊃ auditor). An empty group grants the role
+  # to nobody; without any role the web-UI login is rejected.
   groups:
     # GSSH_ADMIN_GROUP (empty ⇒ admin API disabled)
     admin: ""
-    # GSSH_AUDITOR_GROUP
+    # GSSH_AUDITOR_GROUP — all read access incl. audit log and export
     auditor: ""
-    # GSSH_READONLY_GROUP
-    readOnly: ""
   # Group sync via the Keycloak admin API (optional).
   keycloak:
     # GSSH_KC_BASE_URL

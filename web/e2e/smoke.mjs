@@ -38,7 +38,6 @@ function serveDist() {
           oidc_client_id: 'smoke-test',
           admin_group: '',
           auditor_group: '',
-          readonly_group: '',
         }),
       );
       return;

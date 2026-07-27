@@ -165,23 +165,29 @@ func TestCAModeFromEnv(t *testing.T) {
 	}
 }
 
-// TestCheckLegacyOIDCEnv: variables renamed by the server/client OIDC split
-// must stop startup with an old→new hint instead of being silently ignored.
-func TestCheckLegacyOIDCEnv(t *testing.T) {
-	for _, m := range legacyOIDCEnv {
+// TestCheckLegacyEnv: variables renamed or removed by config restructurings
+// must stop startup with a hint instead of being silently ignored.
+func TestCheckLegacyEnv(t *testing.T) {
+	for _, m := range legacyEnv {
 		t.Setenv(m.old, "")
 	}
-	if err := checkLegacyOIDCEnv(); err != nil {
+	if err := checkLegacyEnv(); err != nil {
 		t.Fatalf("no legacy variables: %v", err)
 	}
 
 	t.Setenv("GSSH_OIDC_CLIENT_ID", "gssh-cli")
 	t.Setenv("GSSH_UI_BASE_URL", "https://gssh.example.com")
-	err := checkLegacyOIDCEnv()
+	t.Setenv("GSSH_READONLY_GROUP", "viewers")
+	err := checkLegacyEnv()
 	if err == nil {
 		t.Fatal("legacy variables must stop startup")
 	}
-	for _, want := range []string{"GSSH_OIDC_CLIENT_ID", envClientOIDCClientID, "GSSH_UI_BASE_URL", envPublicURL} {
+	wants := []string{
+		"GSSH_OIDC_CLIENT_ID", envClientOIDCClientID,
+		"GSSH_UI_BASE_URL", envPublicURL,
+		"GSSH_READONLY_GROUP", "removed",
+	}
+	for _, want := range wants {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not name %s: %v", want, err)
 		}

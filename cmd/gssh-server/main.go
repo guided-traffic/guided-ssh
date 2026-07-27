@@ -95,10 +95,9 @@ const (
 	// configuration error (fail-fast, no accidental "true"/"1" activation).
 	envDevUIAuth = "GSSH_DEV_UI_AUTH"
 
-	// Web UI roles (Phase 8): auditor may read/export the audit log,
-	// read-only the resource views; admin includes both.
-	envAuditorGroup  = "GSSH_AUDITOR_GROUP"
-	envReadOnlyGroup = "GSSH_READONLY_GROUP"
+	// Web UI roles (Phase 8): auditor covers all read access (resource
+	// views, audit log incl. export); admin includes auditor.
+	envAuditorGroup = "GSSH_AUDITOR_GROUP"
 
 	// OIDC client of the server itself (confidential, WITH a client secret):
 	// the server performs the UI login (BFF: authorization code + PKCE +
@@ -261,32 +260,32 @@ func caModeFromEnv() (string, ca.ExternalKeyPaths, error) {
 	return mode, paths, nil
 }
 
-// legacyOIDCEnv maps the env vars removed by the server/client OIDC split to
-// their replacements. Renamed without aliases: the old names mixed the
-// server's confidential client with the clients' public client, and a stale
-// deployment must not silently run with parts of auth disabled.
-var legacyOIDCEnv = []struct{ old, replacement string }{
-	{"GSSH_OIDC_CLIENT_ID", envClientOIDCClientID},
-	{"GSSH_UI_OIDC_CLIENT_ID", envServerOIDCClientID},
-	{"GSSH_UI_OIDC_CLIENT_SECRET", envServerOIDCClientSecret},
-	{"GSSH_UI_OIDC_SCOPES", envServerOIDCScopes},
-	{"GSSH_UI_BASE_URL", envPublicURL},
+// legacyEnv lists env vars renamed or removed by config restructurings
+// (server/client OIDC split, readonly-role removal). No aliases: a stale
+// deployment must not silently run with parts of auth disabled or ignored.
+var legacyEnv = []struct{ old, hint string }{
+	{"GSSH_OIDC_CLIENT_ID", "now " + envClientOIDCClientID},
+	{"GSSH_UI_OIDC_CLIENT_ID", "now " + envServerOIDCClientID},
+	{"GSSH_UI_OIDC_CLIENT_SECRET", "now " + envServerOIDCClientSecret},
+	{"GSSH_UI_OIDC_SCOPES", "now " + envServerOIDCScopes},
+	{"GSSH_UI_BASE_URL", "now " + envPublicURL},
+	{"GSSH_READONLY_GROUP", "removed — the auditor role covers read access"},
 }
 
-// checkLegacyOIDCEnv fails startup while a pre-split variable is still set.
-// Errors name every offending variable at once (like caModeFromEnv) and run
-// before any database work so a stale deployment stops at the first message.
-func checkLegacyOIDCEnv() error {
+// checkLegacyEnv fails startup while a renamed or removed variable is still
+// set. Errors name every offending variable at once (like caModeFromEnv) and
+// run before any database work so a stale deployment stops at the first message.
+func checkLegacyEnv() error {
 	var stale []string
-	for _, m := range legacyOIDCEnv {
+	for _, m := range legacyEnv {
 		if os.Getenv(m.old) != "" {
-			stale = append(stale, fmt.Sprintf("%s (now %s)", m.old, m.replacement))
+			stale = append(stale, fmt.Sprintf("%s (%s)", m.old, m.hint))
 		}
 	}
 	if len(stale) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the server/client oidc split renamed these variables — set: %s (migration notes in the chart README)", strings.Join(stale, ", "))
+	return fmt.Errorf("these variables were renamed or removed — set: %s (migration notes in the chart README)", strings.Join(stale, ", "))
 }
 
 func main() {
@@ -500,7 +499,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := checkLegacyOIDCEnv(); err != nil {
+	if err := checkLegacyEnv(); err != nil {
 		return err
 	}
 
@@ -548,8 +547,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 			DownloadRateLimit: setupDownloadRateLimit(logger),
 			HostCertValidity:  hostCertValidity,
 			Logger:            logger, AdminGroup: adminGroup,
-			AuditorGroup:  os.Getenv(envAuditorGroup),
-			ReadOnlyGroup: os.Getenv(envReadOnlyGroup),
+			AuditorGroup: os.Getenv(envAuditorGroup),
 			// Advertised to CLI installs (/v1/ui/config, client.sh): always
 			// the clients' public client, never the server's confidential one.
 			UIConfig: api.UIConfig{

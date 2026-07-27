@@ -51,12 +51,12 @@ func registerUIRoutes(mux *http.ServeMux, admin *adminContext) {
 	if admin.ui == nil {
 		return
 	}
-	mux.HandleFunc("GET /v1/admin/hosts", admin.authorized(roleReadOnly, admin.handleListHosts))
-	mux.HandleFunc("GET /v1/admin/users", admin.authorized(roleReadOnly, admin.handleListUsers))
-	mux.HandleFunc("GET /v1/admin/groups", admin.authorized(roleReadOnly, admin.handleListGroups))
-	mux.HandleFunc("GET /v1/admin/service-accounts", admin.authorized(roleReadOnly, admin.handleListServiceAccounts))
+	mux.HandleFunc("GET /v1/admin/hosts", admin.authorized(roleAuditor, admin.handleListHosts))
+	mux.HandleFunc("GET /v1/admin/users", admin.authorized(roleAuditor, admin.handleListUsers))
+	mux.HandleFunc("GET /v1/admin/groups", admin.authorized(roleAuditor, admin.handleListGroups))
+	mux.HandleFunc("GET /v1/admin/service-accounts", admin.authorized(roleAuditor, admin.handleListServiceAccounts))
 	mux.HandleFunc("PATCH /v1/admin/service-accounts/{id}", admin.authorized(roleAdmin, admin.handleUpdateServiceAccount))
-	mux.HandleFunc("GET /v1/admin/certificates", admin.authorized(roleReadOnly, admin.handleListCertificates))
+	mux.HandleFunc("GET /v1/admin/certificates", admin.authorized(roleAuditor, admin.handleListCertificates))
 	mux.HandleFunc("GET /v1/admin/audit", admin.authorized(roleAuditor, admin.handleListAudit))
 	mux.HandleFunc("GET /v1/admin/audit/export", admin.authorized(roleAuditor, admin.handleExportAudit))
 	mux.HandleFunc("POST /v1/admin/enroll-tokens", admin.authorized(roleAdmin, admin.handleCreateEnrollToken))
