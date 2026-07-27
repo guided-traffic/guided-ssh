@@ -323,7 +323,7 @@ paths:
               schema: { $ref: "#/components/schemas/Grant" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
 
   /v1/admin/grants/{id}:
     parameters:
@@ -355,6 +355,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Grant" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [grants]
@@ -362,6 +363,7 @@ paths:
       operationId: deleteGrant
       responses:
         "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/admin/grants/apply:
@@ -386,6 +388,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApplyResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
 
   /v1/admin/ci-grants:
     get:
@@ -416,6 +419,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CiGrant" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
 
   /v1/admin/ci-grants/{id}:
     parameters:
@@ -447,6 +451,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CiGrant" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [ci-grants]
@@ -454,6 +459,7 @@ paths:
       operationId: deleteCiGrant
       responses:
         "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/admin/ci-grants/apply:
@@ -478,6 +484,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApplyResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/RulesWriteForbidden" }
 
   /v1/admin/hosts:
     get:
@@ -648,6 +655,15 @@ components:
       description: Not found
       content:
         text/plain: { schema: { type: string } }
+    RulesWriteForbidden:
+      description: >-
+        Rule write rejected by the provisioning gate: in-app editing is off
+        (`manual_rules_disabled`) or the domain is owned by a rules file
+        (`rules_file_managed`). A missing admin role produces the same status
+        with a plain-text body instead.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RulesWriteError" }
     RolloutUnavailable:
       description: Host rollout not configured (missing conditions in `missing`)
       content:
@@ -672,13 +688,34 @@ components:
           type: array
           items: { type: string, enum: [admin, auditor] }
 
+    RulesWriteError:
+      type: object
+      description: >-
+        Body of a rule write blocked by the provisioning gate; `code` is
+        stable, `error` is the human-facing explanation naming the
+        environment variable / chart value that owns the domain.
+      required: [error, code]
+      properties:
+        error: { type: string }
+        code:
+          type: string
+          enum: [manual_rules_disabled, rules_file_managed]
+
     UiConfig:
       type: object
       description: >-
         Public bootstrap configuration. The OIDC fields describe the clients'
         public OIDC client (consumed by the client-setup page and client.sh) —
         never the server's confidential login client.
-      required: [oidc_issuer, oidc_client_id, admin_group, auditor_group]
+      required:
+        [
+          oidc_issuer,
+          oidc_client_id,
+          admin_group,
+          auditor_group,
+          grants_editable,
+          ci_grants_editable,
+        ]
       properties:
         oidc_issuer: { type: string }
         oidc_client_id:
@@ -689,6 +726,18 @@ components:
             on bearer tokens.
         admin_group: { type: string }
         auditor_group: { type: string }
+        grants_editable:
+          type: boolean
+          description: >-
+            Whether the server accepts in-app writes on access rules
+            (GSSH_MANUAL_RULES enabled and the domain not owned by
+            GSSH_HOST_RULES_FILE). The UI hides Add/Edit/Delete when false;
+            the server enforces it independently (403).
+        ci_grants_editable:
+          type: boolean
+          description: >-
+            Same for CI access rules (GSSH_MANUAL_RULES and
+            GSSH_CI_RULES_FILE).
 
     SignRequest:
       type: object

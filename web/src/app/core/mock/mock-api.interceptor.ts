@@ -17,6 +17,7 @@ import {
   Grant,
   GrantRequest,
   ServiceAccount,
+  UiConfig,
 } from "../../api/models";
 import {
   mockAgentManifest,
@@ -42,6 +43,11 @@ import {
  * Role variants: `localStorage.setItem('gssh-mock-roles', 'auditor')` (or
  * '' for logged-out) + reload shows the UI as that role; removing the key
  * restores the full admin view.
+ *
+ * Rule provisioning: `localStorage.setItem('gssh-mock-rules', 'gitops')` +
+ * reload serves grants_editable/ci_grants_editable as false — the read-only
+ * variant of the rule pages (GitOps-owned rules); removing the key restores
+ * in-app editing. 'gitops-host' / 'gitops-ci' switch a single domain.
  */
 export const mockApiInterceptor: HttpInterceptorFn = (req, next) => {
   if (!req.url.startsWith("/v1/")) {
@@ -86,7 +92,7 @@ function route(
     return respond(req, 204, null);
   }
   if (method === "GET" && path === "/v1/ui/config") {
-    return respond(req, 200, mockUiConfig);
+    return respond(req, 200, uiConfigFixture());
   }
   if (method === "GET" && path === "/v1/admin/hosts") {
     return respond(req, 200, mockHosts);
@@ -134,6 +140,19 @@ function route(
     crudRoute(req, path, "/v1/admin/ci-grants", ciGrants, applyCiGrant) ??
     serviceAccountRoute(req, path)
   );
+}
+
+/** UI config with optional rule-provisioning override (see file docs). */
+function uiConfigFixture(): UiConfig {
+  const override = localStorage.getItem("gssh-mock-rules");
+  if (override === null) {
+    return mockUiConfig;
+  }
+  return {
+    ...mockUiConfig,
+    grants_editable: override === "gitops-ci",
+    ci_grants_editable: override === "gitops-host",
+  };
 }
 
 /** Session with optional role override from localStorage (see file docs). */

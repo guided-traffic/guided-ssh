@@ -38,6 +38,8 @@ function serveDist() {
           oidc_client_id: 'smoke-test',
           admin_group: '',
           auditor_group: '',
+          grants_editable: false,
+          ci_grants_editable: false,
         }),
       );
       return;

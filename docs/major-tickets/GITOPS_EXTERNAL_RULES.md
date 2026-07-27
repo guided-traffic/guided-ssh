@@ -256,18 +256,49 @@ rules. Both follow D3's rationale; the flux-example files are unaffected.
 - Local frontend development needs `GSSH_MANUAL_RULES=true` next to
   `GSSH_DEV_UI_AUTH=insecure` — noted in [docs/web-ui.md](../web-ui.md).
 
-### Phase 3 — UI config + frontend
+### Phase 3 — UI config + frontend ✅
 
-- [ ] `UIConfig` + handler: add `grants_editable`, `ci_grants_editable`
-      (D7); update [openapi.yaml](../../api/openapi.yaml) (UIConfig schema +
-      403 responses from D6); regenerate the API client (`ng-openapi-gen`).
-- [ ] [grants.ts](../../web/src/app/features/grants.ts) /
-      [ci.ts](../../web/src/app/features/ci.ts): gate Add/Edit/Delete (and
-      the CI service-account toggle) on the flags; read-only hint text.
-- [ ] Mock mode: extend
-      [mock-data.ts](../../web/src/app/core/mock/mock-data.ts) /
-      interceptor so both states are testable in dev.
-- [ ] Frontend tests for both flag states.
+- [x] `UIConfig` + handler: `grants_editable`, `ci_grants_editable`,
+      computed per request from `Deps.Rules` via `RulesConfig.editable`
+      ([server.go](../../internal/api/server.go),
+      [admin_rules.go](../../internal/api/admin_rules.go)) (D7);
+      [openapi.yaml](../../api/openapi.yaml) carries the UiConfig fields and
+      a `RulesWriteForbidden` 403 (schema `RulesWriteError` with the two D6
+      codes) on all eight rule write operations; API client regenerated
+      (`make web-api`).
+- [x] [grants.ts](../../web/src/app/features/grants.ts) /
+      [ci.ts](../../web/src/app/features/ci.ts): Add/Edit/Delete require
+      `session.isAdmin() && <domain>Editable()`, read-only hint under the
+      page subtitle. Flags come from the new
+      [ConfigService](../../web/src/app/core/config.service.ts) (loads
+      `/v1/ui/config` once, defaults to *not* editable).
+- [x] Mock mode: `mockUiConfig` carries both flags,
+      [mock-api.interceptor.ts](../../web/src/app/core/mock/mock-api.interceptor.ts)
+      serves `gitops` / `gitops-host` / `gitops-ci` variants via
+      `localStorage['gssh-mock-rules']` (documented in
+      [docs/web-ui.md](../web-ui.md)).
+- [x] Tests: [grants.spec.ts](../../web/src/app/features/grants.spec.ts) /
+      [ci.spec.ts](../../web/src/app/features/ci.spec.ts) for both flag
+      states, `TestUIConfigEditableFlags`
+      ([admin_ui_test.go](../../internal/api/admin_ui_test.go)) for the
+      server-side matrix.
+
+**Decisions made while implementing:**
+
+- The **CI service-account toggle stays ungated**, deviating from the
+  Phase-3 bullet above. Service accounts are not part of the declarative
+  rule files (no `service_accounts:` key), Phase 2 does not gate
+  `PATCH /v1/admin/service-accounts/{id}` server-side, and the toggle is the
+  per-project kill switch. Hiding a control the server still accepts would
+  remove an incident-response path from the UI without making anything more
+  declarative. The CI page's hint says so explicitly.
+- The hint renders only once `/v1/ui/config` has been loaded
+  (`ConfigService.loaded()`), so the read-only text does not flash while the
+  page boots. If the config request fails, neither buttons nor hint appear —
+  fail-closed.
+- `createGrant`'s existing plain-text `403` in the OpenAPI spec now points
+  at `RulesWriteForbidden`; its description names the role case (text/plain)
+  so the role gate stays documented.
 
 ### Phase 4 — Helm chart
 

@@ -18,6 +18,7 @@ import { MatTableModule } from '@angular/material/table';
 import { Api } from '../api/api';
 import { createGrant, deleteGrant, listGrants, updateGrant } from '../api/functions';
 import { Grant, GrantRequest } from '../api/models';
+import { ConfigService } from '../core/config.service';
 import { csvToList, formatSeconds, tagsToText, textToTags } from '../core/format';
 import { SessionService } from '../core/session.service';
 
@@ -32,12 +33,17 @@ import { SessionService } from '../core/session.service';
           <div class="page-sub">
             IdP group × tag selector → principals · additive, no deny (ADR-018)
           </div>
+          @if (config.loaded() && !config.grantsEditable()) {
+            <div class="page-sub">
+              Rules are managed declaratively (GitOps) — in-app editing is disabled.
+            </div>
+          }
         </div>
         <div>
           <button mat-stroked-button (click)="load()" [disabled]="loading()">
             <mat-icon svgIcon="refresh" />Refresh
           </button>
-          @if (session.isAdmin()) {
+          @if (session.isAdmin() && config.grantsEditable()) {
             <button mat-flat-button (click)="edit(null)" style="margin-left: 8px">
               <mat-icon svgIcon="add" />New Rule
             </button>
@@ -86,7 +92,7 @@ import { SessionService } from '../core/session.service';
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef></th>
               <td mat-cell *matCellDef="let g" style="white-space: nowrap; text-align: right">
-                @if (session.isAdmin()) {
+                @if (session.isAdmin() && config.grantsEditable()) {
                   <button mat-icon-button aria-label="Edit" (click)="edit(g)">
                     <mat-icon svgIcon="edit" />
                   </button>
@@ -109,6 +115,7 @@ export class GrantsPage implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   protected readonly session = inject(SessionService);
+  protected readonly config = inject(ConfigService);
 
   protected readonly columns = ['group', 'selector', 'principals', 'sudo', 'validity', 'actions'];
   protected readonly grants = signal<Grant[]>([]);
@@ -116,6 +123,7 @@ export class GrantsPage implements OnInit {
   protected readonly formatSeconds = formatSeconds;
 
   ngOnInit(): void {
+    void this.config.load();
     this.load();
   }
 

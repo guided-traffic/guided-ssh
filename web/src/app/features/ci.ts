@@ -27,6 +27,7 @@ import {
   updateServiceAccount,
 } from '../api/functions';
 import { CiGrant, CiGrantRequest, ServiceAccount } from '../api/models';
+import { ConfigService } from '../core/config.service';
 import { csvToList, formatSeconds, tagsToText, textToTags } from '../core/format';
 import { SessionService } from '../core/session.service';
 
@@ -46,12 +47,18 @@ import { SessionService } from '../core/session.service';
         <div>
           <h1>CI &amp; Service Accounts</h1>
           <div class="page-sub">GitLab pipelines: access rules and project identities</div>
+          @if (config.loaded() && !config.ciGrantsEditable()) {
+            <div class="page-sub">
+              CI rules are managed declaratively (GitOps) — in-app editing is disabled. The
+              service-account kill switch stays available.
+            </div>
+          }
         </div>
         <div>
           <button mat-stroked-button (click)="load()" [disabled]="loading()">
             <mat-icon svgIcon="refresh" />Refresh
           </button>
-          @if (session.isAdmin()) {
+          @if (session.isAdmin() && config.ciGrantsEditable()) {
             <button mat-flat-button (click)="edit(null)" style="margin-left: 8px">
               <mat-icon svgIcon="add" />New CI Rule
             </button>
@@ -110,7 +117,7 @@ import { SessionService } from '../core/session.service';
                 <ng-container matColumnDef="actions">
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let g" style="white-space: nowrap; text-align: right">
-                    @if (session.isAdmin()) {
+                    @if (session.isAdmin() && config.ciGrantsEditable()) {
                       <button mat-icon-button aria-label="Edit" (click)="edit(g)">
                         <mat-icon svgIcon="edit" />
                       </button>
@@ -174,6 +181,7 @@ export class CiPage implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   protected readonly session = inject(SessionService);
+  protected readonly config = inject(ConfigService);
 
   protected readonly ciColumns = ['project', 'conditions', 'selector', 'principals', 'validity', 'actions'];
   protected readonly accountColumns = ['name', 'kind', 'issuer', 'active'];
@@ -184,6 +192,7 @@ export class CiPage implements OnInit {
   protected readonly formatSeconds = formatSeconds;
 
   ngOnInit(): void {
+    void this.config.load();
     this.load();
   }
 

@@ -54,6 +54,14 @@ func (c RulesConfig) fileOwned(domain ruleDomain) bool {
 	return c.HostFile != ""
 }
 
+// editable reports whether in-app editing of the domain is possible at all:
+// manual provisioning on and no file owner. Served to the web UI in
+// /v1/ui/config (D7) so it can hide buttons whose writes the gates below
+// would reject anyway.
+func (c RulesConfig) editable(domain ruleDomain) bool {
+	return c.ManualRules && !c.fileOwned(domain)
+}
+
 // Machine-readable codes of the blocked writes (D6). The UI and scripts key
 // off these, the message stays human-facing.
 const (

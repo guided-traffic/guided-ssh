@@ -10,6 +10,16 @@ export interface UiConfig {
   auditor_group: string;
 
   /**
+   * Same for CI access rules (GSSH_MANUAL_RULES and GSSH_CI_RULES_FILE).
+   */
+  ci_grants_editable: boolean;
+
+  /**
+   * Whether the server accepts in-app writes on access rules (GSSH_MANUAL_RULES enabled and the domain not owned by GSSH_HOST_RULES_FILE). The UI hides Add/Edit/Delete when false; the server enforces it independently (403).
+   */
+  grants_editable: boolean;
+
+  /**
    * Public OIDC client of the gssh CLIs (no client secret, GSSH_CLIENT_OIDC_CLIENT_ID); also the audience the server expects on bearer tokens.
    */
   oidc_client_id: string;
