@@ -151,6 +151,18 @@ user can null them. */}}
 {{- end -}}
 {{- include "guided-ssh.validateRules" . -}}
 {{- include "guided-ssh.validateAgentIngress" . -}}
+{{- include "guided-ssh.validateAgentProxy" . -}}
+{{- end }}
+
+{{/* PROXY protocol guard: the setting only configures the agent listener, so
+without the agent API it would be silently dead config. Whether the component
+in front actually sends the header is deliberately NOT derived from
+agent.ingress — that annotation is operator-managed and the rollout order
+matters (see README). */}}
+{{- define "guided-ssh.validateAgentProxy" -}}
+{{- if and .Values.agent.proxyProtocol.enabled (not .Values.agent.enabled) -}}
+{{- fail "agent.proxyProtocol.enabled=true requires agent.enabled=true — the PROXY protocol reader only wraps the agent listener" -}}
+{{- end -}}
 {{- end }}
 
 {{/* Agent ingress guards: the Ingress needs the agent Service as backend, and

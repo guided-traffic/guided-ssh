@@ -214,6 +214,40 @@ fails "agent ingress: enabled with agent.service.enabled=false" \
   "requires agent.service.enabled=true" \
   "${INGRESS[@]}" --set agent.service.enabled=false
 
+# --- PROXY protocol on the agent listener (AGENT_INGRESS WP5) --------------
+case_name="proxy protocol: off by default"
+if render "$case_name"; then
+  hasnt "$case_name" "GSSH_AGENT_PROXY_PROTOCOL"
+  hasnt "$case_name" "GSSH_AGENT_PROXY_TRUSTED"
+fi
+
+case_name="proxy protocol: enabled with trusted senders"
+if render "$case_name" --set agent.proxyProtocol.enabled=true \
+  --set 'agent.proxyProtocol.trusted[0]=haproxy-pods.ingress.svc.cluster.local' \
+  --set 'agent.proxyProtocol.trusted[1]=10.42.0.0/16'; then
+  has "$case_name" "name: GSSH_AGENT_PROXY_PROTOCOL"
+  has "$case_name" 'value: "haproxy-pods.ingress.svc.cluster.local,10.42.0.0/16"'
+fi
+
+# An empty list is a valid (if dangerous) configuration: the header then has to
+# come from every connection — NOTES.txt warns about it, the env stays unset.
+case_name="proxy protocol: enabled without trusted senders"
+if render "$case_name" --set agent.proxyProtocol.enabled=true; then
+  has "$case_name" "name: GSSH_AGENT_PROXY_PROTOCOL"
+  hasnt "$case_name" "GSSH_AGENT_PROXY_TRUSTED"
+fi
+
+# Not implied by the ingress: the send-proxy annotation is operator-managed and
+# has to be rolled out after the server (D5).
+case_name="proxy protocol: not implied by agent.ingress"
+if render "$case_name" "${INGRESS[@]}"; then
+  hasnt "$case_name" "GSSH_AGENT_PROXY_PROTOCOL"
+fi
+
+fails "proxy protocol: enabled with agent.enabled=false" \
+  "requires agent.enabled=true" \
+  --set agent.proxyProtocol.enabled=true --set agent.enabled=false
+
 if [ "$failures" -eq 0 ]; then
   echo "helm render checks passed"
 else

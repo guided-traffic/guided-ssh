@@ -45,3 +45,13 @@ spec:
     #     host: gssh-agent.staging.example.com
     #     annotations:
     #       nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    #   # Real agent source IP in the audit log: the controller prepends a
+    #   # PROXY header, the server trusts it only from the listed senders.
+    #   # Roll this out FIRST, the controller's send-proxy annotation second —
+    #   # the reverse order breaks the agent endpoint (chart README).
+    #   proxyProtocol:
+    #     enabled: true
+    #     trusted:
+    #       # Headless Service of the controller pods — a ClusterIP name would
+    #       # resolve to an address that never appears as a source.
+    #       - haproxy-pods.ingress.svc.cluster.local

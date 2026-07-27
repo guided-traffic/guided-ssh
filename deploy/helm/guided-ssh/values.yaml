@@ -245,6 +245,21 @@ agent:
     #   nginx.ingress.kubernetes.io/ssl-passthrough: "true" (ingress-nginx,
     #     controller needs --enable-ssl-passthrough)
     annotations: {}
+  # PROXY protocol (v1/v2) on the agent listener: restores the agent's real
+  # source IP for the audit log when something in front (passthrough ingress,
+  # LoadBalancer, appliance) forwards it. Only enable it when that component
+  # actually sends the header — and in this order: server first, sender's
+  # send-proxy annotation second (the reverse breaks the endpoint, the
+  # listener would read the header as TLS bytes). See README.
+  proxyProtocol:
+    enabled: false
+    # Who may send a PROXY header: CIDRs, IPs, or DNS names. A headless
+    # Service of the ingress controller pods resolves exactly to the pod IPs
+    # the server sees as sources — a normal (ClusterIP) Service name does not
+    # and never matches. Empty = the header is REQUIRED from every
+    # connection, which breaks agents that connect directly.
+    # example: ["haproxy-pods.ingress.svc.cluster.local"]
+    trusted: []
 
 hostRollout:
   # One-command host install (UI button "Add host"). When true, the
