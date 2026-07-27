@@ -218,23 +218,43 @@ strict decoding now rejects unknown/misspelled keys, and a file without a
 top-level `grants:` key is an error instead of silently deleting all host
 rules. Both follow D3's rationale; the flux-example files are unaffected.
 
-### Phase 2 — server: gates + reconcile loop
+### Phase 2 — server: gates + reconcile loop ✅
 
-- [ ] Env parsing for the three new vars in `serve()`
-      ([main.go:498](../../cmd/gssh-server/main.go#L498)); pass into
-      `api.Deps`.
-- [ ] Write-gate in [admin.go](../../internal/api/admin.go) /
-      [admin_ci.go](../../internal/api/admin_ci.go): CRUD handlers check
-      manual flag + file ownership, apply handlers check file ownership;
-      403 with `manual_rules_disabled` / `rules_file_managed` (D1, D6).
-- [ ] Reconciler (new `internal/rulesync` or similar): startup apply with
-      fail-fast, 30 s ticker, actor `system:rules-file`, error handling +
-      `gssh_rules_file_sync_errors_total{domain}` metric, change-only info
-      log (D4, D5). Started from `serve()` alongside the other background
-      loops.
-- [ ] Tests: API gate matrix (D1 table), reconciler unit tests against the
-      store test harness (create/update/delete/unchanged, invalid file keeps
-      state, startup fail-fast).
+- [x] Env parsing for the three new vars in `serve()`
+      ([main.go](../../cmd/gssh-server/main.go), `rulesConfigFromEnv`); the
+      names live in [rulespec](../../internal/rulespec/rulespec.go) so
+      server, API gates and reconciler spell them identically. Passed into
+      `api.Deps.Rules`.
+- [x] Write-gate in [admin_rules.go](../../internal/api/admin_rules.go),
+      applied at route registration in
+      [admin.go](../../internal/api/admin.go): CRUD handlers check manual
+      flag + file ownership, apply handlers check file ownership; 403 with
+      `manual_rules_disabled` / `rules_file_managed` in a JSON body (D1, D6).
+      Reads stay open in every mode.
+- [x] Reconciler [internal/rulesync](../../internal/rulesync/rulesync.go):
+      startup apply with fail-fast, 30 s ticker, actor `system:rules-file`,
+      per-domain error handling + `gssh_rules_file_sync_errors_total{domain}`
+      metric, change-only info log (D4, D5). Started from `serve()` via
+      `startRulesSync` alongside the other background loops.
+- [x] Tests: API gate matrix (D1 table,
+      [admin_rules_test.go](../../internal/api/admin_rules_test.go)),
+      reconciler unit tests against a fake applier
+      ([rulesync_test.go](../../internal/rulesync/rulesync_test.go)):
+      both domains, empty list, per-domain isolation, invalid/missing file
+      keeps state, loop recovery. The transactional apply semantics stay
+      covered by the store integration tests.
+
+**Decisions made while implementing:**
+
+- Host entries without an explicit `issuer:` need a default issuer, which
+  the API path takes from the admin's token. The reconciler has no token, so
+  it uses `GSSH_OIDC_ISSUER`. Without that variable, such a file fails the
+  startup apply with the store's "issuer is missing" error.
+- `GSSH_MANUAL_RULES=true` together with a rules file logs a warning at
+  startup and the file still wins (D1); the chart forbids the combination
+  (Phase 4), the env path allows it.
+- Local frontend development needs `GSSH_MANUAL_RULES=true` next to
+  `GSSH_DEV_UI_AUTH=insecure` — noted in [docs/web-ui.md](../web-ui.md).
 
 ### Phase 3 — UI config + frontend
 

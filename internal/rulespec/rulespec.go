@@ -21,6 +21,19 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
+// Environment variables of the rules provisioning (GITOPS_EXTERNAL_RULES D9).
+// They live here because server, API gates and reconciler all name them in
+// their error messages — one spelling for all three.
+const (
+	// EnvManualRules gates the interactive CRUD endpoints; only the exact
+	// value "true" enables them.
+	EnvManualRules = "GSSH_MANUAL_RULES"
+	// EnvHostRulesFile / EnvCIRulesFile point at a declarative rules file
+	// per domain; a file-owned domain rejects all API writes.
+	EnvHostRulesFile = "GSSH_HOST_RULES_FILE"
+	EnvCIRulesFile   = "GSSH_CI_RULES_FILE"
+)
+
 // GrantEntry is an access rule in the YAML file:
 //
 //	grants:

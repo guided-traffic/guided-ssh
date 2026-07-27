@@ -150,6 +150,9 @@ export GSSH_DB_HOST=localhost GSSH_DB_USER=gssh GSSH_DB_PASSWORD=gssh \
        GSSH_DB_NAME=gssh GSSH_DB_SSLMODE=disable
 export GSSH_CA_MASTER_KEY="$(openssl rand -base64 32)"
 export GSSH_DEV_UI_AUTH=insecure
+# In-app rule editing is off by default (rules are expected to come from
+# GitOps); enable it if you work on the grants/CI pages.
+export GSSH_MANUAL_RULES=true
 
 go run ./cmd/gssh-server -listen :8080
 ```

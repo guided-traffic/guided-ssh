@@ -80,6 +80,10 @@ type Deps struct {
 	// PublicBaseURL is the external base URL of the public listener
 	// (GSSH_PUBLIC_URL); empty ⇒ gate closed.
 	PublicBaseURL string
+	// Rules decides which rule domains accept API writes: in-app CRUD is an
+	// opt-in, file-owned domains reject every write (GITOPS_EXTERNAL_RULES).
+	// The zero value is the production default: CRUD blocked, apply open.
+	Rules RulesConfig
 }
 
 // AgentSource provides metadata and content of the embedded agent binaries

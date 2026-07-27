@@ -119,8 +119,17 @@ func adminClaims() *auth.Claims {
 	return claims
 }
 
-// newAdminServer builds the test server including the admin API.
+// newAdminServer builds the test server including the admin API with in-app
+// rule editing enabled; the gates of GITOPS_EXTERNAL_RULES have their own
+// tests (newAdminServerRules, TestAdminRuleWriteGates).
 func newAdminServer(t *testing.T, fs *fakeAuthStore, admin api.AdminStore, verifier api.TokenVerifier, adminGroup string) *httptest.Server {
+	t.Helper()
+	return newAdminServerRules(t, fs, admin, verifier, adminGroup, api.RulesConfig{ManualRules: true})
+}
+
+// newAdminServerRules builds the test server with an explicit rules
+// configuration (manual provisioning / file ownership per domain).
+func newAdminServerRules(t *testing.T, fs *fakeAuthStore, admin api.AdminStore, verifier api.TokenVerifier, adminGroup string, rules api.RulesConfig) *httptest.Server {
 	t.Helper()
 	masterKey := make([]byte, ca.MasterKeySize)
 	certAuthority, err := ca.New(&fs.fakeStore, masterKey, ca.NewPolicyEngine(ca.DefaultPolicies()))
@@ -134,6 +143,7 @@ func newAdminServer(t *testing.T, fs *fakeAuthStore, admin api.AdminStore, verif
 	srv := httptest.NewServer(api.New(api.Deps{
 		CA: certAuthority, Store: fs, Grants: fs, Admin: admin,
 		Verifier: verifier, Logger: logger, AdminGroup: adminGroup,
+		Rules: rules,
 	}))
 	t.Cleanup(srv.Close)
 	return srv
