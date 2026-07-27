@@ -93,7 +93,7 @@ func TestEnrollRequirePin(t *testing.T) {
 				"--hostname", "testhost",
 				"--ssh-key", keyPath,
 				"--state-dir", t.TempDir(),
-				"--ssh-dir", t.TempDir(),
+				"--ssh-dir", testSSHDir(t),
 			}, tc.args...)
 
 			var stdout, stderr bytes.Buffer

@@ -142,7 +142,7 @@ create a first access rule, enroll a host, ssh:
 api_url: http://localhost:8080
 issuer: http://127.0.0.1:5556/dex          # must match GSSH_OIDC_ISSUER
 client_id: gssh-cli
-scopes: [openid, profile, email, groups]   # the default omits groups — Dex only sends what is requested
+# scopes: [openid, profile, email, groups]  # default; only set it to deviate
 ```
 
 ```sh
@@ -311,11 +311,14 @@ gssh ssh <host>
 
 No sudo, no token, no secrets: the script refuses to run as root, installs
 into `~/.local/bin`, and writes `~/.config/guided-ssh/config.yaml` (mode
-0600) only if none exists — an existing configuration is never overwritten,
-the binary is still updated. Possessing the binary grants nothing; access is
-only ever granted at `gssh login` time (OIDC + grants). Direct binary
-downloads (macOS included) and a manual-configuration snippet live on the
-same UI page.
+0600) with the values of the server it was fetched from. An existing
+configuration is replaced and kept as `config.yaml.bak`, so re-running the
+one-liner is also how you switch between environments — a `pin_sha256` set
+for the *same* `api_url` survives the rewrite, a pin belonging to another
+server is dropped with a warning. Possessing the binary grants nothing;
+access is only ever granted at `gssh login` time (OIDC + grants). Direct
+binary downloads (macOS included) and a manual-configuration snippet live on
+the same UI page.
 
 Three public routes back this (all served with `Cache-Control: no-store`):
 

@@ -144,6 +144,58 @@ func TestClientCredentialsWrongSecret(t *testing.T) {
 	}
 }
 
+// TestDefaultScopes pins the scope set of a configuration without `scopes`:
+// groups has to be requested (grants are matched by group), unless the
+// issuer publishes a scopes_supported list without it.
+func TestDefaultScopes(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		scopesSupported []string
+		configured      []string
+		want            string
+	}{
+		{
+			name: "no scopes_supported published",
+			want: "openid profile email groups",
+		},
+		{
+			name:            "groups advertised",
+			scopesSupported: []string{"openid", "profile", "email", "groups"},
+			want:            "openid profile email groups",
+		},
+		{
+			name:            "groups not advertised",
+			scopesSupported: []string{"openid", "profile", "email"},
+			want:            "openid profile email",
+		},
+		{
+			name:            "configuration wins",
+			scopesSupported: []string{"openid", "profile", "email", "groups"},
+			configured:      []string{"openid", "email"},
+			want:            "openid email",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			idp := newFakeIDP(t)
+			idp.scopesSupported = tc.scopesSupported
+			flow, err := auth.NewFlow(context.Background(), auth.FlowConfig{
+				IssuerURL: idp.Issuer(),
+				ClientID:  fakeClientID,
+				Scopes:    tc.configured,
+			})
+			if err != nil {
+				t.Fatalf("NewFlow: %v", err)
+			}
+			if _, err := flow.AuthCodePKCE(context.Background(), browse(t)); err != nil {
+				t.Fatalf("AuthCodePKCE: %v", err)
+			}
+			if got, _ := idp.lastAuthScope.Load().(string); got != tc.want {
+				t.Errorf("authorize scope = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewFlowDiscoveryError(t *testing.T) {
 	_, err := auth.NewFlow(context.Background(), auth.FlowConfig{IssuerURL: "http://127.0.0.1:1/realms/nix"})
 	if err == nil {

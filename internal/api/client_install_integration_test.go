@@ -180,14 +180,23 @@ func TestClientInstallScriptEndToEnd(t *testing.T) {
 		t.Errorf("gssh status does not print the configured api url:\n%s", raw)
 	}
 
-	// ── Second run: config kept (iron rule 2), binary still replaced ──────
+	// ── Second run: config rewritten from this server, binary replaced ────
+	// The config carries a stale api_url (as after an environment switch), a
+	// pin for that other server, and a hand-added key — the re-run has to
+	// point the client back at THIS server, drop the foreign pin, and leave
+	// the previous file behind as .bak.
 	assertClientCmd(t, ctr, []string{"sh", "-c", "echo broken > " + binPath}, "corrupting binary for the re-run")
+	assertClientCmd(t, ctr, []string{"su", "-l", "alice", "-c",
+		"printf 'api_url: \"https://gssh.other.test\"\\nissuer: \"https://idp.other.test\"\\nclient_id: \"gssh-cli\"\\npin_sha256: \"AAAA\"\\nvalidity: 4h\\n' > " + configPath},
+		"planting a foreign configuration")
 	code, raw = execClientCmd(t, ctr, []string{"su", "-l", "alice", "-c", install})
 	if code != 0 {
 		t.Fatalf("client.sh re-run exit %d:\n%s", code, raw)
 	}
-	if !strings.Contains(raw, "existing configuration kept") {
-		t.Errorf("re-run without 'existing configuration kept':\n%s", raw)
+	for _, want := range []string{"existing configuration replaced", "https://gssh.other.test"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("re-run output without %q:\n%s", want, raw)
+		}
 	}
 	// The corrupted binary works again ⇒ the re-run replaced it.
 	code, raw = execClientCmd(t, ctr, []string{"su", "-l", "alice", "-c", binPath + " version"})
@@ -196,7 +205,38 @@ func TestClientInstallScriptEndToEnd(t *testing.T) {
 	}
 	_, raw = execClientCmd(t, ctr, []string{"cat", configPath})
 	if !strings.Contains(raw, fmt.Sprintf("api_url: %q", publicBaseURL)) {
-		t.Errorf("config.yaml changed by the re-run:\n%s", raw)
+		t.Errorf("re-run did not repoint api_url at this server:\n%s", raw)
+	}
+	if strings.Contains(raw, "pin_sha256") {
+		t.Errorf("re-run carried a pin of another server over:\n%s", raw)
+	}
+	// The replaced file stays available, mode included.
+	_, raw = execClientCmd(t, ctr, []string{"cat", configPath + ".bak"})
+	if !strings.Contains(raw, "https://gssh.other.test") || !strings.Contains(raw, "validity: 4h") {
+		t.Errorf("backup does not hold the previous configuration:\n%s", raw)
+	}
+	if mode := containerFileMode(t, ctr, configPath+".bak"); mode != "600" {
+		t.Errorf("config.yaml.bak mode = %s, want 600", mode)
+	}
+
+	// ── Third run: a pin for THIS server survives the rewrite ─────────────
+	// Dropping it silently would downgrade a pinned client to plain WebPKI.
+	// 32 zero bytes — a decodable SPKI pin, so the rewritten config stays
+	// loadable by the client.
+	testPin := strings.Repeat("A", 43) + "="
+	assertClientCmd(t, ctr, []string{"su", "-l", "alice", "-c",
+		"printf 'pin_sha256: \"" + testPin + "\"\\n' >> " + configPath},
+		"pinning the configuration for this server")
+	code, raw = execClientCmd(t, ctr, []string{"su", "-l", "alice", "-c", install})
+	if code != 0 {
+		t.Fatalf("client.sh pinned re-run exit %d:\n%s", code, raw)
+	}
+	if !strings.Contains(raw, "keeping the configured pin") {
+		t.Errorf("pinned re-run without a notice about the kept pin:\n%s", raw)
+	}
+	_, raw = execClientCmd(t, ctr, []string{"cat", configPath})
+	if !strings.Contains(raw, `pin_sha256: "`+testPin+`"`) {
+		t.Errorf("pin for this server was dropped by the re-run:\n%s", raw)
 	}
 }
 

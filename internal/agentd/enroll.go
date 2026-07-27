@@ -45,6 +45,16 @@ type EnrollOptions struct {
 	// PAMDir is the PAM configuration directory (default /etc/pam.d); if
 	// missing, the pam_exec hooks are skipped (tests/non-Linux).
 	PAMDir string
+	// ReloadCommand overrides the detected command that makes the running
+	// sshd re-read its configuration; it is persisted in config.yaml and
+	// reused for every certificate renewal.
+	ReloadCommand string
+	// NoReload leaves the reload to the operator (immutable images, config
+	// management). The configuration stays inactive until they reload sshd.
+	NoReload bool
+	// sshdBinary overrides the sshd binary used for `sshd -t` and the probe
+	// of the running daemon (test seam; empty = resolved from PATH).
+	sshdBinary string
 }
 
 // enrollResponse mirrors the response of POST /v1/enroll (internal/api).
@@ -64,24 +74,14 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	if opts.ServerURL == "" || opts.Token == "" || opts.AgentURL == "" {
 		return fmt.Errorf("server-url, agent-url, and token are required")
 	}
-	if opts.StateDir == "" {
-		opts.StateDir = DefaultStateDir
+	if err := opts.applyDefaults(); err != nil {
+		return err
 	}
-	if opts.SSHDir == "" {
-		opts.SSHDir = DefaultSSHDir
-	}
-	if opts.SSHKeyPath == "" {
-		opts.SSHKeyPath = filepath.Join(opts.SSHDir, "ssh_host_ed25519_key.pub")
-	}
-	if opts.PAMDir == "" {
-		opts.PAMDir = DefaultPAMDir
-	}
-	if opts.Hostname == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			return fmt.Errorf("determining hostname: %w", err)
-		}
-		opts.Hostname = hostname
+
+	// Preflight before the network call: without the Include the snippet is
+	// written but never read, and a failure here leaves the token unused.
+	if err := verifyInclude(opts.SSHDir); err != nil {
+		return err
 	}
 
 	sshPub, err := os.ReadFile(opts.SSHKeyPath)
@@ -99,17 +99,86 @@ func Enroll(ctx context.Context, opts EnrollOptions, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	return writeAndActivate(opts, priv, response, stdout)
+}
 
-	if err := writeState(opts, priv, response); err != nil {
+// applyDefaults fills the optional paths and the hostname.
+func (o *EnrollOptions) applyDefaults() error {
+	if o.StateDir == "" {
+		o.StateDir = DefaultStateDir
+	}
+	if o.SSHDir == "" {
+		o.SSHDir = DefaultSSHDir
+	}
+	if o.SSHKeyPath == "" {
+		o.SSHKeyPath = filepath.Join(o.SSHDir, "ssh_host_ed25519_key.pub")
+	}
+	if o.PAMDir == "" {
+		o.PAMDir = DefaultPAMDir
+	}
+	if o.Hostname == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return fmt.Errorf("determining hostname: %w", err)
+		}
+		o.Hostname = hostname
+	}
+	return nil
+}
+
+// writeAndActivate persists the enrollment result and makes it effective:
+// writing the files is only half the job, a running sshd keeps serving the
+// configuration it parsed at startup until it is reloaded.
+func writeAndActivate(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollResponse, stdout io.Writer) error {
+	sshdBin := resolveSSHD(opts.sshdBinary)
+	reloadCmd := opts.ReloadCommand
+	if reloadCmd == "" && !opts.NoReload {
+		reloadCmd = detectReloadCommand(sshdBin)
+	}
+	if reloadCmd == "" {
+		// Never drop a command a previous enrollment found: re-enrolling on
+		// a host whose init system we no longer detect would otherwise stop
+		// renewals from reaching sshd — silently, one certificate later.
+		reloadCmd = previousReloadCommand(opts.StateDir)
+	}
+
+	if err := writeState(opts, priv, response, reloadCmd); err != nil {
 		return err
 	}
+	previous, hadPrevious := readSnippet(opts.SSHDir)
 	if err := writeSSHDFiles(opts, response); err != nil {
 		return err
 	}
+	// A written but invalid configuration would take sshd down on its next
+	// restart — roll the snippet back instead of leaving that behind.
+	if err := validateSSHDConfig(sshdBin); err != nil {
+		restoreSnippet(opts.SSHDir, previous, hadPrevious)
+		return fmt.Errorf("sshd rejected the generated configuration (rolled back %s): %w", SnippetPath(opts.SSHDir), err)
+	}
 
 	fmt.Fprintf(stdout, "enrolled: %s (host-id %s)\n", opts.Hostname, response.HostID)
-	fmt.Fprintf(stdout, "sshd snippet: %s — check the Include and reload sshd\n", SnippetPath(opts.SSHDir))
-	return nil
+	fmt.Fprintf(stdout, "sshd snippet: %s\n", SnippetPath(opts.SSHDir))
+	return activateSSHD(sshdBin, opts.SSHDir, reloadCmd, opts.NoReload, stdout)
+}
+
+// readSnippet returns the current snippet so an invalid new one can be rolled
+// back; hadPrevious is false when no snippet existed yet.
+func readSnippet(sshDir string) (content []byte, hadPrevious bool) {
+	raw, err := os.ReadFile(SnippetPath(sshDir))
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+// restoreSnippet undoes the snippet write (best effort — the error path is
+// already reported by the caller).
+func restoreSnippet(sshDir string, previous []byte, hadPrevious bool) {
+	if !hadPrevious {
+		_ = os.Remove(SnippetPath(sshDir))
+		return
+	}
+	_ = os.WriteFile(SnippetPath(sshDir), previous, 0o644) //nolint:gosec // sshd configuration, must be readable by sshd
 }
 
 // newMTLSKeyAndCSR generates a fresh Ed25519 key pair and an empty CSR for
@@ -172,8 +241,9 @@ func postEnroll(ctx context.Context, opts EnrollOptions, sshPub, csrPEM string) 
 }
 
 // writeState writes the mTLS material and agent configuration into the
-// state directory (0700; keys 0600).
-func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollResponse) error {
+// state directory (0700; keys 0600). reloadCmd is persisted so the daemon
+// can activate renewed host certificates unattended.
+func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollResponse, reloadCmd string) error {
 	paths := Paths{StateDir: opts.StateDir}
 	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
@@ -198,12 +268,13 @@ func writeState(opts EnrollOptions, priv ed25519.PrivateKey, response *enrollRes
 		}
 	}
 	cfg := &Config{
-		AgentURL:     opts.AgentURL,
-		HostID:       response.HostID,
-		HostName:     opts.Hostname,
-		SSHKeyPath:   opts.SSHKeyPath,
-		SSHDir:       opts.SSHDir,
-		SessionAudit: opts.SessionAudit,
+		AgentURL:      opts.AgentURL,
+		HostID:        response.HostID,
+		HostName:      opts.Hostname,
+		SSHKeyPath:    opts.SSHKeyPath,
+		SSHDir:        opts.SSHDir,
+		ReloadCommand: reloadCmd,
+		SessionAudit:  opts.SessionAudit,
 	}
 	cfg.applyDefaults(paths)
 	if opts.SessionAudit {

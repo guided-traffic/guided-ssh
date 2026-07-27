@@ -22,6 +22,7 @@ type agentAPI interface {
 	Principals(ctx context.Context, user string) ([]string, error)
 	Bundle(ctx context.Context) (string, error)
 	SendSessions(ctx context.Context, events []sessionEventWire) error
+	Heartbeat(ctx context.Context) error
 }
 
 // apiClient talks to the mTLS agent API with the client certificate obtained
@@ -162,6 +163,25 @@ func (c *apiClient) Bundle(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+// Heartbeat reports liveness (the server stamps last_seen_at from the mTLS
+// identity). No request body, no response body — the agent sits on the
+// untrusted side and contributes nothing but the connection itself.
+func (c *apiClient) Heartbeat(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/agent/heartbeat", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("reaching agent api: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("agent api: %s", resp.Status)
+	}
+	return nil
 }
 
 // SendSessions delivers a batch of session/sudo events to the server (mTLS).

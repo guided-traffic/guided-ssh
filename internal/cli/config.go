@@ -28,7 +28,10 @@ type Config struct {
 	Issuer string `yaml:"issuer"`
 	// ClientID is the public OIDC client of the CLI.
 	ClientID string `yaml:"client_id"`
-	// Scopes; empty = openid, profile, email.
+	// Scopes; empty = openid, profile, email plus groups (the latter only if
+	// the issuer's discovery does not rule it out — see auth.defaultScopes).
+	// Grants are matched by group, so overriding this without groups yields a
+	// token the sign endpoint cannot authorize.
 	Scopes []string `yaml:"scopes,omitempty"`
 	// PinSHA256 pins the TLS certificate of the API server: base64-encoded
 	// SHA-256 of the SubjectPublicKeyInfo. Empty = system CAs.
@@ -126,6 +129,7 @@ api_url: https://gssh.example.com
 issuer: https://idp.example.com/realms/example
 client_id: gssh-cli
 # optional:
+# scopes: [openid, profile, email, groups]   # default; groups drives grant matching
 # pin_sha256: <base64-encoded sha-256 of the server spki>
 # validity: 8h
 `, path)

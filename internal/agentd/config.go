@@ -20,9 +20,10 @@ const (
 	DefaultSSHDir   = "/etc/ssh"
 	DefaultPAMDir   = "/etc/pam.d"
 
-	defaultCacheTTL       = 5 * time.Minute
-	defaultBundleInterval = time.Hour
-	defaultRenewInterval  = 5 * time.Minute
+	defaultCacheTTL          = 5 * time.Minute
+	defaultBundleInterval    = time.Hour
+	defaultRenewInterval     = 5 * time.Minute
+	defaultHeartbeatInterval = time.Minute
 )
 
 // Config is the agent configuration written during enrollment
@@ -47,8 +48,13 @@ type Config struct {
 	BundleInterval Duration `yaml:"bundle_interval"`
 	// RenewInterval is the check interval for certificate renewal.
 	RenewInterval Duration `yaml:"renew_interval"`
+	// HeartbeatInterval is how often the agent reports liveness
+	// (last_seen_at on the server); the other loops are too sparse on an
+	// idle host to tell a dead agent from a quiet one.
+	HeartbeatInterval Duration `yaml:"heartbeat_interval"`
 	// ReloadCommand runs after writing a new host certificate (e.g.
-	// "systemctl reload sshd"); empty = nothing.
+	// "systemctl reload ssh"); empty = nothing, which leaves sshd serving
+	// the old certificate from memory. Resolved during enrollment.
 	ReloadCommand string `yaml:"reload_command,omitempty"`
 	// SessionAudit enables host session/sudo audit (phase 9, opt-in at
 	// enroll): writable socket endpoints, spool, and flush to the server.
@@ -123,6 +129,9 @@ func (c *Config) applyDefaults(paths Paths) {
 	if c.RenewInterval <= 0 {
 		c.RenewInterval = Duration(defaultRenewInterval)
 	}
+	if c.HeartbeatInterval <= 0 {
+		c.HeartbeatInterval = Duration(defaultHeartbeatInterval)
+	}
 	if c.SocketPath == "" {
 		c.SocketPath = paths.DefaultSocket()
 	}
@@ -147,6 +156,21 @@ func LoadConfig(stateDir string) (*Config, error) {
 	}
 	cfg.applyDefaults(paths)
 	return &cfg, nil
+}
+
+// previousReloadCommand reads reload_command from an earlier enrollment.
+// Deliberately lenient: a missing or unreadable configuration simply means
+// there is nothing to carry over.
+func previousReloadCommand(stateDir string) string {
+	raw, err := os.ReadFile(Paths{StateDir: stateDir}.ConfigFile())
+	if err != nil {
+		return ""
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		return ""
+	}
+	return cfg.ReloadCommand
 }
 
 // writeConfig persists the agent configuration.

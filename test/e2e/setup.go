@@ -393,9 +393,12 @@ func (e *env) setupTesthost(name, fqdn, tags string) {
 		"--hostname", fqdn)
 
 	// Adjust the agent configuration for E2E timing, then let the entrypoint
-	// keep running (starts agentd + sshd).
+	// keep running (starts agentd + sshd). Here sshd starts *after*
+	// enrollment, so enrollment finds nothing to reload — the entrypoint
+	// makes sshd pid 1, which is what the rotation test HUPs. Any detected
+	// reload_command is dropped first so the key stays unique.
 	e.mustExecPod("deploy/"+name,
-		"sed -i 's/^cache_ttl:.*/cache_ttl: 30s/; s/^renew_interval:.*/renew_interval: 10s/' /var/lib/guided-ssh/config.yaml"+
+		"sed -i 's/^cache_ttl:.*/cache_ttl: 30s/; s/^renew_interval:.*/renew_interval: 10s/; /^reload_command:/d' /var/lib/guided-ssh/config.yaml"+
 			" && printf 'reload_command: kill -HUP 1\\n' >> /var/lib/guided-ssh/config.yaml"+
 			" && touch /var/lib/guided-ssh/.e2e-ready")
 	e.poll(60*time.Second, name+" sshd", func() error {

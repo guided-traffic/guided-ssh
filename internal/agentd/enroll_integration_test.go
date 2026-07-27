@@ -192,6 +192,10 @@ func TestEnrollmentAndLoginEndToEnd(t *testing.T) {
 	}
 
 	// ── Enrollment inside the container ──────────────────────────────────
+	// sshd is already running at this point (see testdata/sshd/entrypoint.sh):
+	// enrollment has to reload it, otherwise the listener keeps serving the
+	// configuration it parsed at startup and every certificate login below
+	// fails. Nothing in this test reloads sshd by hand.
 	code, output, err := ctr.Exec(ctx, []string{
 		"/usr/local/bin/gssh-agentd", "enroll",
 		"--server", fmt.Sprintf("http://%s:%d", hostInternal, publicPort),
@@ -202,9 +206,18 @@ func TestEnrollmentAndLoginEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enroll exec: %v", err)
 	}
+	enrollOutput, _ := io.ReadAll(output)
 	if code != 0 {
-		raw, _ := io.ReadAll(output)
-		t.Fatalf("enroll exit %d: %s", code, raw)
+		t.Fatalf("enroll exit %d: %s", code, enrollOutput)
+	}
+	t.Logf("enroll:\n%s", enrollOutput)
+	if !strings.Contains(string(enrollOutput), "serves the guided-ssh host certificate") {
+		t.Errorf("enrollment did not verify the running sshd:\n%s", enrollOutput)
+	}
+	// Persisted for the renewal path: without it the daemon writes a new host
+	// certificate that sshd never picks up.
+	if code, _, err := ctr.Exec(ctx, []string{"grep", "-q", "^reload_command:", "/var/lib/guided-ssh/config.yaml"}); err != nil || code != 0 {
+		t.Errorf("reload_command not persisted in config.yaml (exit %d, %v)", code, err)
 	}
 
 	// Host registered in the DB, tags from the token.
@@ -293,6 +306,22 @@ func TestEnrollmentAndLoginEndToEnd(t *testing.T) {
 	// root: no grant ⇒ AuthorizedPrincipalsCommand returns nothing ⇒ denied.
 	if err := trySSH(sshAddr, "root", certSigner, hostKeyCallback); err == nil {
 		t.Fatal("login as root must fail (no grant, fail-closed)")
+	}
+
+	// ── Heartbeat ─────────────────────────────────────────────────────────
+	// The daemon beats once at startup; both sides are unit-tested against
+	// their own fakes, so this is where a mismatched route would show up.
+	seen, err := st.GetHost(ctx, host.ID)
+	if err != nil || seen.LastSeenAt == nil {
+		t.Fatalf("last_seen_at not stamped: %v %v", seen, err)
+	}
+	logs, err := ctr.Logs(ctx)
+	if err != nil {
+		t.Fatalf("container logs: %v", err)
+	}
+	raw, _ := io.ReadAll(logs)
+	if strings.Contains(string(raw), "heartbeat failed") {
+		t.Errorf("agent could not deliver its heartbeat:\n%s", raw)
 	}
 }
 

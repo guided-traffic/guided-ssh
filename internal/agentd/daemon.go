@@ -90,14 +90,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go func() { errCh <- server.Serve(listener) }()
 	d.logger.Info("gssh-agentd started", "socket", d.cfg.SocketPath, "host", d.cfg.HostName)
 
-	// Initial maintenance, then periodic.
+	// Initial maintenance, then periodic. The heartbeat goes out right away
+	// so a restarted agent is visible without waiting a full interval.
 	d.refreshBundle(ctx)
 	d.renewIfNeeded(ctx)
 	d.rotateMTLSIfNeeded(ctx)
+	d.heartbeat(ctx)
 	renewTicker := time.NewTicker(time.Duration(d.cfg.RenewInterval))
 	bundleTicker := time.NewTicker(time.Duration(d.cfg.BundleInterval))
+	heartbeatTicker := time.NewTicker(time.Duration(d.cfg.HeartbeatInterval))
 	defer renewTicker.Stop()
 	defer bundleTicker.Stop()
+	defer heartbeatTicker.Stop()
 
 	// Session flush only with audit enabled; otherwise a dead channel.
 	var flushC <-chan time.Time
@@ -121,6 +125,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.rotateMTLSIfNeeded(ctx)
 		case <-bundleTicker.C:
 			d.refreshBundle(ctx)
+		case <-heartbeatTicker.C:
+			d.heartbeat(ctx)
 		case <-flushC:
 			d.flushSpool(ctx)
 		}
@@ -341,6 +347,17 @@ func (d *Daemon) refreshBundle(ctx context.Context) {
 		return
 	}
 	d.logger.Info("user ca bundle updated", "path", path)
+}
+
+// heartbeat reports liveness to the server. Failures are logged and
+// otherwise ignored: liveness is observability, it must never influence the
+// authorization path (principals stay served from cache/API as before).
+func (d *Daemon) heartbeat(ctx context.Context) {
+	beatCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	if err := d.api.Heartbeat(beatCtx); err != nil {
+		d.logger.Warn("heartbeat failed", "error", err)
+	}
 }
 
 // runReloadCommand executes the configured reload command (sshd reads

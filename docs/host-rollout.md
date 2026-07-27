@@ -38,6 +38,13 @@ unit, enrolls the host **pinned**, and waits (up to 10 s) for the agent socket
 before reporting success. Flags: `--arch` (otherwise derived from `uname -m`),
 `--session-audit`, `--no-systemd`.
 
+Enrollment activates the sshd configuration itself — validate (`sshd -t`),
+reload, then verify against the *running* daemon — so the one-command install
+needs no follow-up step. It aborts if the main `sshd_config` has no `Include`
+for `/etc/ssh/sshd_config.d/*.conf`; the token stays unused in that case.
+Details and the `--reload-command` / `--no-reload` escape hatches:
+[enrollment-guide.md](enrollment-guide.md).
+
 ## Enabling it
 
 All four conditions must hold, otherwise the button stays disabled and the

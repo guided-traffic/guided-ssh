@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -24,9 +25,15 @@ type FlowConfig struct {
 	IssuerURL string
 	// ClientID is the CLI's public OIDC client.
 	ClientID string
-	// Scopes; default: openid, profile, email.
+	// Scopes; empty = defaultScopes (openid, profile, email and — unless the
+	// issuer's discovery rules it out — groups).
 	Scopes []string
 }
+
+// groupsScope carries the IdP group memberships into the ID token. Access
+// grants are matched by group, so a token without them cannot authorize at
+// /v1/sign/user.
+const groupsScope = "groups"
 
 // Flow runs the CLI's OIDC login flows: Authorization Code + PKCE
 // (default) and the Device Flow (fallback without a browser/localhost, e.g.
@@ -43,9 +50,32 @@ func NewFlow(ctx context.Context, cfg FlowConfig) (*Flow, error) {
 		return nil, fmt.Errorf("auth: oidc discovery for %s: %w", cfg.IssuerURL, err)
 	}
 	if len(cfg.Scopes) == 0 {
-		cfg.Scopes = []string{oidc.ScopeOpenID, "profile", "email"}
+		cfg.Scopes = defaultScopes(provider)
 	}
 	return &Flow{cfg: cfg, endpoint: provider.Endpoint()}, nil
+}
+
+// defaultScopes are the scopes used when the configuration names none:
+// openid, profile, email plus groups — without a groups claim the sign
+// endpoint finds no grants and refuses the certificate, so a group-less
+// default is a login that can never work.
+//
+// groups is dropped only when the issuer publishes a scopes_supported list
+// without it: Keycloak answers an unrequestable scope with invalid_scope and
+// would break the login outright, and a realm that ships groups through a
+// default client scope delivers the claim without being asked. An issuer
+// without scopes_supported (the field is only RECOMMENDED) gets the scope —
+// the group-based flow is the point of this client.
+func defaultScopes(provider *oidc.Provider) []string {
+	scopes := []string{oidc.ScopeOpenID, "profile", "email"}
+	var discovery struct {
+		ScopesSupported []string `json:"scopes_supported"`
+	}
+	if err := provider.Claims(&discovery); err != nil || len(discovery.ScopesSupported) == 0 ||
+		slices.Contains(discovery.ScopesSupported, groupsScope) {
+		scopes = append(scopes, groupsScope)
+	}
+	return scopes
 }
 
 // AuthCodePKCE runs the Authorization Code flow with PKCE: starts a
