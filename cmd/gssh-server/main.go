@@ -613,16 +613,23 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if agentServer != nil {
-			_ = agentServer.Shutdown(shutdownCtx)
-		}
-		if metricsServer != nil {
-			_ = metricsServer.Shutdown(shutdownCtx)
-		}
-		return server.Shutdown(shutdownCtx)
+		return shutdownServers(server, agentServer, metricsServer)
 	}
+}
+
+// shutdownServers drains the listeners that were actually started (agent and
+// metrics servers are optional) within one shared 10 s budget. The API server
+// goes last so in-flight requests still see the other endpoints.
+func shutdownServers(server, agentServer, metricsServer *http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if agentServer != nil {
+		_ = agentServer.Shutdown(ctx)
+	}
+	if metricsServer != nil {
+		_ = metricsServer.Shutdown(ctx)
+	}
+	return server.Shutdown(ctx)
 }
 
 // newAgentServer builds the mTLS server of the agent API: the server
