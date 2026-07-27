@@ -5,8 +5,8 @@
 #
 # Authentication: client-credentials flow (GSSH_CLIENT_ID/-SECRET) against
 # the IdP — a service account client whose tokens carry the server's
-# audience (GSSH_OIDC_CLIENT_ID) and the admin group in the groups claim;
-# see README (Grants sync section) for setup.
+# audience (GSSH_CLIENT_OIDC_CLIENT_ID) and the admin group in the groups
+# claim; see README (Grants sync section) for setup.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

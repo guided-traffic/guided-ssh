@@ -39,9 +39,9 @@ import {
  * service accounts are held in module state, so create/edit/delete dialogs
  * behave like the real thing until the next reload.
  *
- * Role variants: `localStorage.setItem('gssh-mock-roles', 'readonly')` (or
- * 'auditor,readonly', or '' for logged-out) + reload shows the UI as that
- * role; removing the key restores the full admin view.
+ * Role variants: `localStorage.setItem('gssh-mock-roles', 'auditor')` (or
+ * '' for logged-out) + reload shows the UI as that role; removing the key
+ * restores the full admin view.
  */
 export const mockApiInterceptor: HttpInterceptorFn = (req, next) => {
   if (!req.url.startsWith("/v1/")) {

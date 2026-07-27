@@ -88,6 +88,34 @@ self-managed setup on start. */}}
 {{- end }}
 {{- end }}
 
+{{/* Fail fast on values keys renamed or removed by config restructurings
+(server/client OIDC split, readonly-role removal), so an upgrade with stale
+values stops at render time with a migration hint instead of silently
+dropping auth configuration. hasKey (not truthiness) also catches keys left
+behind with empty values; the parent maps are checked via `with` because a
+user can null them. */}}
+{{- define "guided-ssh.validateValues" -}}
+{{- $legacy := list -}}
+{{- with .Values.config -}}
+{{- with .oidc -}}
+{{- if hasKey . "clientID" }}{{- $legacy = append $legacy "config.oidc.clientID (now config.oidc.client.clientID)" }}{{- end -}}
+{{- if hasKey . "uiClientID" }}{{- $legacy = append $legacy "config.oidc.uiClientID (now config.oidc.server.clientID)" }}{{- end -}}
+{{- if hasKey . "uiExistingSecret" }}{{- $legacy = append $legacy "config.oidc.uiExistingSecret (now config.oidc.server.existingSecret)" }}{{- end -}}
+{{- if hasKey . "uiExistingSecretKey" }}{{- $legacy = append $legacy "config.oidc.uiExistingSecretKey (now config.oidc.server.existingSecretKey)" }}{{- end -}}
+{{- if hasKey . "uiBaseURL" }}{{- $legacy = append $legacy "config.oidc.uiBaseURL (now config.publicURL)" }}{{- end -}}
+{{- end -}}
+{{- with .groups -}}
+{{- if hasKey . "readOnly" }}{{- $legacy = append $legacy "config.groups.readOnly (removed — the auditor role covers read access)" }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with .Values.hostRollout -}}
+{{- if hasKey . "publicUrl" }}{{- $legacy = append $legacy "hostRollout.publicUrl (now config.publicURL)" }}{{- end -}}
+{{- end -}}
+{{- if $legacy -}}
+{{- fail (printf "these values were renamed or removed — set: %s (migration notes in the chart README)" (join ", " $legacy)) -}}
+{{- end -}}
+{{- end }}
+
 {{/* Mount path of the public TLS certificate when hostRollout.pin.source=file.
 Only tls.crt is projected from the secret (the server doesn't need the
 key) and deliberately mounted without subPath — only then does the kubelet
@@ -110,18 +138,14 @@ here it already fails at render time instead of only out on the fleet. */}}
 {{- if and $rollout.agentPublicUrl (not (hasPrefix "https://" $rollout.agentPublicUrl)) -}}
 {{- fail (printf "hostRollout.agentPublicUrl must be an https URL (got: %q)" $rollout.agentPublicUrl) -}}
 {{- end -}}
-{{- $publicURL := default .Values.config.oidc.uiBaseURL $rollout.publicUrl -}}
-{{- if and $publicURL (not (hasPrefix "https://" $publicURL)) -}}
-{{- fail (printf "hostRollout needs an https public URL — hostRollout.publicUrl or config.oidc.uiBaseURL is %q" $publicURL) -}}
+{{- if not .Values.config.publicURL -}}
+{{- fail "hostRollout.enabled=true requires config.publicURL (external public URL for install_command and pin dial)" -}}
+{{- end -}}
+{{- if not (hasPrefix "https://" .Values.config.publicURL) -}}
+{{- fail (printf "hostRollout needs an https public URL — config.publicURL is %q" .Values.config.publicURL) -}}
 {{- end -}}
 - name: GSSH_AGENT_PUBLIC_URL
   value: {{ required "hostRollout.enabled=true requires hostRollout.agentPublicUrl (external mTLS agent URL of the agents, e.g. https://gssh-agent.example.com:8443 — deliberately never derived)" $rollout.agentPublicUrl | quote }}
-{{- if $rollout.publicUrl }}
-- name: GSSH_PUBLIC_URL
-  value: {{ $rollout.publicUrl | quote }}
-{{- else if not .Values.config.oidc.uiBaseURL }}
-{{- fail "hostRollout.enabled=true requires hostRollout.publicUrl or config.oidc.uiBaseURL (external public URL for install_command and pin dial)" -}}
-{{- end }}
 {{- if eq $source "static" }}
 - name: GSSH_PUBLIC_PIN
   value: {{ required "hostRollout.pin.source=static requires hostRollout.pin.static (base64 SPKI pin, openssl snippet in the README)" $rollout.pin.static | quote }}

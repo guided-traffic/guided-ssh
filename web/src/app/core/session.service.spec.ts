@@ -23,13 +23,13 @@ describe('SessionService.init', () => {
     const session: AuthSession = {
       authenticated: true,
       username: 'alice',
-      roles: ['auditor', 'readonly'],
+      roles: ['auditor'],
     };
     const service = setup(() => of(session));
     await service.init();
     expect(service.authenticated()).toBe(true);
     expect(service.username()).toBe('alice');
-    expect(service.roles()).toEqual(new Set(['auditor', 'readonly']));
+    expect(service.roles()).toEqual(new Set(['auditor']));
     expect(service.isAuditor()).toBe(true);
     expect(service.isAdmin()).toBe(false);
     expect(service.checking()).toBe(false);
@@ -51,6 +51,21 @@ describe('SessionService.init', () => {
     expect(service.checking()).toBe(false);
     expect(service.authenticated()).toBe(false);
     expect(service.error()).not.toBe('');
+  });
+
+  it('reads login_error=no_role from the URL, sets loginError, and strips the param', async () => {
+    window.history.replaceState(null, '', '/?login_error=no_role&x=1');
+    const service = setup(() => of({ authenticated: false } as AuthSession));
+    await service.init();
+    expect(service.loginError()).toContain('neither the admin nor the auditor');
+    expect(window.location.search).toBe('?x=1');
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('leaves loginError empty without the marker', async () => {
+    const service = setup(() => of({ authenticated: false } as AuthSession));
+    await service.init();
+    expect(service.loginError()).toBe('');
   });
 
   it('init is idempotent — multiple calls (app + guard) only fetch once', async () => {

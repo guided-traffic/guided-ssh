@@ -37,7 +37,7 @@ func registerDevUIAuthRoutes(mux *http.ServeMux, deps Deps) {
 		writeJSON(w, http.StatusOK, authMeJSON{
 			Authenticated: true,
 			Username:      deps.DevUser.Username(),
-			Roles:         uiRoles(deps.DevUser.Groups, deps.AdminGroup, deps.AuditorGroup, deps.ReadOnlyGroup),
+			Roles:         uiRoles(deps.DevUser.Groups, deps.AdminGroup, deps.AuditorGroup),
 		})
 	})
 }

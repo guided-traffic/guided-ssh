@@ -154,11 +154,11 @@ func TestMintTTLBounds(t *testing.T) {
 	}
 }
 
-// TestMintAdminOnly: auditor and read-only must not be able to mint.
+// TestMintAdminOnly: auditor must not be able to mint.
 func TestMintAdminOnly(t *testing.T) {
 	env := newUIServerWithDeps(t, rolloutReady)
 	for name, token := range map[string]string{
-		"auditor": env.auditorToken, "readonly": env.readonlyToken, "no role": env.noRoleToken,
+		"auditor": env.auditorToken, "no role": env.noRoleToken,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if status, _ := mintToken(t, env, token, map[string]any{}); status != http.StatusForbidden {

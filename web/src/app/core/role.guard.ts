@@ -10,17 +10,17 @@ import { Role, SessionService } from './session.service';
  * Waits for session.init(), since the initial navigation would otherwise
  * check against still-empty roles. Never redirects to '/': '' → 'hosts' →
  * guard → '/' used to be a synchronous infinite redirect that completely
- * froze the page. The fallback is '/hosts' (readonly is enough there) —
+ * froze the page. The fallback is '/hosts' (auditor is enough there) —
  * and only if that role is present; otherwise navigation is cancelled and
  * the app shell shows the login, error, or "no role" card.
  */
 export const roleGuard: CanActivateFn = async (route) => {
   const session = inject(SessionService);
   const router = inject(Router);
-  const minRole = (route.data['minRole'] ?? 'readonly') as Role;
+  const minRole = (route.data['minRole'] ?? 'auditor') as Role;
   await session.init();
   if (session.roles().has(minRole)) {
     return true;
   }
-  return session.roles().has('readonly') ? router.parseUrl('/hosts') : false;
+  return session.roles().has('auditor') ? router.parseUrl('/hosts') : false;
 };

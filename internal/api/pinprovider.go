@@ -72,8 +72,7 @@ type PinProviderConfig struct {
 	// CertFile is the path to a PEM certificate (GSSH_PUBLIC_PIN_CERT_FILE);
 	// the first CERTIFICATE block counts as the leaf (cert-manager convention).
 	CertFile string
-	// DialURL is the external public URL for the self-dial
-	// (GSSH_PUBLIC_URL, falling back to GSSH_UI_BASE_URL).
+	// DialURL is the external public URL for the self-dial (GSSH_PUBLIC_URL).
 	DialURL string
 	// Refresh is the self-dial interval; 0 ⇒ DefaultPinRefresh.
 	Refresh time.Duration
@@ -304,7 +303,7 @@ func classifyDialErr(err error) string {
 // pin into every install.sh.
 func (p *PinProvider) dialPin(ctx context.Context) (string, error) {
 	if p.cfg.DialURL == "" {
-		return "", fmt.Errorf("no public url set (GSSH_PUBLIC_URL or GSSH_UI_BASE_URL): %w", errPinPublicURL)
+		return "", fmt.Errorf("no public url set (GSSH_PUBLIC_URL): %w", errPinPublicURL)
 	}
 	target, err := url.Parse(p.cfg.DialURL)
 	if err != nil {

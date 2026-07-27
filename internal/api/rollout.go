@@ -19,7 +19,7 @@ const (
 	// never derived (rule 2) — otherwise a wrong agent URL ends up
 	// unnoticed in the config.yaml of N hosts.
 	rolloutMissingAgentURL = "agent_public_url"
-	// rolloutMissingPublicURL: neither GSSH_PUBLIC_URL nor GSSH_UI_BASE_URL.
+	// rolloutMissingPublicURL: GSSH_PUBLIC_URL not set.
 	rolloutMissingPublicURL = "public_url"
 	// rolloutMissingAgentURLHTTPS: agent URL set, but not an https URL.
 	rolloutMissingAgentURLHTTPS = "agent_public_url_https"

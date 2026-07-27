@@ -4,8 +4,8 @@ import { firstValueFrom } from 'rxjs';
 
 import { AuthSession } from '../api/models';
 
-/** Roles of the admin API; admin ⊃ auditor ⊃ readonly (as in the backend). */
-export type Role = 'admin' | 'auditor' | 'readonly';
+/** Roles of the admin API; admin ⊃ auditor (as in the backend). */
+export type Role = 'admin' | 'auditor';
 
 /**
  * SessionService holds the login state and roles of the signed-in person.
@@ -25,6 +25,8 @@ export class SessionService {
   readonly roles = signal<ReadonlySet<Role>>(new Set());
   /** Error message when the login check was not possible (server down). */
   readonly error = signal('');
+  /** Message when the server rejected the IdP login (no admin/auditor role). */
+  readonly loginError = signal('');
 
   readonly isAdmin = computed(() => this.roles().has('admin'));
   readonly isAuditor = computed(() => this.roles().has('auditor'));
@@ -43,6 +45,7 @@ export class SessionService {
   }
 
   private async run(): Promise<void> {
+    this.consumeLoginError();
     try {
       const session = await firstValueFrom(this.http.get<AuthSession>('/v1/auth/me'));
       this.authenticated.set(session.authenticated);
@@ -59,6 +62,26 @@ export class SessionService {
     } finally {
       this.checking.set(false);
     }
+  }
+
+  /**
+   * consumeLoginError reads the login_error marker a rejected
+   * /v1/auth/callback redirects with and strips it from the URL —
+   * synchronously, before the first await, so the router's initial
+   * navigation ('' → 'hosts' preserves query params) never carries it on.
+   */
+  private consumeLoginError(): void {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('login_error') !== 'no_role') {
+      return;
+    }
+    this.loginError.set(
+      'Sign-in rejected: your account has neither the admin nor the auditor ' +
+        'role. Ask an operator to add you to one of these IdP groups, then try again.',
+    );
+    params.delete('login_error');
+    const query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
   }
 
   /** Starts the server-side login; returns to the current page afterwards. */

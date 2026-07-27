@@ -1,3 +1,4 @@
+{{- include "guided-ssh.validateValues" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -135,22 +136,22 @@ spec:
               value: {{ include "guided-ssh.caFile" (dict "mountPath" .mountPath "key" .keys.mtlsCert) | quote }}
             {{- end }}
             {{- end }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_PUBLIC_URL" "value" .Values.config.publicURL) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_ISSUER" "value" .Values.config.oidc.issuer) | nindent 12 }}
-            {{- include "guided-ssh.env" (dict "name" "GSSH_OIDC_CLIENT_ID" "value" .Values.config.oidc.clientID) | nindent 12 }}
-            {{- include "guided-ssh.env" (dict "name" "GSSH_UI_OIDC_CLIENT_ID" "value" .Values.config.oidc.uiClientID) | nindent 12 }}
-            {{- if .Values.config.oidc.uiExistingSecret }}
-            - name: GSSH_UI_OIDC_CLIENT_SECRET
+            {{- include "guided-ssh.env" (dict "name" "GSSH_CLIENT_OIDC_CLIENT_ID" "value" .Values.config.oidc.client.clientID) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_SERVER_OIDC_CLIENT_ID" "value" .Values.config.oidc.server.clientID) | nindent 12 }}
+            {{- if .Values.config.oidc.server.existingSecret }}
+            - name: GSSH_SERVER_OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.config.oidc.uiExistingSecret }}
-                  key: {{ .Values.config.oidc.uiExistingSecretKey }}
+                  name: {{ .Values.config.oidc.server.existingSecret }}
+                  key: {{ .Values.config.oidc.server.existingSecretKey }}
             {{- end }}
-            {{- include "guided-ssh.env" (dict "name" "GSSH_UI_BASE_URL" "value" .Values.config.oidc.uiBaseURL) | nindent 12 }}
+            {{- include "guided-ssh.env" (dict "name" "GSSH_SERVER_OIDC_SCOPES" "value" .Values.config.oidc.server.scopes) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_CI_ISSUER" "value" .Values.config.ci.issuer) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_CI_AUDIENCE" "value" .Values.config.ci.audience) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_ADMIN_GROUP" "value" .Values.config.groups.admin) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_AUDITOR_GROUP" "value" .Values.config.groups.auditor) | nindent 12 }}
-            {{- include "guided-ssh.env" (dict "name" "GSSH_READONLY_GROUP" "value" .Values.config.groups.readOnly) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_KC_BASE_URL" "value" .Values.config.keycloak.baseURL) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_KC_REALM" "value" .Values.config.keycloak.realm) | nindent 12 }}
             {{- include "guided-ssh.env" (dict "name" "GSSH_KC_CLIENT_ID" "value" .Values.config.keycloak.clientID) | nindent 12 }}

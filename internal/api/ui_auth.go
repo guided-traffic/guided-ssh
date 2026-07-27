@@ -83,12 +83,11 @@ func (c *UIAuthConfig) sessionFromRequest(r *http.Request) *auth.Claims {
 
 // uiAuthContext bundles the dependencies of the /v1/auth handlers.
 type uiAuthContext struct {
-	cfg           *UIAuthConfig
-	mapper        *auth.Mapper
-	adminGroup    string
-	auditorGroup  string
-	readonlyGroup string
-	logger        *slog.Logger
+	cfg          *UIAuthConfig
+	mapper       *auth.Mapper
+	adminGroup   string
+	auditorGroup string
+	logger       *slog.Logger
 }
 
 // registerUIAuthRoutes attaches the web UI's login endpoints to the mux.
@@ -105,12 +104,11 @@ func registerUIAuthRoutes(mux *http.ServeMux, deps Deps) {
 		return
 	}
 	ui := &uiAuthContext{
-		cfg:           deps.UIAuth,
-		mapper:        auth.NewMapper(deps.Store),
-		adminGroup:    deps.AdminGroup,
-		auditorGroup:  deps.AuditorGroup,
-		readonlyGroup: deps.ReadOnlyGroup,
-		logger:        deps.Logger,
+		cfg:          deps.UIAuth,
+		mapper:       auth.NewMapper(deps.Store),
+		adminGroup:   deps.AdminGroup,
+		auditorGroup: deps.AuditorGroup,
+		logger:       deps.Logger,
 	}
 	mux.HandleFunc("GET /v1/auth/login", ui.handleLogin)
 	mux.HandleFunc("GET /v1/auth/callback", ui.handleCallback)
@@ -258,6 +256,17 @@ func (u *uiAuthContext) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(uiRoles(claims.Groups, u.adminGroup, u.auditorGroup)) == 0 {
+		// Neither the admin nor the auditor role — reject the login instead
+		// of minting a role-less session. Clearing any previous session is
+		// required: a still-valid old cookie would keep the shell alive and
+		// hide the error, and a rejected login must leave the user signed out.
+		u.logger.Info("ui-auth: login rejected — no role", "subject", claims.Subject, "username", claims.Username(), "groups", claims.Groups)
+		u.clearCookie(w, r, sessionCookieName, "/")
+		http.Redirect(w, r, "/?login_error=no_role", http.StatusFound)
+		return
+	}
+
 	payload, err := json.Marshal(uiSession{Claims: *claims, ExpiresAt: time.Now().Add(u.cfg.SessionTTL)})
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -313,29 +322,25 @@ func (u *uiAuthContext) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, authMeJSON{
 		Authenticated: true,
 		Username:      claims.Username(),
-		Roles:         uiRoles(claims.Groups, u.adminGroup, u.auditorGroup, u.readonlyGroup),
+		Roles:         uiRoles(claims.Groups, u.adminGroup, u.auditorGroup),
 	})
 }
 
-// uiRoles maps group claims onto the role hierarchy (admin ⊃ auditor ⊃
-// readonly; an empty group configuration grants nothing — fail-closed,
-// consistent with adminContext.hasRole).
-func uiRoles(groups []string, adminGroup, auditorGroup, readonlyGroup string) []string {
+// uiRoles maps group claims onto the role hierarchy (admin ⊃ auditor; an
+// empty group configuration grants nothing — fail-closed, consistent with
+// adminContext.hasRole).
+func uiRoles(groups []string, adminGroup, auditorGroup string) []string {
 	in := func(group string) bool {
 		return group != "" && slices.Contains(groups, group)
 	}
 	isAdmin := in(adminGroup)
 	isAuditor := isAdmin || in(auditorGroup)
-	isReadOnly := isAuditor || in(readonlyGroup)
-	roles := make([]string, 0, 3)
+	roles := make([]string, 0, 2)
 	if isAdmin {
 		roles = append(roles, roleAdmin)
 	}
 	if isAuditor {
 		roles = append(roles, roleAuditor)
-	}
-	if isReadOnly {
-		roles = append(roles, roleReadOnly)
 	}
 	return roles
 }

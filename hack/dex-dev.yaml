@@ -23,12 +23,23 @@ web:
 oauth2:
   skipApprovalScreen: true
 
-# Public client (no secret) — Dex then accepts the CLI's loopback redirect
-# (http://127.0.0.1:<random port>/callback) automatically.
+# Two separate clients, matching the server/client OIDC split:
+#   gssh-cli    — public client (no secret) for the gssh/gssh-admin CLIs;
+#                 Dex accepts the CLI's loopback redirect
+#                 (http://127.0.0.1:<random port>/callback) automatically.
+#   gssh-server — confidential client (WITH secret) for the server-side UI
+#                 login (BFF): GSSH_SERVER_OIDC_CLIENT_ID=gssh-server,
+#                 GSSH_SERVER_OIDC_CLIENT_SECRET=gssh-server-dev-secret.
+#                 Confidential clients need the redirect URI listed explicitly.
 staticClients:
   - id: gssh-cli
     name: gssh CLI
     public: true
+  - id: gssh-server
+    name: gssh server (UI login)
+    secret: gssh-server-dev-secret
+    redirectURIs:
+      - http://127.0.0.1:8080/v1/auth/callback
 
 connectors:
   - type: mockCallback

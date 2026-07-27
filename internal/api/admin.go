@@ -82,26 +82,24 @@ func toGrantJSON(g *store.GrantWithGroup) grantJSON {
 	}
 }
 
-// Roles of the admin API (phase 8): admin includes auditor, auditor
-// includes readonly. Each role is bound to an IdP group.
+// Roles of the admin API (phase 8): admin includes auditor. Each role is
+// bound to an IdP group; an empty group grants the role to nobody.
 const (
-	roleAdmin    = "admin"
-	roleAuditor  = "auditor"
-	roleReadOnly = "readonly"
+	roleAdmin   = "admin"
+	roleAuditor = "auditor"
 )
 
 // adminContext bundles the dependencies of the admin handlers.
 type adminContext struct {
-	store         AdminStore
-	ui            UIStore
-	groups        auth.Store
-	verifier      TokenVerifier
-	uiAuth        *UIAuthConfig
-	mapper        *auth.Mapper
-	adminGroup    string
-	auditorGroup  string
-	readonlyGroup string
-	logger        *slog.Logger
+	store        AdminStore
+	ui           UIStore
+	groups       auth.Store
+	verifier     TokenVerifier
+	uiAuth       *UIAuthConfig
+	mapper       *auth.Mapper
+	adminGroup   string
+	auditorGroup string
+	logger       *slog.Logger
 	// rollout gates token minting the same way as the public rollout
 	// routes; publicBaseURL is the base of install_command
 	// (the gate guarantees it is set).
@@ -116,7 +114,7 @@ type adminContext struct {
 // without a single configured role group, the entire admin path responds
 // with 503 (fail-closed, but diagnosable).
 func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
-	anyRole := deps.AdminGroup != "" || deps.AuditorGroup != "" || deps.ReadOnlyGroup != ""
+	anyRole := deps.AdminGroup != "" || deps.AuditorGroup != ""
 	// In developer mode (DevUser) the OIDC verifier is optional — dev
 	// setups have no IdP; everything else stays fail-closed.
 	if deps.Admin == nil || (deps.Verifier == nil && deps.DevUser == nil) || deps.Store == nil || !anyRole {
@@ -134,21 +132,20 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 		mapper:        auth.NewMapper(deps.Store),
 		adminGroup:    deps.AdminGroup,
 		auditorGroup:  deps.AuditorGroup,
-		readonlyGroup: deps.ReadOnlyGroup,
 		logger:        deps.Logger,
 		rollout:       newRolloutGate(deps),
 		publicBaseURL: deps.PublicBaseURL,
 		devUser:       deps.DevUser,
 	}
-	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(roleReadOnly, admin.handleListGrants))
+	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(roleAuditor, admin.handleListGrants))
 	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(roleAdmin, admin.handleCreateGrant))
-	mux.HandleFunc("GET /v1/admin/grants/{id}", admin.authorized(roleReadOnly, admin.handleGetGrant))
+	mux.HandleFunc("GET /v1/admin/grants/{id}", admin.authorized(roleAuditor, admin.handleGetGrant))
 	mux.HandleFunc("PUT /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.handleUpdateGrant))
 	mux.HandleFunc("DELETE /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.handleDeleteGrant))
 	mux.HandleFunc("POST /v1/admin/grants/apply", admin.authorized(roleAdmin, admin.handleApplyGrants))
-	mux.HandleFunc("GET /v1/admin/ci-grants", admin.authorized(roleReadOnly, admin.handleListCIGrants))
+	mux.HandleFunc("GET /v1/admin/ci-grants", admin.authorized(roleAuditor, admin.handleListCIGrants))
 	mux.HandleFunc("POST /v1/admin/ci-grants", admin.authorized(roleAdmin, admin.handleCreateCIGrant))
-	mux.HandleFunc("GET /v1/admin/ci-grants/{id}", admin.authorized(roleReadOnly, admin.handleGetCIGrant))
+	mux.HandleFunc("GET /v1/admin/ci-grants/{id}", admin.authorized(roleAuditor, admin.handleGetCIGrant))
 	mux.HandleFunc("PUT /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.handleUpdateCIGrant))
 	mux.HandleFunc("DELETE /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.handleDeleteCIGrant))
 	mux.HandleFunc("POST /v1/admin/ci-grants/apply", admin.authorized(roleAdmin, admin.handleApplyCIGrants))
@@ -159,23 +156,22 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 // the KeyID form of the admin (for audit events).
 type adminHandler func(w http.ResponseWriter, r *http.Request, claims *auth.Claims, actor string)
 
-// hasRole checks whether the claims satisfy the minimum role; higher roles
-// include lower ones. An empty group configuration grants the respective
-// role to nobody (fail-closed).
+// hasRole checks whether the claims satisfy the minimum role; admin
+// includes auditor. An empty group configuration grants the respective role
+// to nobody, and an unknown role name grants nothing (fail-closed).
 func (a *adminContext) hasRole(claims *auth.Claims, minRole string) bool {
 	inGroup := func(group string) bool {
 		return group != "" && slices.Contains(claims.Groups, group)
 	}
 	isAdmin := inGroup(a.adminGroup)
 	isAuditor := isAdmin || inGroup(a.auditorGroup)
-	isReadOnly := isAuditor || inGroup(a.readonlyGroup)
 	switch minRole {
 	case roleAdmin:
 		return isAdmin
 	case roleAuditor:
 		return isAuditor
 	default:
-		return isReadOnly
+		return false
 	}
 }
 

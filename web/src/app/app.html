@@ -24,6 +24,9 @@
       <p class="login-claim">
         Certificate-based SSH access — hosts, access rules, and audit in one place.
       </p>
+      @if (session.loginError()) {
+        <p class="login-claim error-text">{{ session.loginError() }}</p>
+      }
       <button mat-flat-button class="login-button" (click)="session.login()">
         Sign in with SSO
       </button>
@@ -37,7 +40,8 @@
       </div>
       <p class="login-claim">
         Signed in as <strong>{{ session.username() }}</strong> — but not assigned
-        to any UI role. Please request the admin, auditor, or read-only group.
+        to any UI role. Please request the admin or auditor group, then sign
+        in again.
       </p>
       <button mat-stroked-button (click)="session.logout()">Sign out</button>
     </div>
@@ -111,7 +115,7 @@
           <span class="user-meta">
             <span class="user-name">{{ session.username() }}</span>
             <span class="user-role">
-              @if (session.isAdmin()) { Admin } @else if (session.isAuditor()) { Auditor } @else { Read-only }
+              @if (session.isAdmin()) { Admin } @else { Auditor }
             </span>
           </span>
         </div>

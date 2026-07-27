@@ -7,31 +7,31 @@ export const routes: Routes = [
   {
     path: 'hosts',
     canActivate: [roleGuard],
-    data: { minRole: 'readonly' },
+    data: { minRole: 'auditor' },
     loadComponent: () => import('./features/hosts').then((m) => m.HostsPage),
   },
   {
     path: 'client',
     canActivate: [roleGuard],
-    data: { minRole: 'readonly' },
+    data: { minRole: 'auditor' },
     loadComponent: () => import('./features/client-setup').then((m) => m.ClientSetupPage),
   },
   {
     path: 'grants',
     canActivate: [roleGuard],
-    data: { minRole: 'readonly' },
+    data: { minRole: 'auditor' },
     loadComponent: () => import('./features/grants').then((m) => m.GrantsPage),
   },
   {
     path: 'ci',
     canActivate: [roleGuard],
-    data: { minRole: 'readonly' },
+    data: { minRole: 'auditor' },
     loadComponent: () => import('./features/ci').then((m) => m.CiPage),
   },
   {
     path: 'users',
     canActivate: [roleGuard],
-    data: { minRole: 'readonly' },
+    data: { minRole: 'auditor' },
     loadComponent: () => import('./features/users').then((m) => m.UsersPage),
   },
   {

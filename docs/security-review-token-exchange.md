@@ -33,7 +33,8 @@ accepted residual risk.
 - User and CI tokens go through **separate verifiers with their own
   issuer and audience** (ADR-019); a CI token at the user endpoint fails
   on audience (and usually issuer), and vice versa.
-- **Fix (fail-fast):** `GSSH_OIDC_ISSUER` without `GSSH_OIDC_CLIENT_ID` is
+- **Fix (fail-fast):** `GSSH_OIDC_ISSUER` without the clients' client ID
+  (today `GSSH_CLIENT_OIDC_CLIENT_ID`) is
   now a startup error instead of a runtime rejection of all tokens —
   previously the server appeared to start correctly while silently
   rejecting every sign request.
@@ -42,10 +43,15 @@ accepted residual risk.
   would be exchangeable at both endpoints (a CI token could create a user).
   The server now refuses this configuration at startup
   (`checkAudienceSeparation`).
-- The web UI deliberately uses the same audience as the CLI
-  (`GSSH_UI_OIDC_CLIENT_ID`, default `GSSH_OIDC_CLIENT_ID`) — the admin API
-  and the sign endpoint accept the same token class; authorization happens
-  downstream via groups (roles) and grants.
+- ~~The web UI deliberately uses the same audience as the CLI~~ — **reversed
+  by the server/client OIDC split**: the web UI no longer sends bearer tokens
+  at all. It logs in through the server's own confidential client
+  (`GSSH_SERVER_OIDC_CLIENT_ID`, server-side code flow, HttpOnly session
+  cookie), while the bearer endpoints keep expecting the CLIs' public client
+  (`GSSH_CLIENT_OIDC_CLIENT_ID`) as audience. Reusing one IdP client for both
+  roles is now a startup error — a client cannot be public (CLIs, no secret)
+  and confidential (server, secret) at the same time. Authorization still
+  happens downstream via groups (roles) and grants.
 
 ## Clock skew
 

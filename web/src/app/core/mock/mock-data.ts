@@ -35,15 +35,14 @@ function ahead(ms: number): string {
 export const mockSession: AuthSession = {
   authenticated: true,
   username: "design-reviewer",
-  roles: ["admin", "auditor", "readonly"],
+  roles: ["admin", "auditor"],
 };
 
 export const mockUiConfig: UiConfig = {
   oidc_issuer: "https://idp.example.com/realms/acme",
-  oidc_client_id: "gssh-ui",
+  oidc_client_id: "gssh-cli",
   admin_group: "ssh-admins",
   auditor_group: "ssh-auditors",
-  readonly_group: "ssh-viewers",
 };
 
 /**

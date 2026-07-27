@@ -14,7 +14,8 @@ spec:
     config:
       oidc:
         issuer: https://idp.staging.example.com/realms/example
-        clientID: gssh-cli
+        client:
+          clientID: gssh-cli
       groups:
         admin: gssh-admins
         auditor: gssh-auditors

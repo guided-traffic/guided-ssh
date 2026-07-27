@@ -32,7 +32,7 @@ helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set secrets.db.existingSecret=guided-ssh-db \
   --set secrets.ca.existingSecret=guided-ssh-ca \
   --set config.oidc.issuer=https://idp.example.com/realms/acme \
-  --set config.oidc.clientID=guided-ssh \
+  --set config.oidc.client.clientID=gssh-cli \
   --set config.groups.admin=gssh-admins
 ```
 
@@ -58,7 +58,7 @@ and rotation cycles) or both to the same secret:
 | `secrets.ca.existingSecret` (required) | CA master key |
 | `secrets.ca.selfManaged.existingSecret` (required with `secrets.ca.mode=self-managed`) | The four CA key files |
 | `config.keycloak.existingSecret` (optional) | Keycloak service-account client secret |
-| `config.oidc.uiExistingSecret` (optional) | OIDC client secret of the web UI |
+| `config.oidc.server.existingSecret` (optional) | Client secret of the server's own OIDC client (server-side UI login/BFF) |
 
 ¹ Not allowed together with `internalDatabase.enabled=true` (test
 environments, see [Internal database](#internal-database-test-environments-only));
@@ -343,12 +343,13 @@ name the missing conditions.
 helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
   --set hostRollout.enabled=true \
   --set hostRollout.agentPublicUrl=https://gssh-agent.example.com:8443 \
-  --set hostRollout.publicUrl=https://gssh.example.com
+  --set config.publicURL=https://gssh.example.com
 ```
 
 `agentPublicUrl` is never derived — a wrong agent URL would land unnoticed in
-the `config.yaml` of every enrolled host. `publicUrl` may be omitted if
-`config.oidc.uiBaseURL` is set.
+the `config.yaml` of every enrolled host. `config.publicURL` is the server's
+external public URL (also used for the UI login redirect and the client
+install) and must be https here.
 
 ### Which pin source (`hostRollout.pin.source`)
 
@@ -361,7 +362,7 @@ pin ⇒ no rollout.
 | `file` | Hairpin/split-horizon DNS, or the certificate is managed by cert-manager anyway | Automatic — the file is read uncached on every pin lookup |
 | `static` | Last resort, e.g. a CDN or an external terminator whose certificate the cluster never sees | Manual (operator sets the new pin) |
 
-**`dial`** — the server dials `publicUrl` and reads the leaf certificate, i.e.
+**`dial`** — the server dials `config.publicURL` and reads the leaf certificate, i.e.
 exactly what a host sees during enrollment. Verified against the system roots
 (a private CA needs `SSL_CERT_FILE`/`SSL_CERT_DIR` via `config.extraEnv`).
 Requires hairpin access: if the cluster cannot resolve or reach its own
@@ -370,10 +371,11 @@ external URL from a pod, use `file` or `static`.
 **`file`** — mount the ingress TLS secret:
 
 ```yaml
+config:
+  publicURL: https://gssh.example.com
 hostRollout:
   enabled: true
   agentPublicUrl: https://gssh-agent.example.com:8443
-  publicUrl: https://gssh.example.com
   pin:
     source: file
     certSecretName: gssh-example-com-tls
@@ -435,15 +437,19 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `secrets.ca.selfManaged.mountPath` | `/etc/gssh/ca` | Read-only mount path of the CA key files |
 | `internalDatabase.enabled` | `false` | **Test only**: ephemeral Postgres sidecar instead of `secrets.db` (mutually exclusive) |
 | `internalDatabase.image` / `pullPolicy` | `postgres:16-alpine` / `IfNotPresent` | Sidecar image; pull policy is independent of `image.pullPolicy` |
-| `config.oidc.issuer` / `clientID` | `""` | User OIDC; empty ⇒ `/v1/sign/user` disabled |
+| `config.publicURL` | `""` | External public base URL (UI login redirect, install command, pin dial); required (https) for host rollout and client install |
+| `config.oidc.issuer` | `""` | Shared IdP issuer; empty ⇒ `/v1/sign/user` disabled |
+| `config.oidc.client.clientID` | `""` (required with issuer) | Public OIDC client of the gssh/gssh-admin CLIs (no secret); expected bearer audience |
+| `config.oidc.server.clientID` / `existingSecret` | `""` | Confidential OIDC client of the server (UI login/BFF); set together, must differ from `oidc.client` — both empty ⇒ UI login disabled |
+| `config.oidc.server.existingSecretKey` | `client-secret` | Key inside the server OIDC secret |
+| `config.oidc.server.scopes` | `""` (= `openid,profile,email,groups`) | Scopes of the server-side UI login |
 | `config.ci.issuer` / `audience` | `""` | GitLab CI issuer; empty ⇒ `/v1/sign/ci` disabled |
-| `config.groups.admin/auditor/readOnly` | `""` | IdP role groups |
+| `config.groups.admin/auditor` | `""` | IdP role groups (admin ⊃ auditor; empty ⇒ role granted to nobody) |
 | `config.keycloak.*` | `""` | Group sync via Keycloak admin API |
 | `config.rateLimit.trustProxy` | `true` | Client IP from `X-Forwarded-For` (behind ingress) |
 | `agent.enabled` / `agent.tlsNames` | `true` / service DNS | Agent API (mTLS) |
 | `hostRollout.enabled` | `false` | One-command host install; `true` requires the values below |
 | `hostRollout.agentPublicUrl` | `""` (required with `enabled`) | External mTLS agent URL written into every enrolled host |
-| `hostRollout.publicUrl` | `""` | External public URL; empty ⇒ `config.oidc.uiBaseURL` (one of them is required) |
 | `hostRollout.pin.source` | `dial` | `dial` / `file` / `static` — see [Which pin source](#which-pin-source-hostrolloutpinsource) |
 | `hostRollout.pin.static` / `certSecretName` | `""` | Required for `source=static` / `source=file` |
 | `hostRollout.pin.refreshInterval` | `5m` | Refresh interval of the pin self-dial (`source=dial`) |
@@ -456,6 +462,52 @@ ingress. `metrics.serviceMonitor.enabled=true` creates a ServiceMonitor
 | `postgresql.enabled` | `false` | Dev-only subchart bitnami/postgresql |
 
 Full list with comments: [values.yaml](values.yaml).
+
+## Migration: server/client OIDC split
+
+The OIDC configuration was split into the clients' public client and the
+server's confidential client. The old keys make the chart **fail at render
+time** with a hint, and the old env variables stop the server at startup —
+nothing is silently ignored:
+
+| Old | New |
+|---|---|
+| `config.oidc.clientID` (`GSSH_OIDC_CLIENT_ID`) | `config.oidc.client.clientID` (`GSSH_CLIENT_OIDC_CLIENT_ID`) |
+| `config.oidc.uiClientID` (`GSSH_UI_OIDC_CLIENT_ID`) | `config.oidc.server.clientID` (`GSSH_SERVER_OIDC_CLIENT_ID`) |
+| `config.oidc.uiExistingSecret` / `uiExistingSecretKey` (`GSSH_UI_OIDC_CLIENT_SECRET`) | `config.oidc.server.existingSecret` / `existingSecretKey` (`GSSH_SERVER_OIDC_CLIENT_SECRET`) |
+| — (`GSSH_UI_OIDC_SCOPES`) | `config.oidc.server.scopes` (`GSSH_SERVER_OIDC_SCOPES`) |
+| `config.oidc.uiBaseURL` (`GSSH_UI_BASE_URL`) | `config.publicURL` (`GSSH_PUBLIC_URL`) |
+| `hostRollout.publicUrl` | `config.publicURL` |
+
+Semantic changes on top of the renames:
+
+- The server's client (`oidc.server.*`) and the clients' client
+  (`oidc.client.clientID`) must be **different IdP clients** — reusing one is
+  now a startup error. The server authenticates with a client secret
+  (confidential); the CLIs without one (public, authorization code + PKCE).
+  Create a separate confidential client in the IdP for the UI login, redirect
+  URI `<config.publicURL>/v1/auth/callback`.
+- `oidc.server.clientID` no longer falls back to the clients' client ID —
+  set it explicitly together with `existingSecret`.
+- `/v1/ui/config` and `/client.sh` now always advertise the clients' public
+  client to CLI installs (previously they leaked the UI client ID when one
+  was configured).
+
+### readonly role removed
+
+The `readonly` role was merged into `auditor` (now the read role for all
+views plus the audit log). As above, old keys fail at render/startup time:
+
+| Old | New |
+|---|---|
+| `config.groups.readOnly` (`GSSH_READONLY_GROUP`) | removed — assign the group to `config.groups.auditor` instead |
+
+Semantic changes:
+
+- Endpoints that accepted the readonly role now require auditor.
+- The **web-UI login is rejected** for users with neither the admin nor the
+  auditor role (previously a role-less session was created); the login page
+  explains the missing role. An empty group value grants the role to nobody.
 
 ## Chart release (GitHub Pages)
 

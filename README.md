@@ -94,8 +94,12 @@ export GSSH_DB_HOST=localhost GSSH_DB_USER=gssh GSSH_DB_PASSWORD=gssh \
        GSSH_DB_NAME=gssh GSSH_DB_SSLMODE=disable
 export GSSH_CA_MASTER_KEY="$(openssl rand -base64 32)"    # encrypts the CA keys — keep it!
 export GSSH_OIDC_ISSUER=http://127.0.0.1:5556/dex         # or your IdP's issuer
-export GSSH_OIDC_CLIENT_ID=gssh-cli
+export GSSH_CLIENT_OIDC_CLIENT_ID=gssh-cli                # public client of the CLIs (no secret)
 export GSSH_ADMIN_GROUP=authors                           # IdP group allowed to manage grants
+# Optional — web-UI login. The server authenticates as its own confidential
+# client (client secret), separate from the CLIs' public client:
+export GSSH_SERVER_OIDC_CLIENT_ID=gssh-server
+export GSSH_SERVER_OIDC_CLIENT_SECRET=gssh-server-dev-secret
 
 gssh-server -listen :8080 -agent-listen :8443
 ```
@@ -118,7 +122,7 @@ helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set internalDatabase.enabled=true \
   --set secrets.ca.existingSecret=guided-ssh-ca \
   --set config.oidc.issuer=https://idp.example.com/realms/acme \
-  --set config.oidc.clientID=gssh-cli \
+  --set config.oidc.client.clientID=gssh-cli \
   --set config.groups.admin=gssh-admins
 ```
 
@@ -178,7 +182,7 @@ helm install guided-ssh guided-ssh/guided-ssh -n guided-ssh \
   --set secrets.db.existingSecret=guided-ssh-db \
   --set secrets.ca.existingSecret=guided-ssh-ca \
   --set config.oidc.issuer=https://idp.example.com/realms/acme \
-  --set config.oidc.clientID=gssh-cli
+  --set config.oidc.client.clientID=gssh-cli
 ```
 
 By default the server generates the CA private keys on first start and stores
@@ -214,7 +218,7 @@ mandatory SPKI pin. Enable it with Helm:
 helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
   --set hostRollout.enabled=true \
   --set hostRollout.agentPublicUrl=https://gssh-agent.example.com:8443 \
-  --set hostRollout.publicUrl=https://gssh.example.com
+  --set config.publicURL=https://gssh.example.com
 ```
 
 This is `curl … | sudo sh` — read the security model before enabling it:
@@ -255,8 +259,8 @@ Three public routes back this (all served with `Cache-Control: no-store`):
 | `GET /v1/clients/{os}/{arch}` | client binary (`linux/amd64`, `linux/arm64`, `darwin/arm64`) |
 
 The feature fails closed: script and binary download answer 503 naming the
-missing conditions until the public base URL (`GSSH_PUBLIC_URL` /
-`GSSH_UI_BASE_URL`) is https and the OIDC issuer and client ID are set;
+missing conditions until the public base URL (`GSSH_PUBLIC_URL`) is https
+and the OIDC issuer and the clients' client ID are set;
 released images always embed the client binaries. Binary downloads share the
 host install's rate limit — `GSSH_AGENT_DOWNLOAD_RPM` throttles agent *and*
 client downloads from one per-IP bucket.

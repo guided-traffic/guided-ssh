@@ -3,6 +3,6 @@
 
 export interface AuthSession {
   authenticated: boolean;
-  roles?: Array<'admin' | 'auditor' | 'readonly'>;
+  roles?: Array<'admin' | 'auditor'>;
   username?: string;
 }

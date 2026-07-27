@@ -332,7 +332,8 @@ secrets:
 config:
   oidc:
     issuer: http://dex.{{NS}}.svc.cluster.local:5556/dex
-    clientID: gssh-cli
+    client:
+      clientID: gssh-cli
   ci:
     issuer: http://gitlab-fake.{{NS}}.svc.cluster.local
     audience: guided-ssh

@@ -52,8 +52,8 @@ All values from `cmd/gssh-server/main.go`; mapped 1:1 in the Helm chart via
 | `GSSH_CA_HOST_KEY_FILE` | empty | host CA: OpenSSH private key PEM; as above |
 | `GSSH_CA_MTLS_KEY_FILE` | empty | agent mTLS CA: PKCS#8 PEM (Ed25519); as above |
 | `GSSH_CA_MTLS_CERT_FILE` | empty | agent mTLS CA: X.509 CA certificate (PEM, `CA:TRUE`, `keyCertSign`); as above |
-| `GSSH_OIDC_ISSUER` | empty | issuer URL of the IdP; empty ⇒ `/v1/sign/user` disabled (503) |
-| `GSSH_OIDC_CLIENT_ID` | empty | expected audience of the ID tokens; missing while issuer is set ⇒ startup error (fail-fast) |
+| `GSSH_OIDC_ISSUER` | empty | issuer URL of the IdP (shared by both OIDC clients); empty ⇒ `/v1/sign/user` disabled (503) |
+| `GSSH_CLIENT_OIDC_CLIENT_ID` | empty | public OIDC client of the gssh/gssh-admin CLIs (no secret); expected audience of bearer ID tokens; missing while issuer is set ⇒ startup error (fail-fast) |
 | `GSSH_CI_ISSUER` | empty | GitLab base URL (OIDC issuer); empty ⇒ `/v1/sign/ci` disabled (503) |
 | `GSSH_CI_AUDIENCE` | `guided-ssh` | expected audience of the GitLab job tokens |
 | `GSSH_KC_BASE_URL` | empty | Keycloak base URL for group sync |
@@ -63,9 +63,13 @@ All values from `cmd/gssh-server/main.go`; mapped 1:1 in the Helm chart via
 | `GSSH_KC_SYNC_INTERVAL` | `5m` | sync interval (Go duration) |
 | `GSSH_AGENT_TLS_NAMES` | `localhost,127.0.0.1` | SANs of the agent API's mTLS server certificate (comma-separated) |
 | `GSSH_ADMIN_GROUP` | empty | IdP group of admins; empty ⇒ no admin mutations (fail-closed) |
-| `GSSH_AUDITOR_GROUP` | empty | IdP group of auditors (read/export the audit log) |
-| `GSSH_READONLY_GROUP` | empty | IdP group for read-only views; all three groups empty ⇒ admin API fully disabled |
-| `GSSH_UI_OIDC_CLIENT_ID` | `GSSH_OIDC_CLIENT_ID` | OIDC client of the web UI (public client, PKCE) |
+| `GSSH_AUDITOR_GROUP` | empty | IdP group of auditors: all read views plus audit log read/export; admin includes this role. Both groups empty ⇒ admin API fully disabled; an empty group grants the role to nobody, and the web-UI login rejects users without any role |
+| `GSSH_SERVER_OIDC_CLIENT_ID` | empty | confidential OIDC client of the server itself (server-side UI login/BFF); set together with the secret, must differ from `GSSH_CLIENT_OIDC_CLIENT_ID` (startup error otherwise) |
+| `GSSH_SERVER_OIDC_CLIENT_SECRET` | empty | client secret of the server's OIDC client; ID and secret both empty ⇒ `/v1/auth` (UI login) disabled |
+| `GSSH_SERVER_OIDC_SCOPES` | `openid,profile,email,groups` | scopes of the server-side UI login (comma-separated) |
+| `GSSH_UI_SESSION_TTL` | `12h` | lifetime of the UI session cookie (Go duration) |
+| `GSSH_PUBLIC_URL` | empty | external public base URL (UI login redirect, `install_command`, client install gate, pin self-dial) |
+| `GSSH_DEV_UI_AUTH` | empty | **insecure dev mode**: the exact value `insecure` makes every request act as a logged-in admin without any IdP; any other non-empty value is a startup error |
 | `GSSH_AUDIT_STREAM` | empty | `true` ⇒ committed audit events as JSON logs on stdout (SIEM) |
 | `GSSH_AUDIT_WEBHOOK_URL` | empty | audit events additionally sent as a JSON array to this webhook |
 | `GSSH_AUDIT_STREAM_INTERVAL` | `10s` | poll interval of the audit streamer (Go duration) |

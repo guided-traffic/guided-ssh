@@ -17,8 +17,8 @@ import { formatBytes } from '../core/format';
  */
 const CLIENT_MISSING_LABELS: Record<string, string> = {
   binaries: 'Server build without client binaries',
-  public_url: 'GSSH_PUBLIC_URL or GSSH_UI_BASE_URL is missing',
-  public_url_https: 'GSSH_PUBLIC_URL or GSSH_UI_BASE_URL is not an https URL',
+  public_url: 'GSSH_PUBLIC_URL is missing',
+  public_url_https: 'GSSH_PUBLIC_URL is not an https URL',
   oidc_issuer: 'OIDC issuer is not configured',
   oidc_client_id: 'OIDC client ID is not configured',
 };

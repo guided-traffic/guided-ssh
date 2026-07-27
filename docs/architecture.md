@@ -147,7 +147,7 @@ The groups also come fresh from the token claims on every issuance.
 
 | Path | Who | Mechanism | Endpoints |
 |---|---|---|---|
-| ① User OIDC | Humans (CLI, Web UI, gssh-admin) | IdP ID token as Bearer; audience = `GSSH_OIDC_CLIENT_ID`; roles/grants behind it | `/v1/sign/user`, `/v1/admin/…` |
+| ① User OIDC | Humans — CLI/gssh-admin as bearer, web UI via session cookie | Bearer: IdP ID token, audience = `GSSH_CLIENT_OIDC_CLIENT_ID` (the CLIs' public client). Web UI: server-side login with the server's own confidential client (`GSSH_SERVER_OIDC_CLIENT_ID`), HttpOnly session cookie; roles/grants behind both | `/v1/sign/user`, `/v1/admin/…`, `/v1/auth/…` |
 | ② GitLab OIDC | CI jobs | Job token (`id_tokens`) as Bearer; dedicated verifier, dedicated issuer, audience = `GSSH_CI_AUDIENCE` (default `guided-ssh`) | `/v1/sign/ci` |
 | ③ mTLS | Host agents | Client certificate from the dedicated mTLS mini-PKI, identity = CN (host UUID), resolved against the host record per request | `/v1/agent/…` (dedicated listener) |
 | ④ Enrollment token | New hosts (one-time) | 256-bit one-time token, only the hash stored, transactional consumption | `/v1/enroll` |

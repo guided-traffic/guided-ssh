@@ -20,14 +20,11 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/store"
 )
 
-// Role groups for the UI tests.
-const (
-	auditorGroupName  = "gssh-auditors"
-	readonlyGroupName = "gssh-readonly"
-)
+// Role group for the UI tests (adminGroupName lives in admin_test.go).
+const auditorGroupName = "gssh-auditors"
 
 // roleVerifier accepts several tokens each with their own claims (for role
-// tests with admin, auditor, and read-only side by side).
+// tests with admin and auditor side by side).
 type roleVerifier struct {
 	claims map[string]*auth.Claims
 }
@@ -131,17 +128,16 @@ func (f *fakeUIStore) AppendAuditEvent(_ context.Context, e *store.AuditEvent) e
 	return nil
 }
 
-// uiTestEnv bundles the server, the store, and the tokens of the three roles.
+// uiTestEnv bundles the server, the store, and the tokens of the roles.
 type uiTestEnv struct {
-	srv           *httptest.Server
-	ui            *fakeUIStore
-	adminToken    string
-	auditorToken  string
-	readonlyToken string
-	noRoleToken   string
+	srv          *httptest.Server
+	ui           *fakeUIStore
+	adminToken   string
+	auditorToken string
+	noRoleToken  string
 }
 
-// newUIServer builds the test server with all three role groups and a UIStore.
+// newUIServer builds the test server with both role groups and a UIStore.
 func newUIServer(t *testing.T) *uiTestEnv {
 	t.Helper()
 	return newUIServerWithDeps(t, nil)
@@ -163,17 +159,16 @@ func newUIServerWithDeps(t *testing.T, mutate func(*api.Deps)) *uiTestEnv {
 
 	ui := &fakeUIStore{accounts: map[uuid.UUID]*store.ServiceAccount{}}
 	verifier := &roleVerifier{claims: map[string]*auth.Claims{
-		"admin-token":    claimsWithGroups("admin", adminGroupName),
-		"auditor-token":  claimsWithGroups("auditor", auditorGroupName),
-		"readonly-token": claimsWithGroups("viewer", readonlyGroupName),
-		"norole-token":   claimsWithGroups("nobody", "dev"),
+		"admin-token":   claimsWithGroups("admin", adminGroupName),
+		"auditor-token": claimsWithGroups("auditor", auditorGroupName),
+		"norole-token":  claimsWithGroups("nobody", "dev"),
 	}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	deps := api.Deps{
 		CA: certAuthority, Store: fs, Grants: fs, Admin: newFakeAdminStore(fs), UI: ui,
 		Verifier: verifier, Logger: logger,
-		AdminGroup: adminGroupName, AuditorGroup: auditorGroupName, ReadOnlyGroup: readonlyGroupName,
-		UIConfig: api.UIConfig{OIDCIssuer: "https://idp.example.com/realms/gssh", OIDCClientID: "gssh-ui"},
+		AdminGroup: adminGroupName, AuditorGroup: auditorGroupName,
+		UIConfig: api.UIConfig{OIDCIssuer: "https://idp.example.com/realms/gssh", OIDCClientID: "gssh-cli"},
 	}
 	if mutate != nil {
 		mutate(&deps)
@@ -183,7 +178,7 @@ func newUIServerWithDeps(t *testing.T, mutate func(*api.Deps)) *uiTestEnv {
 	return &uiTestEnv{
 		srv: srv, ui: ui,
 		adminToken: "admin-token", auditorToken: "auditor-token",
-		readonlyToken: "readonly-token", noRoleToken: "norole-token",
+		noRoleToken: "norole-token",
 	}
 }
 
@@ -197,10 +192,10 @@ func TestUIConfigPublic(t *testing.T) {
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		t.Fatalf("parsing response: %v", err)
 	}
-	if cfg["oidc_issuer"] != "https://idp.example.com/realms/gssh" || cfg["oidc_client_id"] != "gssh-ui" {
+	if cfg["oidc_issuer"] != "https://idp.example.com/realms/gssh" || cfg["oidc_client_id"] != "gssh-cli" {
 		t.Errorf("oidc configuration wrong: %v", cfg)
 	}
-	if cfg["admin_group"] != adminGroupName || cfg["auditor_group"] != auditorGroupName || cfg["readonly_group"] != readonlyGroupName {
+	if cfg["admin_group"] != adminGroupName || cfg["auditor_group"] != auditorGroupName {
 		t.Errorf("role groups wrong: %v", cfg)
 	}
 }
@@ -215,13 +210,10 @@ func TestUIRoles(t *testing.T) {
 		payload                   any
 		want                      int
 	}{
-		{"readonly reads hosts", http.MethodGet, "/v1/admin/hosts", env.readonlyToken, nil, http.StatusOK},
-		{"readonly reads grants", http.MethodGet, "/v1/admin/grants", env.readonlyToken, nil, http.StatusOK},
-		{"readonly cannot read audit", http.MethodGet, "/v1/admin/audit", env.readonlyToken, nil, http.StatusForbidden},
-		{"readonly no export", http.MethodGet, "/v1/admin/audit/export", env.readonlyToken, nil, http.StatusForbidden},
-		{"readonly does not mutate", http.MethodPatch, "/v1/admin/service-accounts/" + saID.String(), env.readonlyToken, map[string]any{"active": false}, http.StatusForbidden},
-		{"auditor reads audit", http.MethodGet, "/v1/admin/audit", env.auditorToken, nil, http.StatusOK},
 		{"auditor reads hosts", http.MethodGet, "/v1/admin/hosts", env.auditorToken, nil, http.StatusOK},
+		{"auditor reads grants", http.MethodGet, "/v1/admin/grants", env.auditorToken, nil, http.StatusOK},
+		{"auditor reads audit", http.MethodGet, "/v1/admin/audit", env.auditorToken, nil, http.StatusOK},
+		{"auditor exports audit", http.MethodGet, "/v1/admin/audit/export", env.auditorToken, nil, http.StatusOK},
 		{"auditor does not mutate", http.MethodPatch, "/v1/admin/service-accounts/" + saID.String(), env.auditorToken, map[string]any{"active": false}, http.StatusForbidden},
 		{"admin reads audit", http.MethodGet, "/v1/admin/audit", env.adminToken, nil, http.StatusOK},
 		{"admin mutates", http.MethodPatch, "/v1/admin/service-accounts/" + saID.String(), env.adminToken, map[string]any{"active": false}, http.StatusOK},
@@ -247,7 +239,7 @@ func TestUIHostsList(t *testing.T) {
 		CertValidBefore: &expiry,
 	}}
 
-	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/admin/hosts", env.readonlyToken, nil)
+	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/admin/hosts", env.auditorToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("status %d, expected 200 (body %s)", status, body)
 	}
@@ -273,7 +265,7 @@ func TestUIUsersWithGroups(t *testing.T) {
 		User:   store.User{ID: uuid.New(), Username: "alice", Email: "alice@example.com", Active: true},
 		Groups: []string{"admins", "dev"},
 	}}
-	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/admin/users", env.readonlyToken, nil)
+	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/admin/users", env.auditorToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("status %d, expected 200", status)
 	}
@@ -424,7 +416,7 @@ func TestUICertificatesLimit(t *testing.T) {
 			ID: uuid.New(), Serial: int64(i + 1), KeyID: fmt.Sprintf("user:key-%d", i), CertType: store.CertTypeUser,
 		})
 	}
-	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/admin/certificates?limit=2", env.readonlyToken, nil)
+	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/admin/certificates?limit=2", env.auditorToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("status %d, expected 200", status)
 	}

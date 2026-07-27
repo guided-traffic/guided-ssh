@@ -23,12 +23,25 @@ reliably streamed to external systems?
    same groups purely for display purposes (`/v1/ui/config` returns the
    group names).
 
+   > **Superseded (readonly-role removal):** the readonly role was merged
+   > into auditor — two roles remain (`admin ⊃ auditor`,
+   > `GSSH_READONLY_GROUP` removed), and a web-UI login without any role is
+   > rejected by the server instead of minting a role-less session. See
+   > [docs/web-ui.md](../web-ui.md).
+
 2. **Bootstrap via `GET /v1/ui/config` (public).** The SPA loads the issuer,
    client ID (`GSSH_UI_OIDC_CLIENT_ID`, default `GSSH_OIDC_CLIENT_ID`), and
    role groups at runtime — a single build for all environments, no secrets
    in the frontend. Login via Authorization Code + PKCE
    (`angular-auth-oidc-client`); the ID token serves as the bearer token,
    consistent with `gssh-admin` and the sign endpoint.
+
+   > **Superseded** by the BFF rework and the server/client OIDC split: the
+   > SPA login described here was replaced by the server-side login
+   > (`/v1/auth/…`) with the server's own confidential client
+   > (`GSSH_SERVER_OIDC_CLIENT_ID`); `/v1/ui/config` now only serves the
+   > role-group names and the CLI setup values (the clients' public client,
+   > `GSSH_CLIENT_OIDC_CLIENT_ID`). See [docs/web-ui.md](../web-ui.md).
 
 3. **API client generated from `api/openapi.yaml` with `ng-openapi-gen`.**
    The spec is hand-maintained and the single source of truth for the REST

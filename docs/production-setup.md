@@ -48,8 +48,8 @@ Component overview and auth-path diagrams: [architecture.md](architecture.md).
   key is worthless for the CA.
 - Decide the **CA mode consciously** (`managed` vs. `self-managed`) before
   go-live — switching later means re-anchoring trust.
-- Set **all three role groups** (`GSSH_ADMIN_GROUP`, `GSSH_AUDITOR_GROUP`,
-  `GSSH_READONLY_GROUP`) to dedicated IdP groups.
+- Set **both role groups** (`GSSH_ADMIN_GROUP`, `GSSH_AUDITOR_GROUP`) to
+  dedicated IdP groups.
 - Enable **`networkPolicy.enabled=true`**, the **ServiceMonitor**, and the
   [alerts from the operations manual](operations-manual.md#monitoring).
 - Run **`replicaCount ≥ 2`** with `podDisruptionBudget.enabled=true`.
@@ -119,22 +119,26 @@ in **both** modes (UI session key).
 
 ### OIDC and role groups
 
-- `GSSH_OIDC_ISSUER` / `GSSH_OIDC_CLIENT_ID`: humans authenticate with ID
-  tokens whose audience must match the client ID; an issuer without a client ID
-  is a startup error (fail-fast). An empty issuer disables the user sign
-  endpoint entirely (503).
+- `GSSH_OIDC_ISSUER` / `GSSH_CLIENT_OIDC_CLIENT_ID`: humans authenticate with
+  ID tokens whose audience must match the clients' public client ID; an issuer
+  without that client ID is a startup error (fail-fast). An empty issuer
+  disables the user sign endpoint entirely (503).
 - **CI is a strictly separate issuer** (`GSSH_CI_ISSUER`, GitLab). User and CI
   tokens are never interchangeable — separate verifiers, and if both point at
   the same issuer the server refuses to start with identical audiences
   (`checkAudienceSeparation`,
   [security-review-token-exchange.md](security-review-token-exchange.md)).
-- `GSSH_ADMIN_GROUP`, `GSSH_AUDITOR_GROUP`, `GSSH_READONLY_GROUP`: role
-  mapping is fail-closed — no admin group means no admin mutations, all three
-  empty disables the admin API. Set all three to dedicated IdP groups and
-  manage membership in the IdP, not ad hoc.
-- Give the **web UI its own OIDC client** (`GSSH_UI_OIDC_CLIENT_ID`, secret via
-  `config.oidc.uiExistingSecret`). The UI is a BFF: server-side code flow,
-  HttpOnly session cookie, tokens never reach the browser.
+- `GSSH_ADMIN_GROUP`, `GSSH_AUDITOR_GROUP`: role mapping is fail-closed — an
+  empty group grants the role to nobody, no admin group means no admin
+  mutations, both empty disables the admin API, and the web-UI login rejects
+  users without any role. Set both to dedicated IdP groups and manage
+  membership in the IdP, not ad hoc.
+- Give the **server its own confidential OIDC client** for the web-UI login
+  (`GSSH_SERVER_OIDC_CLIENT_ID`, secret via `config.oidc.server.existingSecret`,
+  redirect URI `<config.publicURL>/v1/auth/callback`). The UI is a BFF:
+  server-side code flow, HttpOnly session cookie, tokens never reach the
+  browser. Reusing the CLIs' public client (`GSSH_CLIENT_OIDC_CLIENT_ID`) is a
+  startup error — one IdP client cannot be public and confidential at once.
 - Enable **group sync** (`GSSH_KC_*`, Keycloak) so removing a user from a
   group offboards them within ~10 minutes even while their certificate is
   still valid (see [lifetimes and revocation](#certificate-lifetimes-and-revocation)).
@@ -230,7 +234,7 @@ Short version — the full procedure is in the
 - [ ] CA mode decided; if `self-managed`: key files generated, SOPS key backed up offline
 - [ ] `GSSH_DB_SSLMODE=require` (or stricter) for out-of-cluster databases
 - [ ] OIDC issuer + client ID set; separate UI client with secret; CI issuer separate
-- [ ] Admin/auditor/read-only groups mapped to dedicated IdP groups
+- [ ] Admin/auditor groups mapped to dedicated IdP groups
 - [ ] Group sync enabled (offboarding without manual steps)
 - [ ] Agent API exposed via TLS passthrough/LB; `agent.tlsNames` = public DNS name
 - [ ] `networkPolicy.enabled=true`, `podDisruptionBudget.enabled=true`, `replicaCount ≥ 2`
