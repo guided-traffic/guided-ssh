@@ -176,6 +176,31 @@ Immediately instead of waiting for the next tick:
 kubectl -n guided-ssh create job --from=cronjob/guided-ssh-grants-sync sync-now
 ```
 
+The `…/apply` endpoint the CronJob uses stays open with the chart defaults,
+so this flow works unmodified. What the defaults do change: in-app rule
+editing is off (`config.rules.manualProvision: false`) — the rules pages stay
+readable in the web UI, but Add/Edit/Delete are gone. That is the intended
+state here, since this repo is the writer.
+
+### Successor for chart-based installs: mounted rules ConfigMaps
+
+The server can also reconcile the rules from mounted ConfigMaps itself
+(`config.rules.host.existingConfigMap` /
+`config.rules.ci.existingConfigMap`): no CronJob, no `gssh-admin` image, and
+above all **no IdP service account** — the client-credentials setup below
+becomes unnecessary. A file-owned domain rejects every API write, so Git is
+provably the only writer, and the 30 s reconcile loop also reverts out-of-band
+database changes.
+
+This example still uses the CronJob (it also works against non-chart
+installs); rewriting it is a separate step. For a new chart-based setup,
+prefer the ConfigMap mount: keep generating the ConfigMaps with the
+`configMapGenerator` above — one file per domain (`grants:` for host rules,
+`ci_grants:` for CI rules) and `disableNameSuffixHash: true`, so the name the
+HelmRelease values reference stays stable. Details:
+[docs/grants.md](../../docs/grants.md#declarative-management-gitops),
+[chart README](../helm/guided-ssh/README.md#rules-provisioning-gitops).
+
 ### IdP service account for the sync
 
 `gssh-admin` authenticates non-interactively in the CronJob via the

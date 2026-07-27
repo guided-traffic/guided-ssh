@@ -80,6 +80,10 @@ type Deps struct {
 	// PublicBaseURL is the external base URL of the public listener
 	// (GSSH_PUBLIC_URL); empty ⇒ gate closed.
 	PublicBaseURL string
+	// Rules decides which rule domains accept API writes: in-app CRUD is an
+	// opt-in, file-owned domains reject every write (GITOPS_EXTERNAL_RULES).
+	// The zero value is the production default: CRUD blocked, apply open.
+	Rules RulesConfig
 }
 
 // AgentSource provides metadata and content of the embedded agent binaries
@@ -111,6 +115,14 @@ type UIConfig struct {
 	OIDCClientID string `json:"oidc_client_id"`
 	AdminGroup   string `json:"admin_group"`
 	AuditorGroup string `json:"auditor_group"`
+	// GrantsEditable/CIGrantsEditable tell the UI whether the server accepts
+	// in-app rule writes for the domain at all (manual provisioning on and
+	// the domain not owned by a rules file, GITOPS_EXTERNAL_RULES D7). They
+	// are computed per request from Deps.Rules, never taken from the caller,
+	// and are a display hint only — the write gates reject blocked writes
+	// with 403 regardless of what the UI shows.
+	GrantsEditable   bool `json:"grants_editable"`
+	CIGrantsEditable bool `json:"ci_grants_editable"`
 }
 
 // New builds the HTTP handler.
@@ -142,11 +154,14 @@ func New(deps Deps) http.Handler {
 	})
 
 	// Web UI bootstrap configuration: deliberately unauthenticated, contains
-	// only public values (issuer, client ID, role group names).
+	// only public values (issuer, client ID, role group names, and whether
+	// rule editing is offered at all).
 	mux.HandleFunc("GET /v1/ui/config", func(w http.ResponseWriter, _ *http.Request) {
 		cfg := deps.UIConfig
 		cfg.AdminGroup = deps.AdminGroup
 		cfg.AuditorGroup = deps.AuditorGroup
+		cfg.GrantsEditable = deps.Rules.editable(domainHost)
+		cfg.CIGrantsEditable = deps.Rules.editable(domainCI)
 		writeJSON(w, http.StatusOK, cfg)
 	})
 

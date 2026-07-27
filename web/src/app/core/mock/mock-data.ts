@@ -43,6 +43,11 @@ export const mockUiConfig: UiConfig = {
   oidc_client_id: "gssh-cli",
   admin_group: "ssh-admins",
   auditor_group: "ssh-auditors",
+  // Manual provisioning: the dialogs are part of the design review. The
+  // GitOps variant (both false) is reachable via localStorage, see
+  // mock-api.interceptor.ts.
+  grants_editable: true,
+  ci_grants_editable: true,
 };
 
 /**

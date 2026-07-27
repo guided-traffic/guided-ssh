@@ -28,6 +28,15 @@ var (
 		Help: "HTTP responses by status code (API and agent endpoints).",
 	}, []string{"code"})
 
+	// RulesFileSyncErrors counts failed reconciliations of a declarative
+	// rules file (parse or apply errors) by domain (host/ci). The server
+	// keeps the last applied state on error, so a rising counter means the
+	// rules in the database are older than the file's source of truth.
+	RulesFileSyncErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gssh_rules_file_sync_errors_total",
+		Help: "Failed reconciliations of a declarative rules file (GitOps).",
+	}, []string{"domain"})
+
 	// AgentHeartbeats counts agent contacts (mTLS requests that stamp
 	// last_seen_at).
 	AgentHeartbeats = promauto.NewCounter(prometheus.CounterOpts{

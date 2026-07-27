@@ -108,6 +108,9 @@ type adminContext struct {
 	// devUser is the INSECURE developer mode's implicit identity
 	// (Deps.DevUser); nil in every real deployment.
 	devUser *auth.Claims
+	// rules decides which rule domains accept API writes at all
+	// (GITOPS_EXTERNAL_RULES D1); see admin_rules.go.
+	rules RulesConfig
 }
 
 // registerAdminRoutes attaches the admin API to the mux. Without OIDC or
@@ -136,19 +139,22 @@ func registerAdminRoutes(mux *http.ServeMux, deps Deps) {
 		rollout:       newRolloutGate(deps),
 		publicBaseURL: deps.PublicBaseURL,
 		devUser:       deps.DevUser,
+		rules:         deps.Rules,
 	}
+	// Reads stay open for auditors in every mode; writes pass the rule gates
+	// (GITOPS_EXTERNAL_RULES D1) before the handler sees the request.
 	mux.HandleFunc("GET /v1/admin/grants", admin.authorized(roleAuditor, admin.handleListGrants))
-	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(roleAdmin, admin.handleCreateGrant))
+	mux.HandleFunc("POST /v1/admin/grants", admin.authorized(roleAdmin, admin.gateCRUD(domainHost, admin.handleCreateGrant)))
 	mux.HandleFunc("GET /v1/admin/grants/{id}", admin.authorized(roleAuditor, admin.handleGetGrant))
-	mux.HandleFunc("PUT /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.handleUpdateGrant))
-	mux.HandleFunc("DELETE /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.handleDeleteGrant))
-	mux.HandleFunc("POST /v1/admin/grants/apply", admin.authorized(roleAdmin, admin.handleApplyGrants))
+	mux.HandleFunc("PUT /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.gateCRUD(domainHost, admin.handleUpdateGrant)))
+	mux.HandleFunc("DELETE /v1/admin/grants/{id}", admin.authorized(roleAdmin, admin.gateCRUD(domainHost, admin.handleDeleteGrant)))
+	mux.HandleFunc("POST /v1/admin/grants/apply", admin.authorized(roleAdmin, admin.gateApply(domainHost, admin.handleApplyGrants)))
 	mux.HandleFunc("GET /v1/admin/ci-grants", admin.authorized(roleAuditor, admin.handleListCIGrants))
-	mux.HandleFunc("POST /v1/admin/ci-grants", admin.authorized(roleAdmin, admin.handleCreateCIGrant))
+	mux.HandleFunc("POST /v1/admin/ci-grants", admin.authorized(roleAdmin, admin.gateCRUD(domainCI, admin.handleCreateCIGrant)))
 	mux.HandleFunc("GET /v1/admin/ci-grants/{id}", admin.authorized(roleAuditor, admin.handleGetCIGrant))
-	mux.HandleFunc("PUT /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.handleUpdateCIGrant))
-	mux.HandleFunc("DELETE /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.handleDeleteCIGrant))
-	mux.HandleFunc("POST /v1/admin/ci-grants/apply", admin.authorized(roleAdmin, admin.handleApplyCIGrants))
+	mux.HandleFunc("PUT /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.gateCRUD(domainCI, admin.handleUpdateCIGrant)))
+	mux.HandleFunc("DELETE /v1/admin/ci-grants/{id}", admin.authorized(roleAdmin, admin.gateCRUD(domainCI, admin.handleDeleteCIGrant)))
+	mux.HandleFunc("POST /v1/admin/ci-grants/apply", admin.authorized(roleAdmin, admin.gateApply(domainCI, admin.handleApplyCIGrants)))
 	registerUIRoutes(mux, admin)
 }
 

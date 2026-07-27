@@ -184,20 +184,53 @@ func newUIServerWithDeps(t *testing.T, mutate func(*api.Deps)) *uiTestEnv {
 
 func TestUIConfigPublic(t *testing.T) {
 	env := newUIServer(t)
+	cfg := fetchUIConfig(t, env)
+	if cfg.OIDCIssuer != "https://idp.example.com/realms/gssh" || cfg.OIDCClientID != "gssh-cli" {
+		t.Errorf("oidc configuration wrong: %+v", cfg)
+	}
+	if cfg.AdminGroup != adminGroupName || cfg.AuditorGroup != auditorGroupName {
+		t.Errorf("role groups wrong: %+v", cfg)
+	}
+}
+
+// TestUIConfigEditableFlags covers D7 of GITOPS_EXTERNAL_RULES: the UI only
+// offers rule editing where the write gates would actually accept it —
+// manual provisioning on and the domain not owned by a rules file.
+func TestUIConfigEditableFlags(t *testing.T) {
+	cases := []struct {
+		name           string
+		rules          api.RulesConfig
+		grants, cignts bool
+	}{
+		{"default: nothing editable", api.RulesConfig{}, false, false},
+		{"manual provisioning: both editable", api.RulesConfig{ManualRules: true}, true, true},
+		{"host file wins over manual", api.RulesConfig{ManualRules: true, HostFile: "/etc/rules/host.yaml"}, false, true},
+		{"ci file wins over manual", api.RulesConfig{ManualRules: true, CIFile: "/etc/rules/ci.yaml"}, true, false},
+		{"files without manual", api.RulesConfig{HostFile: "/etc/rules/host.yaml", CIFile: "/etc/rules/ci.yaml"}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newUIServerWithDeps(t, func(d *api.Deps) { d.Rules = tc.rules })
+			cfg := fetchUIConfig(t, env)
+			if cfg.GrantsEditable != tc.grants || cfg.CIGrantsEditable != tc.cignts {
+				t.Errorf("grants_editable=%v ci_grants_editable=%v, expected %v/%v",
+					cfg.GrantsEditable, cfg.CIGrantsEditable, tc.grants, tc.cignts)
+			}
+		})
+	}
+}
+
+func fetchUIConfig(t *testing.T, env *uiTestEnv) api.UIConfig {
+	t.Helper()
 	status, body := adminCall(t, http.MethodGet, env.srv.URL+"/v1/ui/config", "", nil)
 	if status != http.StatusOK {
 		t.Fatalf("status %d, expected 200", status)
 	}
-	var cfg map[string]string
+	var cfg api.UIConfig
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		t.Fatalf("parsing response: %v", err)
 	}
-	if cfg["oidc_issuer"] != "https://idp.example.com/realms/gssh" || cfg["oidc_client_id"] != "gssh-cli" {
-		t.Errorf("oidc configuration wrong: %v", cfg)
-	}
-	if cfg["admin_group"] != adminGroupName || cfg["auditor_group"] != auditorGroupName {
-		t.Errorf("role groups wrong: %v", cfg)
-	}
+	return cfg
 }
 
 func TestUIRoles(t *testing.T) {

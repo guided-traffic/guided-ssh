@@ -36,6 +36,8 @@ import (
 	"github.com/guided-traffic/guided-ssh/internal/clientdist"
 	"github.com/guided-traffic/guided-ssh/internal/metrics"
 	"github.com/guided-traffic/guided-ssh/internal/pintls"
+	"github.com/guided-traffic/guided-ssh/internal/rulespec"
+	"github.com/guided-traffic/guided-ssh/internal/rulesync"
 	"github.com/guided-traffic/guided-ssh/internal/store"
 	"github.com/guided-traffic/guided-ssh/internal/version"
 )
@@ -135,6 +137,13 @@ const (
 	envPublicPinCert    = "GSSH_PUBLIC_PIN_CERT_FILE" // pin source 2: PEM certificate (first block = leaf)
 	envPublicPinRefresh = "GSSH_PUBLIC_PIN_REFRESH"   // refresh interval of the self-dial, default 5m
 	envAgentDownloadRPM = "GSSH_AGENT_DOWNLOAD_RPM"   // binary downloads per client IP and minute, default 10 ("0" = off)
+
+	// Rules provisioning (GITOPS_EXTERNAL_RULES, D9). In-app rule editing is
+	// an opt-in; a rules file makes its domain fully GitOps-owned (the
+	// server reconciles from it and the API rejects every write there).
+	envManualRules   = rulespec.EnvManualRules   // "true" enables the rule CRUD endpoints (UI + API)
+	envHostRulesFile = rulespec.EnvHostRulesFile // path to the declarative host-rules YAML; unset ⇒ domain not file-owned
+	envCIRulesFile   = rulespec.EnvCIRulesFile   // path to the declarative CI-rules YAML; unset ⇒ domain not file-owned
 )
 
 // defaultAgentDownloadRPM/Burst throttle the binary download considerably
@@ -531,6 +540,11 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	}
 	startAuditStream(ctx, st, logger)
 
+	rules := rulesConfigFromEnv()
+	if err := startRulesSync(ctx, st, rules, logger); err != nil {
+		return err
+	}
+
 	pinCfg, err := pinConfigFromEnv()
 	if err != nil {
 		return err
@@ -565,6 +579,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 			Pins:           pins,
 			AgentPublicURL: strings.TrimSuffix(os.Getenv(envAgentPublicURL), "/"),
 			PublicBaseURL:  publicBaseURL(),
+			Rules:          rules,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -598,16 +613,23 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if agentServer != nil {
-			_ = agentServer.Shutdown(shutdownCtx)
-		}
-		if metricsServer != nil {
-			_ = metricsServer.Shutdown(shutdownCtx)
-		}
-		return server.Shutdown(shutdownCtx)
+		return shutdownServers(server, agentServer, metricsServer)
 	}
+}
+
+// shutdownServers drains the listeners that were actually started (agent and
+// metrics servers are optional) within one shared 10 s budget. The API server
+// goes last so in-flight requests still see the other endpoints.
+func shutdownServers(server, agentServer, metricsServer *http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if agentServer != nil {
+		_ = agentServer.Shutdown(ctx)
+	}
+	if metricsServer != nil {
+		_ = metricsServer.Shutdown(ctx)
+	}
+	return server.Shutdown(ctx)
 }
 
 // newAgentServer builds the mTLS server of the agent API: the server
@@ -933,6 +955,52 @@ func startAuditStream(ctx context.Context, st *store.Store, logger *slog.Logger)
 	streamer := auditstream.New(st, cfg)
 	go streamer.Run(ctx)
 	logger.Info("audit streaming started", "logs", streamLogs, "webhook", webhookURL != "")
+}
+
+// rulesConfigFromEnv reads the two independent rules switches (D1): manual
+// provisioning gates the CRUD endpoints globally, a rules file makes its
+// domain GitOps-owned. Only the exact value "true" enables manual
+// provisioning (envAuditStream pattern) — no accidental "1"/"yes".
+func rulesConfigFromEnv() api.RulesConfig {
+	return api.RulesConfig{
+		ManualRules: os.Getenv(envManualRules) == "true",
+		HostFile:    os.Getenv(envHostRulesFile),
+		CIFile:      os.Getenv(envCIRulesFile),
+	}
+}
+
+// startRulesSync applies the configured rules files once and then reconciles
+// them periodically. The startup apply is fail-fast: a wrong path or a
+// broken ConfigMap is a deployment bug and must be visible as a crash loop
+// in GitOps (like checkLegacyEnv), not as silently stale rules. Runtime
+// errors of the loop are non-fatal — see rulesync.Run.
+func startRulesSync(ctx context.Context, st *store.Store, rules api.RulesConfig, logger *slog.Logger) error {
+	syncer := rulesync.New(st, rulesync.Config{
+		HostFile: rules.HostFile,
+		CIFile:   rules.CIFile,
+		// Entries without an explicit issuer belong to the server's OIDC
+		// issuer; a file cannot derive one from a token.
+		DefaultIssuer: os.Getenv(envOIDCIssuer),
+		Logger:        logger,
+	})
+	if !syncer.Enabled() {
+		if !rules.ManualRules {
+			logger.Info("rules are managed declaratively — in-app editing disabled, `gssh-admin apply` still available",
+				"env", envManualRules)
+		}
+		return nil
+	}
+	if rules.ManualRules {
+		logger.Warn("rules file configured — in-app editing stays disabled for that domain despite the manual flag",
+			"env", envManualRules, "host_file", rules.HostFile, "ci_file", rules.CIFile)
+	}
+	if err := syncer.Sync(ctx); err != nil {
+		return fmt.Errorf("initial rules file sync: %w", err)
+	}
+	go syncer.Run(ctx)
+	logger.Info("rules file sync started", "host_file", rules.HostFile, "ci_file", rules.CIFile,
+		"interval", rulesync.DefaultInterval)
+	return nil
 }
 
 // startGroupSync starts the periodic group sync via the Keycloak admin API

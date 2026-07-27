@@ -169,6 +169,34 @@ config:
     webhookURL: ""
     # GSSH_AUDIT_STREAM_INTERVAL (Go duration, empty = 10s)
     interval: ""
+  # Provisioning of the rules — access rules (host grants) and CI rules.
+  # Rules are expected to be managed declaratively (GitOps); in-app editing
+  # is opt-in.
+  rules:
+    # GSSH_MANUAL_RULES: in-app rule editing (web UI + CRUD API). With false
+    # the rules pages stay readable but Add/Edit/Delete disappear and the
+    # CRUD endpoints answer 403 manual_rules_disabled; the `…/apply`
+    # endpoints (gssh-admin apply, sync CronJob) keep working.
+    # Combining true with a ConfigMap below is a render error — a file-owned
+    # domain rejects every API write, so the buttons would be dead UI.
+    manualProvision: false
+    host:
+      # ConfigMap in the release namespace with the declarative host rules
+      # (top-level `grants:` — same schema as `gssh-admin apply`). Set ⇒ the
+      # server applies the file at startup (fail fast) and every 30 s, and
+      # rejects ALL API writes for host grants (403 rules_file_managed).
+      # The chart does NOT create this ConfigMap: it is maintained
+      # separately (kustomize configMapGenerator, Flux, plain manifest).
+      # GSSH_HOST_RULES_FILE is derived from it.
+      existingConfigMap: ""
+      # Key inside that ConfigMap; mounted (without subPath, so ConfigMap
+      # updates reach the running pod) as /etc/guided-ssh/rules/host/rules.yaml.
+      key: host-rules.yaml
+    ci:
+      # Same for the CI rules (top-level `ci_grants:`), independent of the
+      # host domain — GSSH_CI_RULES_FILE.
+      existingConfigMap: ""
+      key: ci-rules.yaml
   # Rate limiting of the sign/enroll endpoints.
   rateLimit:
     # GSSH_SIGN_RATE_PER_MINUTE (empty = 60; "0" disables it)

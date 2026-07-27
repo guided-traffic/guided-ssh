@@ -82,6 +82,65 @@ Recommended workflow: maintain `grants.yaml` in the Git repository, merge
 changes via review, run `gssh-admin apply` in the pipeline (token via
 `GSSH_ID_TOKEN`).
 
+Parsing is strict, because the file is fully authoritative: unknown or
+misspelled keys are an error, and a file without a top-level `grants:` key is
+rejected instead of being read as "delete all host grants". An explicit
+`grants: []` does delete them all. `ci_grants:` is optional in the combined
+file (missing ⇒ CI grants untouched, empty list ⇒ all deleted, see
+[CI grants](gitlab-ci.md#ci-grants)).
+
+### Who is allowed to write
+
+Rules have exactly one writer at a time. Two independent switches decide
+which one — a global flag for interactive editing, and a per-domain file
+source ("domain" = host grants resp. CI grants):
+
+| `GSSH_MANUAL_RULES` | rules file for the domain | CRUD API + UI editing | `…/apply` API |
+|---|---|---|---|
+| off (default) | unset | 403 `manual_rules_disabled` | allowed |
+| `true` | unset | allowed | allowed |
+| any | set | 403 `rules_file_managed` | 403 `rules_file_managed` |
+
+Reading is never gated: the rules pages stay visible for admins and auditors
+in every mode, only Add/Edit/Delete disappear (the UI learns this from
+`/v1/ui/config`). The two domains are independent — host rules can come from
+a file while CI rules keep using `gssh-admin apply`. Helm exposes the same
+switches as `config.rules.manualProvision` and
+`config.rules.<host|ci>.existingConfigMap`
+([chart README](../deploy/helm/guided-ssh/README.md#rules-provisioning-gitops)).
+
+### Rules file owned by the server
+
+Instead of pushing state in from outside, the server can reconcile a domain
+from a file it reads itself — no admin token, no sync job:
+
+| Variable | Domain | File content |
+|---|---|---|
+| `GSSH_HOST_RULES_FILE` | host grants | top-level `grants:` (schema above) |
+| `GSSH_CI_RULES_FILE` | CI grants | top-level `ci_grants:` |
+
+Each file carries only its own domain; the wrong domain's key in it is an
+error. Behavior:
+
+- **Startup**: a missing or invalid file makes the server exit — a wrong path
+  or a broken file is a deployment bug and should be visible as a crash loop.
+- **Runtime**: the file is re-applied every 30 s with the same transactional
+  semantics as `gssh-admin apply`. The loop is also drift correction: rules
+  changed out of band in the database are reverted on the next tick.
+- A file that turns invalid at runtime keeps the last applied state, logs the
+  error and increments `gssh_rules_file_sync_errors_total{domain}` — a bad
+  rules push must not stop certificate signing.
+- Applies are audited with the actor `system:rules-file`.
+- Host entries without an explicit `issuer:` fall back to `GSSH_OIDC_ISSUER`
+  (the API path takes the issuer from the admin's token, which the reconciler
+  does not have). With neither, the startup apply fails.
+
+On Kubernetes the files come from ConfigMaps that the chart mounts (it does
+not create them — they are maintained in your GitOps repo); an edit
+propagates within roughly 1–2 minutes, kubelet sync plus reconcile tick.
+Worked example: [README](../README.md#production-deployment) and the
+[chart README](../deploy/helm/guided-ssh/README.md#rules-provisioning-gitops).
+
 ## Bastion pattern (ProxyJump)
 
 The bastion and target hosts are ordinary enrolled hosts; access is

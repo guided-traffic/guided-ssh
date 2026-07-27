@@ -199,6 +199,67 @@ All chart values (secrets layout, CloudNativePG, ingress, mTLS agent API,
 metrics): [chart README](deploy/helm/guided-ssh/README.md). GitOps reference
 (FluxCD, SOPS, declarative grants): [deploy/flux-example/](deploy/flux-example/).
 
+**Rules from Git.** Access rules and CI rules are meant to be managed
+declaratively, so in-app editing is **off by default**
+(`config.rules.manualProvision: false`). Each domain can additionally be
+pointed at a ConfigMap that the server reconciles from — no sync job, no
+extra OIDC client. The chart does not create those ConfigMaps; they are
+maintained next to your other manifests (kustomize `configMapGenerator`,
+Flux, plain YAML):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gssh-host-rules
+data:
+  host-rules.yaml: |
+    grants:
+      - group: deployers
+        tags:
+          env: prod
+        principals: [deploy]
+        sudo: false
+        max_validity: 8h
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gssh-ci-rules
+data:
+  ci-rules.yaml: |
+    ci_grants:
+      - project: infra/ansible
+        ref: main
+        protected_only: true
+        tags:
+          env: prod
+        principals: [deploy]
+        max_validity: 1h
+```
+
+```yaml
+# values.yaml
+config:
+  rules:
+    manualProvision: false   # default; shown for clarity
+    host:
+      existingConfigMap: gssh-host-rules
+      key: host-rules.yaml   # default key; set if your ConfigMap uses another
+    ci:
+      existingConfigMap: gssh-ci-rules
+      key: ci-rules.yaml
+```
+
+Each file is the full desired state of its domain: an empty list
+(`grants: []`) deletes every rule of that domain — a file *without* the
+`grants:` key is a validation error, not "delete everything". Edits
+propagate within roughly 1–2 minutes (kubelet ConfigMap sync plus a 30 s
+reconcile tick), which doubles as drift correction against out-of-band
+database changes. While a domain is file-owned, its pages stay readable in
+the UI but every API write for it returns 403 — one writer per domain.
+Ownership matrix and file schema: [docs/grants.md](docs/grants.md#declarative-management-gitops).
+
 ## One-command host install
 
 Instead of distributing packages, the server can serve the agent itself: in

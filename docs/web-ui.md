@@ -58,10 +58,18 @@ CORS, no separate deployment (ADR-003, ADR-020).
   `missing` conditions), the page shows the reasons in plain language
   instead of the instructions.
 - **Access rules**: grants including create/edit/delete (admin); mutations
-  generate server-side audit events with an actor.
-- **CI & service accounts**: CI grants (CRUD, admin) and service accounts
-  with an active toggle (per-project kill switch; audited as
-  `service_account.updated`).
+  generate server-side audit events with an actor. Editing is only offered
+  when the server reports `grants_editable` in `/v1/ui/config` — manual
+  provisioning on (`GSSH_MANUAL_RULES=true`) and the domain not owned by a
+  rules file (`GSSH_HOST_RULES_FILE`). Otherwise the page stays readable and
+  says that the rules are managed declaratively; the server rejects the
+  writes anyway (403, see
+  [GITOPS_EXTERNAL_RULES](major-tickets/GITOPS_EXTERNAL_RULES.md)).
+- **CI & service accounts**: CI grants (CRUD, admin, gated by
+  `ci_grants_editable` / `GSSH_CI_RULES_FILE` exactly like above) and service
+  accounts with an active toggle (per-project kill switch; audited as
+  `service_account.updated`). The kill switch is **not** part of the
+  declarative rules and stays available in GitOps mode.
 - **Users & groups**: inventory synced from the IdP (read-only).
 - **Audit** (auditor role): filterable by event type, actor, time range, and
   full text (`q` matches actor and payload — covers host and pipeline
@@ -121,6 +129,15 @@ localStorage.setItem('gssh-mock-roles', '');        // logged-out view
 localStorage.removeItem('gssh-mock-roles');         // back to admin
 ```
 
+Rule provisioning variants (GitOps-owned rules → read-only rule pages):
+
+```js
+localStorage.setItem('gssh-mock-rules', 'gitops');      // both domains file-owned
+localStorage.setItem('gssh-mock-rules', 'gitops-host'); // only access rules
+localStorage.setItem('gssh-mock-rules', 'gitops-ci');   // only CI rules
+localStorage.removeItem('gssh-mock-rules');             // back to in-app editing
+```
+
 (reload after each change). Production builds ship with `mockApi: false` —
 the mock never answers outside `ng serve`.
 
@@ -150,6 +167,9 @@ export GSSH_DB_HOST=localhost GSSH_DB_USER=gssh GSSH_DB_PASSWORD=gssh \
        GSSH_DB_NAME=gssh GSSH_DB_SSLMODE=disable
 export GSSH_CA_MASTER_KEY="$(openssl rand -base64 32)"
 export GSSH_DEV_UI_AUTH=insecure
+# In-app rule editing is off by default (rules are expected to come from
+# GitOps); enable it if you work on the grants/CI pages.
+export GSSH_MANUAL_RULES=true
 
 go run ./cmd/gssh-server -listen :8080
 ```

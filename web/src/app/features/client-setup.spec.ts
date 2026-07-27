@@ -18,6 +18,8 @@ const UI_CONFIG: UiConfig = {
   oidc_client_id: 'gssh-cli',
   admin_group: 'ssh-admins',
   auditor_group: 'ssh-auditors',
+  grants_editable: true,
+  ci_grants_editable: true,
 };
 
 const READY: ClientManifest = {

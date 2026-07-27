@@ -21,6 +21,7 @@ export type { GrantRequest } from './models/grant-request';
 export type { Group } from './models/group';
 export type { Host } from './models/host';
 export type { RolloutUnavailable } from './models/rollout-unavailable';
+export type { RulesWriteError } from './models/rules-write-error';
 export type { ServiceAccount } from './models/service-account';
 export type { SignRequest } from './models/sign-request';
 export type { SignResponse } from './models/sign-response';
