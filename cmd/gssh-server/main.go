@@ -66,9 +66,11 @@ const (
 	envCAMTLSKeyFile  = "GSSH_CA_MTLS_KEY_FILE"  //nolint:gosec // name of the env var, not a secret; PKCS#8 PEM
 	envCAMTLSCertFile = "GSSH_CA_MTLS_CERT_FILE" // X.509 CA certificate PEM
 
-	// OIDC (Phase 3); without an issuer the sign endpoint stays disabled (503).
-	envOIDCIssuer   = "GSSH_OIDC_ISSUER"    // issuer URL of the IdP
-	envOIDCClientID = "GSSH_OIDC_CLIENT_ID" // expected audience of the ID tokens
+	// User OIDC (Phase 3); without an issuer the sign endpoint stays disabled
+	// (503). The issuer is shared by both OIDC clients: the CLIs' public
+	// client (below) and the server's own confidential client (GSSH_SERVER_*).
+	envOIDCIssuer         = "GSSH_OIDC_ISSUER"           // issuer URL of the IdP
+	envClientOIDCClientID = "GSSH_CLIENT_OIDC_CLIENT_ID" // public client of the gssh/gssh-admin CLIs; expected audience of bearer ID tokens
 
 	// GitLab CI (Phase 7); without an issuer /v1/sign/ci stays disabled (503).
 	envCIIssuer   = "GSSH_CI_ISSUER"   // GitLab base URL (OIDC issuer)
@@ -98,15 +100,16 @@ const (
 	envAuditorGroup  = "GSSH_AUDITOR_GROUP"
 	envReadOnlyGroup = "GSSH_READONLY_GROUP"
 
-	// OIDC client of the web UI; defaults to the client ID from
-	// GSSH_OIDC_CLIENT_ID. With a client secret set, the server performs the
-	// login itself (BFF: authorization code + PKCE + secret, session
-	// cookie); without a secret the /v1/auth endpoints stay disabled.
-	envUIOIDCClientID     = "GSSH_UI_OIDC_CLIENT_ID"
-	envUIOIDCClientSecret = "GSSH_UI_OIDC_CLIENT_SECRET" //nolint:gosec // name of the env var, not a secret
-	envUIOIDCScopes       = "GSSH_UI_OIDC_SCOPES"        // comma-separated; default openid,profile,email,groups
-	envUIBaseURL          = "GSSH_UI_BASE_URL"           // external base URL of the UI; empty = derive from the request
-	envUISessionTTL       = "GSSH_UI_SESSION_TTL"        // Go duration, default 12h
+	// OIDC client of the server itself (confidential, WITH a client secret):
+	// the server performs the UI login (BFF: authorization code + PKCE +
+	// secret, session cookie). Client ID and secret must be set together;
+	// with both empty the /v1/auth endpoints stay disabled. Must be a
+	// different IdP client than GSSH_CLIENT_OIDC_CLIENT_ID — the clients
+	// authenticate without a secret (public), the server with one.
+	envServerOIDCClientID     = "GSSH_SERVER_OIDC_CLIENT_ID"
+	envServerOIDCClientSecret = "GSSH_SERVER_OIDC_CLIENT_SECRET" //nolint:gosec // name of the env var, not a secret
+	envServerOIDCScopes       = "GSSH_SERVER_OIDC_SCOPES"        // comma-separated; default openid,profile,email,groups
+	envUISessionTTL           = "GSSH_UI_SESSION_TTL"            // Go duration, default 12h
 
 	// Audit streaming (Phase 8): committed audit events as structured
 	// JSON logs (SIEM) and optionally to a webhook.
@@ -127,7 +130,7 @@ const (
 
 	// One-command host install: external URLs and pin sources. If a
 	// prerequisite is missing, host rollout stays disabled (503) — never unpinned.
-	envPublicURL        = "GSSH_PUBLIC_URL"           // external public base URL; empty ⇒ falls back to GSSH_UI_BASE_URL
+	envPublicURL        = "GSSH_PUBLIC_URL"           // external public base URL (UI login redirect, install_command, client gate, pin dial)
 	envAgentPublicURL   = "GSSH_AGENT_PUBLIC_URL"     // external mTLS agent URL; never derived
 	envPublicPin        = "GSSH_PUBLIC_PIN"           // pin source 1: static base64 SPKI pin
 	envPublicPinCert    = "GSSH_PUBLIC_PIN_CERT_FILE" // pin source 2: PEM certificate (first block = leaf)
@@ -172,14 +175,11 @@ func hostCertValidityFromEnv() (time.Duration, error) {
 	return validity, nil
 }
 
-// publicBaseURL returns the external base URL of the public listener:
-// GSSH_PUBLIC_URL, falling back to the UI base URL. Empty ⇒ rollout gate stays closed.
+// publicBaseURL returns the external base URL of the public listener
+// (GSSH_PUBLIC_URL). Empty ⇒ the rollout/client gates stay closed and the
+// UI login derives its redirect URL from the request.
 func publicBaseURL() string {
-	base := os.Getenv(envPublicURL)
-	if base == "" {
-		base = os.Getenv(envUIBaseURL)
-	}
-	return strings.TrimSuffix(base, "/")
+	return strings.TrimSuffix(os.Getenv(envPublicURL), "/")
 }
 
 // pinConfigFromEnv builds the pin configuration of the host rollout. An
@@ -259,6 +259,34 @@ func caModeFromEnv() (string, ca.ExternalKeyPaths, error) {
 			caModeManaged, strings.Join(unexpected, ", "), envCAMode, caModeSelfManaged)
 	}
 	return mode, paths, nil
+}
+
+// legacyOIDCEnv maps the env vars removed by the server/client OIDC split to
+// their replacements. Renamed without aliases: the old names mixed the
+// server's confidential client with the clients' public client, and a stale
+// deployment must not silently run with parts of auth disabled.
+var legacyOIDCEnv = []struct{ old, replacement string }{
+	{"GSSH_OIDC_CLIENT_ID", envClientOIDCClientID},
+	{"GSSH_UI_OIDC_CLIENT_ID", envServerOIDCClientID},
+	{"GSSH_UI_OIDC_CLIENT_SECRET", envServerOIDCClientSecret},
+	{"GSSH_UI_OIDC_SCOPES", envServerOIDCScopes},
+	{"GSSH_UI_BASE_URL", envPublicURL},
+}
+
+// checkLegacyOIDCEnv fails startup while a pre-split variable is still set.
+// Errors name every offending variable at once (like caModeFromEnv) and run
+// before any database work so a stale deployment stops at the first message.
+func checkLegacyOIDCEnv() error {
+	var stale []string
+	for _, m := range legacyOIDCEnv {
+		if os.Getenv(m.old) != "" {
+			stale = append(stale, fmt.Sprintf("%s (now %s)", m.old, m.replacement))
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the server/client oidc split renamed these variables — set: %s (migration notes in the chart README)", strings.Join(stale, ", "))
 }
 
 func main() {
@@ -472,6 +500,10 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := checkLegacyOIDCEnv(); err != nil {
+		return err
+	}
+
 	certAuthority, st, err := setup(ctx)
 	if err != nil {
 		return err
@@ -483,11 +515,7 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 		return err
 	}
 
-	uiClientID := os.Getenv(envUIOIDCClientID)
-	if uiClientID == "" {
-		uiClientID = os.Getenv(envOIDCClientID)
-	}
-	verifier, ciVerifier, uiAuth, err := setupVerifiers(ctx, logger, uiClientID)
+	verifier, ciVerifier, uiAuth, err := setupVerifiers(ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -522,9 +550,11 @@ func serve(logger *slog.Logger, listen, agentListen, metricsListen string) error
 			Logger:            logger, AdminGroup: adminGroup,
 			AuditorGroup:  os.Getenv(envAuditorGroup),
 			ReadOnlyGroup: os.Getenv(envReadOnlyGroup),
+			// Advertised to CLI installs (/v1/ui/config, client.sh): always
+			// the clients' public client, never the server's confidential one.
 			UIConfig: api.UIConfig{
 				OIDCIssuer:   os.Getenv(envOIDCIssuer),
-				OIDCClientID: uiClientID,
+				OIDCClientID: os.Getenv(envClientOIDCClientID),
 			},
 			UIAuth:  uiAuth,
 			DevUser: devUser,
@@ -628,9 +658,9 @@ func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, err
 		logger.Warn("oidc not configured — /v1/sign/user disabled", "env", envOIDCIssuer)
 		return nil, nil //nolint:nilnil // nil interface deliberately disables the endpoint
 	}
-	clientID := os.Getenv(envOIDCClientID)
+	clientID := os.Getenv(envClientOIDCClientID)
 	if clientID == "" {
-		return nil, fmt.Errorf("%s is set, but %s is missing — without an expected audience, token validation is not possible", envOIDCIssuer, envOIDCClientID)
+		return nil, fmt.Errorf("%s is set, but %s is missing — without an expected audience, token validation is not possible", envOIDCIssuer, envClientOIDCClientID)
 	}
 	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{
 		IssuerURL: issuer,
@@ -645,7 +675,7 @@ func setupOIDC(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, err
 
 // setupVerifiers bundles the server's OIDC configuration: user and CI token
 // verifiers, audience separation, and the server-side UI login.
-func setupVerifiers(ctx context.Context, logger *slog.Logger, uiClientID string) (api.TokenVerifier, api.CITokenVerifier, *api.UIAuthConfig, error) {
+func setupVerifiers(ctx context.Context, logger *slog.Logger) (api.TokenVerifier, api.CITokenVerifier, *api.UIAuthConfig, error) {
 	verifier, err := setupOIDC(ctx, logger)
 	if err != nil {
 		return nil, nil, nil, err
@@ -657,7 +687,7 @@ func setupVerifiers(ctx context.Context, logger *slog.Logger, uiClientID string)
 	if err := checkAudienceSeparation(); err != nil {
 		return nil, nil, nil, err
 	}
-	uiAuth, err := setupUIAuth(ctx, logger, uiClientID)
+	uiAuth, err := setupUIAuth(ctx, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -665,28 +695,41 @@ func setupVerifiers(ctx context.Context, logger *slog.Logger, uiClientID string)
 }
 
 // setupUIAuth builds the configuration of the server-side UI login (BFF)
-// if a client secret is set; without a secret the /v1/auth endpoints stay
-// disabled (503). The session key is derived from the CA master key — no
+// from the server's own confidential OIDC client. Client ID and secret must
+// be set together (fail-fast on half configuration); with both empty the
+// /v1/auth endpoints stay disabled (503). The client must differ from the
+// CLIs' public client — one IdP client cannot be public and confidential at
+// the same time. The session key is derived from the CA master key — no
 // additional secret needed.
-func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*api.UIAuthConfig, error) {
-	secret := os.Getenv(envUIOIDCClientSecret)
-	if secret == "" {
-		logger.Warn("ui login not configured — /v1/auth disabled", "env", envUIOIDCClientSecret)
+func setupUIAuth(ctx context.Context, logger *slog.Logger) (*api.UIAuthConfig, error) {
+	clientID := os.Getenv(envServerOIDCClientID)
+	secret := os.Getenv(envServerOIDCClientSecret)
+	if clientID == "" && secret == "" {
+		if os.Getenv(envServerOIDCScopes) != "" {
+			return nil, fmt.Errorf("%s is set, but %s and %s are missing", envServerOIDCScopes, envServerOIDCClientID, envServerOIDCClientSecret)
+		}
+		logger.Warn("ui login not configured — /v1/auth disabled", "env", envServerOIDCClientID+"/"+envServerOIDCClientSecret)
 		return nil, nil //nolint:nilnil // nil config deliberately disables the endpoints
+	}
+	if clientID == "" {
+		return nil, fmt.Errorf("%s is set, but %s is missing", envServerOIDCClientSecret, envServerOIDCClientID)
+	}
+	if secret == "" {
+		return nil, fmt.Errorf("%s is set, but %s is missing", envServerOIDCClientID, envServerOIDCClientSecret)
+	}
+	if clientID == os.Getenv(envClientOIDCClientID) {
+		return nil, fmt.Errorf("%s and %s must be different idp clients — the server authenticates with a client secret, the clients without one", envServerOIDCClientID, envClientOIDCClientID)
 	}
 	issuer := os.Getenv(envOIDCIssuer)
 	if issuer == "" {
-		return nil, fmt.Errorf("%s is set, but %s is missing", envUIOIDCClientSecret, envOIDCIssuer)
-	}
-	if clientID == "" {
-		return nil, fmt.Errorf("%s is set, but %s is missing", envUIOIDCClientSecret, envOIDCClientID)
+		return nil, fmt.Errorf("%s is set, but %s is missing", envServerOIDCClientID, envOIDCIssuer)
 	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("ui login: oidc discovery for %s: %w", issuer, err)
 	}
-	// Its own verifier: the audience of the UI tokens is the UI client ID,
-	// which can differ from GSSH_OIDC_CLIENT_ID.
+	// Its own verifier: the audience of the login's ID tokens is the
+	// server's client ID, not the clients' public client ID.
 	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{IssuerURL: issuer, ClientID: clientID})
 	if err != nil {
 		return nil, err
@@ -700,7 +743,7 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*ap
 		return nil, err
 	}
 	scopes := defaultUIScopes
-	if raw := os.Getenv(envUIOIDCScopes); raw != "" {
+	if raw := os.Getenv(envServerOIDCScopes); raw != "" {
 		scopes = strings.Split(raw, ",")
 		for i := range scopes {
 			scopes[i] = strings.TrimSpace(scopes[i])
@@ -724,7 +767,7 @@ func setupUIAuth(ctx context.Context, logger *slog.Logger, clientID string) (*ap
 		},
 		Verifier:   verifier,
 		Codec:      codec,
-		BaseURL:    strings.TrimSuffix(os.Getenv(envUIBaseURL), "/"),
+		BaseURL:    publicBaseURL(),
 		SessionTTL: sessionTTL,
 	}, nil
 }
@@ -817,7 +860,9 @@ func setupDownloadRateLimit(logger *slog.Logger) *api.RateLimiter {
 // checkAudienceSeparation prevents audience confusion (security review
 // Phase 10): if user OIDC and GitLab CI run against the same issuer, their
 // expected audiences must differ — otherwise user and CI tokens would be
-// interchangeable at both endpoints.
+// interchangeable at both endpoints. The server's confidential client needs
+// no such check: its verifier only sees the ID token the server itself
+// obtains in the login callback, never an inbound bearer token.
 func checkAudienceSeparation() error {
 	issuer := os.Getenv(envOIDCIssuer)
 	if issuer == "" || issuer != os.Getenv(envCIIssuer) {
@@ -827,8 +872,8 @@ func checkAudienceSeparation() error {
 	if ciAudience == "" {
 		ciAudience = auth.DefaultCIAudience
 	}
-	if ciAudience == os.Getenv(envOIDCClientID) {
-		return fmt.Errorf("same issuer and same audience for user oidc and gitlab ci (%s/%s) — tokens would be interchangeable at both sign endpoints", envOIDCClientID, envCIAudience)
+	if ciAudience == os.Getenv(envClientOIDCClientID) {
+		return fmt.Errorf("same issuer and same audience for user oidc and gitlab ci (%s/%s) — tokens would be interchangeable at both sign endpoints", envClientOIDCClientID, envCIAudience)
 	}
 	return nil
 }

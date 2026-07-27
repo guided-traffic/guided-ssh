@@ -19,8 +19,8 @@ import (
 const (
 	// clientMissingBinaries: no client binary in the image (dev build).
 	clientMissingBinaries = "binaries"
-	// clientMissingPublicURL: neither GSSH_PUBLIC_URL nor GSSH_UI_BASE_URL —
-	// the script would have no api_url to write into the config.
+	// clientMissingPublicURL: GSSH_PUBLIC_URL not set — the script would
+	// have no api_url to write into the config.
 	clientMissingPublicURL = "public_url"
 	// clientMissingPublicURLHTTPS: public URL set, but not https. Over
 	// plaintext HTTP the SHA-256 check in the script protects nothing (an

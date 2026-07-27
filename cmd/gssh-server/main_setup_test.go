@@ -165,6 +165,32 @@ func TestCAModeFromEnv(t *testing.T) {
 	}
 }
 
+// TestCheckLegacyOIDCEnv: variables renamed by the server/client OIDC split
+// must stop startup with an old→new hint instead of being silently ignored.
+func TestCheckLegacyOIDCEnv(t *testing.T) {
+	for _, m := range legacyOIDCEnv {
+		t.Setenv(m.old, "")
+	}
+	if err := checkLegacyOIDCEnv(); err != nil {
+		t.Fatalf("no legacy variables: %v", err)
+	}
+
+	t.Setenv("GSSH_OIDC_CLIENT_ID", "gssh-cli")
+	t.Setenv("GSSH_UI_BASE_URL", "https://gssh.example.com")
+	err := checkLegacyOIDCEnv()
+	if err == nil {
+		t.Fatal("legacy variables must stop startup")
+	}
+	for _, want := range []string{"GSSH_OIDC_CLIENT_ID", envClientOIDCClientID, "GSSH_UI_BASE_URL", envPublicURL} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not name %s: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "GSSH_UI_OIDC_CLIENT_SECRET") {
+		t.Errorf("error wrongly names an unset variable: %v", err)
+	}
+}
+
 func TestSetupOIDC(t *testing.T) {
 	// Without an issuer: endpoint deliberately disabled (nil, nil).
 	t.Setenv(envOIDCIssuer, "")
@@ -174,33 +200,55 @@ func TestSetupOIDC(t *testing.T) {
 	}
 	// Issuer without a client ID: fail-fast (security review Phase 10).
 	t.Setenv(envOIDCIssuer, "https://idp.example")
-	t.Setenv(envOIDCClientID, "")
+	t.Setenv(envClientOIDCClientID, "")
 	if _, err := setupOIDC(context.Background(), discardLogger()); err == nil {
 		t.Fatal("issuer without a client id must fail")
 	}
 }
 
 func TestSetupUIAuth(t *testing.T) {
-	// Without a client secret: BFF deliberately disabled (nil, nil).
-	t.Setenv(envUIOIDCClientSecret, "")
-	cfg, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui")
+	// Server client ID and secret both empty: BFF deliberately disabled (nil, nil).
+	t.Setenv(envServerOIDCClientID, "")
+	t.Setenv(envServerOIDCClientSecret, "")
+	t.Setenv(envServerOIDCScopes, "")
+	t.Setenv(envClientOIDCClientID, "")
+	cfg, err := setupUIAuth(context.Background(), discardLogger())
 	if cfg != nil || err != nil {
-		t.Fatalf("without secret: %v %v", cfg, err)
+		t.Fatalf("unconfigured: %v %v", cfg, err)
 	}
-	// Secret without issuer or without client ID: configuration error (fail-fast).
-	t.Setenv(envUIOIDCClientSecret, "secret")
-	t.Setenv(envOIDCIssuer, "")
-	if _, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui"); err == nil {
-		t.Fatal("secret without issuer must fail")
+	// Scopes without the client pair: configuration error (fail-fast).
+	t.Setenv(envServerOIDCScopes, "openid")
+	if _, err := setupUIAuth(context.Background(), discardLogger()); err == nil {
+		t.Fatal("scopes without the client pair must fail")
 	}
-	t.Setenv(envOIDCIssuer, "https://idp.example")
-	if _, err := setupUIAuth(context.Background(), discardLogger(), ""); err == nil {
+	t.Setenv(envServerOIDCScopes, "")
+	// Half-configured pair: configuration error (fail-fast) in both directions.
+	t.Setenv(envServerOIDCClientSecret, "secret")
+	if _, err := setupUIAuth(context.Background(), discardLogger()); err == nil {
 		t.Fatal("secret without client id must fail")
+	}
+	t.Setenv(envServerOIDCClientSecret, "")
+	t.Setenv(envServerOIDCClientID, "gssh-server")
+	if _, err := setupUIAuth(context.Background(), discardLogger()); err == nil {
+		t.Fatal("client id without secret must fail")
+	}
+	// Complete pair without an issuer: configuration error.
+	t.Setenv(envServerOIDCClientSecret, "secret")
+	t.Setenv(envOIDCIssuer, "")
+	if _, err := setupUIAuth(context.Background(), discardLogger()); err == nil {
+		t.Fatal("server client without issuer must fail")
+	}
+	// Server client identical to the clients' public client: rejected — one
+	// IdP client cannot be public and confidential at the same time.
+	t.Setenv(envOIDCIssuer, "https://idp.example")
+	t.Setenv(envClientOIDCClientID, "gssh-server")
+	if _, err := setupUIAuth(context.Background(), discardLogger()); err == nil {
+		t.Fatal("server client == clients' client must fail")
 	}
 }
 
 // TestSetupUIAuthComplete: a complete configuration against a fake IdP
-// (discovery only) — checks scopes override, TTL parsing, and base-URL trimming.
+// (discovery only) — checks scopes override, TTL parsing, and public-URL trimming.
 func TestSetupUIAuthComplete(t *testing.T) {
 	var idp *httptest.Server
 	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -215,18 +263,20 @@ func TestSetupUIAuthComplete(t *testing.T) {
 	}))
 	t.Cleanup(idp.Close)
 
-	t.Setenv(envUIOIDCClientSecret, "secret")
+	t.Setenv(envServerOIDCClientID, "gssh-server")
+	t.Setenv(envServerOIDCClientSecret, "secret")
+	t.Setenv(envClientOIDCClientID, "gssh-cli")
 	t.Setenv(envOIDCIssuer, idp.URL)
 	t.Setenv(envMasterKey, base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	t.Setenv(envUIOIDCScopes, "openid, email")
+	t.Setenv(envServerOIDCScopes, "openid, email")
 	t.Setenv(envUISessionTTL, "1h")
-	t.Setenv(envUIBaseURL, "https://gssh.example.com/")
+	t.Setenv(envPublicURL, "https://gssh.example.com/")
 
-	cfg, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui")
+	cfg, err := setupUIAuth(context.Background(), discardLogger())
 	if err != nil {
 		t.Fatalf("setupUIAuth: %v", err)
 	}
-	if cfg.OAuth.ClientID != "gssh-ui" || cfg.OAuth.ClientSecret != "secret" {
+	if cfg.OAuth.ClientID != "gssh-server" || cfg.OAuth.ClientSecret != "secret" {
 		t.Errorf("oauth-client = %s/%s", cfg.OAuth.ClientID, cfg.OAuth.ClientSecret)
 	}
 	if !slices.Equal(cfg.OAuth.Scopes, []string{"openid", "email"}) {
@@ -244,7 +294,7 @@ func TestSetupUIAuthComplete(t *testing.T) {
 
 	// Invalid session TTL: configuration error (fail-fast).
 	t.Setenv(envUISessionTTL, "nope")
-	if _, err := setupUIAuth(context.Background(), discardLogger(), "gssh-ui"); err == nil {
+	if _, err := setupUIAuth(context.Background(), discardLogger()); err == nil {
 		t.Error("invalid ttl must fail")
 	}
 }
@@ -261,7 +311,7 @@ func TestCheckAudienceSeparation(t *testing.T) {
 	// Different issuers: no restriction.
 	t.Setenv(envOIDCIssuer, "https://idp.example")
 	t.Setenv(envCIIssuer, "https://gitlab.example")
-	t.Setenv(envOIDCClientID, "guided-ssh")
+	t.Setenv(envClientOIDCClientID, "guided-ssh")
 	t.Setenv(envCIAudience, "")
 	if err := checkAudienceSeparation(); err != nil {
 		t.Fatalf("different issuers: %v", err)
@@ -310,38 +360,33 @@ func TestSetupRateLimit(t *testing.T) {
 
 // setPinEnv sets every pin variable so no subtest inherits the developer's
 // environment or the previous case.
-func setPinEnv(t *testing.T, staticPin, certFile, refresh, publicURL, uiBaseURL string) {
+func setPinEnv(t *testing.T, staticPin, certFile, refresh, publicURL string) {
 	t.Helper()
 	t.Setenv(envPublicPin, staticPin)
 	t.Setenv(envPublicPinCert, certFile)
 	t.Setenv(envPublicPinRefresh, refresh)
 	t.Setenv(envPublicURL, publicURL)
-	t.Setenv(envUIBaseURL, uiBaseURL)
 }
 
 // TestPinConfigFromEnv: an invalid static pin or an unusable refresh
 // interval aborts startup (fail-fast) — silently continuing without a pin
 // would be the more dangerous option.
 func TestPinConfigFromEnv(t *testing.T) {
-	setPinEnv(t, "", "", "", "", "")
+	setPinEnv(t, "", "", "", "")
 	cfg, err := pinConfigFromEnv()
 	if err != nil || cfg != (api.PinProviderConfig{}) {
 		t.Fatalf("empty: %+v %v (want empty config, nil)", cfg, err)
 	}
 
-	// GSSH_PUBLIC_URL is the dial source, GSSH_UI_BASE_URL the fallback;
-	// the trailing slash does not belong in the base URL.
-	setPinEnv(t, "", "", "", "https://gssh.example.com/", "https://ui.example.com")
+	// GSSH_PUBLIC_URL is the dial source; the trailing slash does not
+	// belong in the base URL.
+	setPinEnv(t, "", "", "", "https://gssh.example.com/")
 	if cfg, err = pinConfigFromEnv(); err != nil || cfg.DialURL != "https://gssh.example.com" {
 		t.Fatalf("public-url: %+v %v", cfg, err)
 	}
-	setPinEnv(t, "", "", "", "", "https://ui.example.com")
-	if cfg, err = pinConfigFromEnv(); err != nil || cfg.DialURL != "https://ui.example.com" {
-		t.Fatalf("ui-base-url as fallback: %+v %v", cfg, err)
-	}
 
 	validPin := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-	setPinEnv(t, validPin, "/etc/gssh/tls.crt", "30s", "", "")
+	setPinEnv(t, validPin, "/etc/gssh/tls.crt", "30s", "")
 	cfg, err = pinConfigFromEnv()
 	if err != nil {
 		t.Fatalf("valid configuration: %v", err)
@@ -351,14 +396,14 @@ func TestPinConfigFromEnv(t *testing.T) {
 	}
 
 	for _, invalid := range []string{"not-base64!", "AAAA"} {
-		setPinEnv(t, invalid, "", "", "", "")
+		setPinEnv(t, invalid, "", "", "")
 		if _, err := pinConfigFromEnv(); err == nil {
 			t.Errorf("pin %q: expected a startup error", invalid)
 		}
 	}
 
 	for _, invalid := range []string{"garbage", "-5m", "0s"} {
-		setPinEnv(t, "", "", invalid, "", "")
+		setPinEnv(t, "", "", invalid, "")
 		if _, err := pinConfigFromEnv(); err == nil {
 			t.Errorf("refresh %q: expected a startup error", invalid)
 		}

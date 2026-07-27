@@ -18,7 +18,16 @@ spec:
     config:
       oidc:
         issuer: https://idp.example.com/realms/example
-        clientID: gssh-cli
+        # Public client of the gssh/gssh-admin CLIs (no client secret).
+        client:
+          clientID: gssh-cli
+        # Web-UI login (BFF): the server's own confidential IdP client with a
+        # client secret — a SEPARATE client, never the CLI client above.
+        # Redirect URI in the IdP: https://gssh.example.com/v1/auth/callback.
+        # Secret: see guided-ssh-server-oidc in secrets.yaml.
+        # server:
+        #   clientID: gssh-server
+        #   existingSecret: guided-ssh-server-oidc
       ci:
         issuer: https://gitlab.example.com
       groups:

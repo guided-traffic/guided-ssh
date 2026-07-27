@@ -10,7 +10,7 @@ taken from the code (as of Phase 13). Background:
 ### 401 — "invalid id-token" / "authorization: bearer token missing"
 
 - **Cause**: ID token expired, wrong audience (token not issued for
-  `GSSH_OIDC_CLIENT_ID`), wrong issuer, or a broken signature (JWKS). The
+  `GSSH_CLIENT_OIDC_CLIENT_ID`), wrong issuer, or a broken signature (JWKS). The
   reason is in the server-side log (`sign/user: token rejected`), the 401
   response is deliberately generic.
 - **Diagnosis**: server log (`kubectl logs`) at the time of the attempt;
@@ -56,8 +56,8 @@ taken from the code (as of Phase 13). Background:
 
 - **Cause**: `GSSH_OIDC_ISSUER` is not set on the server — `/v1/sign/user`
   is deliberately disabled.
-- **Fix**: set `config.oidc.issuer`/`clientID` in the Helm values and
-  redeploy.
+- **Fix**: set `config.oidc.issuer`/`config.oidc.client.clientID` in the
+  Helm values and redeploy.
 
 ## gssh error messages (client-side)
 
@@ -203,15 +203,18 @@ taken from the code (as of Phase 13). Background:
 
 - **Cause**: `checkAudienceSeparation` — user OIDC and GitLab CI are
   configured with the same issuer **and** `GSSH_CI_AUDIENCE` ==
-  `GSSH_OIDC_CLIENT_ID`. Tokens would then be interchangeable between both
-  sign endpoints; the server refuses to start (security review, Phase 10).
+  `GSSH_CLIENT_OIDC_CLIENT_ID`. Tokens would then be interchangeable between
+  both sign endpoints; the server refuses to start (security review, Phase 10).
 - **Fix**: configure separate audiences (or separate issuers).
 
 ## Server startup errors
 
 | Message | Cause → Fix |
 |---|---|
-| `GSSH_OIDC_ISSUER is set but GSSH_OIDC_CLIENT_ID is missing` | fail-fast instead of silently rejecting all tokens → set the client ID |
+| `GSSH_OIDC_ISSUER is set, but GSSH_CLIENT_OIDC_CLIENT_ID is missing` | fail-fast instead of silently rejecting all tokens → set the clients' client ID |
+| `the server/client oidc split renamed these variables — set: …` | pre-split variables (`GSSH_OIDC_CLIENT_ID`, `GSSH_UI_OIDC_*`, `GSSH_UI_BASE_URL`) still set → rename per the mapping in the message ([migration notes](../deploy/helm/guided-ssh/README.md#migration-serverclient-oidc-split)) |
+| `GSSH_SERVER_OIDC_CLIENT_ID is set, but GSSH_SERVER_OIDC_CLIENT_SECRET is missing` (or vice versa) | half-configured server client → set both, or neither (UI login off) |
+| `GSSH_SERVER_OIDC_CLIENT_ID and GSSH_CLIENT_OIDC_CLIENT_ID must be different idp clients` | one IdP client reused for server and CLIs → create a separate confidential client for the UI login |
 | `database configuration incomplete: GSSH_DB_… not set` | secret missing or key mapping wrong (`secrets.db.existingSecret`, keys via `secrets.db.keys`) |
 | `GSSH_CA_MASTER_KEY decode: …` | value is not valid base64 → generate it correctly (`head -c 32 /dev/urandom \| base64`) |
 | `ca: invalid master key: <n> bytes instead of 32` | value does not decode to 32 bytes → use a 32-byte key |

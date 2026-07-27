@@ -54,7 +54,7 @@ Configuration via environment variables:
 | `GSSH_AGENT_TLS_NAMES` | SANs of the agent API's mTLS server certificate (comma-separated; default `localhost,127.0.0.1`) |
 | `GSSH_ADMIN_GROUP` | IdP group whose members may use the admin API (`/v1/admin/…`); empty ⇒ admin API disabled |
 | `GSSH_AGENT_PUBLIC_URL` | External mTLS agent URL for enrolled hosts (host rollout, never derived) |
-| `GSSH_PUBLIC_URL` | External public base URL (host rollout: `install_command` and pin dial); empty ⇒ `GSSH_UI_BASE_URL` |
+| `GSSH_PUBLIC_URL` | External public base URL (UI login redirect, host rollout `install_command`, client install gate, pin dial) |
 | `GSSH_PUBLIC_PIN` / `GSSH_PUBLIC_PIN_CERT_FILE` | Pin sources for the host rollout: base64 SPKI pin or PEM certificate; without either, the server dials its own public URL |
 | `GSSH_PUBLIC_PIN_REFRESH` | Refresh interval for the pin self-dial (Go duration, default 5m) |
 | `GSSH_AGENT_DOWNLOAD_RPM` | Binary downloads per client IP and minute (default 10, `0` = off); one shared bucket covers agent (`/v1/agents/…`) and client (`/v1/clients/…`) downloads |

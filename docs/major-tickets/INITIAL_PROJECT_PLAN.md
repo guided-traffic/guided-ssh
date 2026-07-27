@@ -317,7 +317,9 @@ web UI is read-mostly (management primarily via CLI/API, GitOps-friendly).
       the SPA no longer uses `angular-auth-oidc-client`, no CORS/discovery in the browser.
       Enabled via `GSSH_UI_OIDC_CLIENT_SECRET` (chart:
       `config.oidc.uiExistingSecret`); the Dex client becomes confidential,
-      redirect URI `<base>/v1/auth/callback`
+      redirect URI `<base>/v1/auth/callback` — names later changed by the
+      server/client OIDC split: `GSSH_SERVER_OIDC_CLIENT_ID`/`_SECRET`,
+      chart `config.oidc.server.*`
 - [x] Generate the API client from an OpenAPI spec (single source of truth for the REST API)
       → `api/openapi.yaml` (hand-maintained, complete REST API) + ng-openapi-gen
       into `web/src/app/api` (`make web-api`)
@@ -581,8 +583,11 @@ web UI is read-mostly (management primarily via CLI/API, GitOps-friendly).
          random port cannot be expressed.
       3. Create a dedicated Dex client for the CLI (e.g.
          `${cluster_name}-gssh-cli`, public, secret-less, without redirectURIs)
-         and point `GSSH_OIDC_CLIENT_ID` (= the audience expected by /v1/sign/user)
-         at it — the UI and CLI clients are separate since the BFF rework.
+         and point `GSSH_CLIENT_OIDC_CLIENT_ID` (= the audience expected by
+         /v1/sign/user) at it — the server/client OIDC split enforces the
+         separation: the server refuses to start when the server's
+         confidential client and the CLIs' public client are the same
+         IdP client.
 
       **Rejected:** putting a `client_secret` in the CLI config (confidential CLI) —
       the secret would sit in every user's config, effectively public anyway,
@@ -592,4 +597,7 @@ web UI is read-mostly (management primarily via CLI/API, GitOps-friendly).
       - `DexStaticClient` with `public: true` renders without a secret and without
         mandatory redirectURIs
       - `gssh login` (PKCE) succeeds against wds18-Dex, as does `--device`
-      - The audience chain is documented: CLI client ID = `GSSH_OIDC_CLIENT_ID`
+      - ~~The audience chain is documented: CLI client ID = `GSSH_OIDC_CLIENT_ID`~~
+        done by the server/client OIDC split: CLI client ID =
+        `GSSH_CLIENT_OIDC_CLIENT_ID` (chart `config.oidc.client.clientID`),
+        documented in the chart README and docs/operations-manual.md

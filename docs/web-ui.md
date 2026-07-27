@@ -9,10 +9,13 @@ CORS, no separate deployment (ADR-003, ADR-020).
 - **API client**: generated from `api/openapi.yaml` (single source of truth)
   with `ng-openapi-gen` into `web/src/app/api/` — regenerate with `make web-api`;
   the generated code is checked in.
-- **Login**: OIDC Authorization Code + PKCE (`angular-auth-oidc-client`).
-  The SPA loads the issuer and client ID at runtime from `GET /v1/ui/config`
-  (public) — no build-time environment needed. The server validates ID
-  tokens as bearer tokens (consistent with `gssh-admin`).
+- **Login**: server-side OIDC (BFF). `GET /v1/auth/login` starts an
+  authorization-code + PKCE flow with the server's own confidential client
+  (`GSSH_SERVER_OIDC_CLIENT_ID`/`GSSH_SERVER_OIDC_CLIENT_SECRET`); the
+  session lives in an HttpOnly cookie, tokens never reach the browser.
+  `GET /v1/ui/config` (public) only bootstraps the role-group names and the
+  CLI setup values (the clients' public client) — no build-time environment
+  needed.
 - **Roles** from token claims (groups), fail-closed:
 
   | Role | IdP group (env) | Permissions |
@@ -25,9 +28,11 @@ CORS, no separate deployment (ADR-003, ADR-020).
   hides elements — roles are enforced server-side on every request. If all
   three groups are empty, the entire admin API stays disabled (503).
 
-- **UI's OIDC client**: `GSSH_UI_OIDC_CLIENT_ID` (default: `GSSH_OIDC_CLIENT_ID`).
-  Set it up in the IdP as a public client with a redirect URI pointing at the
-  UI origin.
+- **Server's OIDC client**: `GSSH_SERVER_OIDC_CLIENT_ID` +
+  `GSSH_SERVER_OIDC_CLIENT_SECRET` — a **confidential** client in the IdP
+  with redirect URI `<public URL>/v1/auth/callback`, separate from the CLIs'
+  public client (`GSSH_CLIENT_OIDC_CLIENT_ID`); reusing one client for both
+  is a startup error.
 
 ## Views
 

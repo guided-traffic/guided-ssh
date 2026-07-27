@@ -30,6 +30,13 @@ reliably streamed to external systems?
    (`angular-auth-oidc-client`); the ID token serves as the bearer token,
    consistent with `gssh-admin` and the sign endpoint.
 
+   > **Superseded** by the BFF rework and the server/client OIDC split: the
+   > SPA login described here was replaced by the server-side login
+   > (`/v1/auth/…`) with the server's own confidential client
+   > (`GSSH_SERVER_OIDC_CLIENT_ID`); `/v1/ui/config` now only serves the
+   > role-group names and the CLI setup values (the clients' public client,
+   > `GSSH_CLIENT_OIDC_CLIENT_ID`). See [docs/web-ui.md](../web-ui.md).
+
 3. **API client generated from `api/openapi.yaml` with `ng-openapi-gen`.**
    The spec is hand-maintained and the single source of truth for the REST
    API; the generator is pure Node tooling (no Java, unlike

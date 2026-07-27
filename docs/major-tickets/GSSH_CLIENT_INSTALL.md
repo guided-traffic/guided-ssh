@@ -1,5 +1,11 @@
 # Client Install via Frontend — Implementation Plan
 
+> **Superseded detail (server/client OIDC split):** `GSSH_UI_BASE_URL` and
+> the `GSSH_PUBLIC_URL` fallback chain described below were merged into a
+> single `GSSH_PUBLIC_URL` (chart: `config.publicURL`); the client ID served
+> to installs is `GSSH_CLIENT_OIDC_CLIENT_ID` (the CLIs' public client). The
+> historical text below is unchanged.
+
 > **As of 2026-07-26.** Initial plan, verified against the code on branch
 > `feat/new-frontend`. Written in the same style as
 > [ONE_CMD_INSTALL.md](ONE_CMD_INSTALL.md) (the one-command **host** install):

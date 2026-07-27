@@ -102,23 +102,39 @@ internalDatabase:
 # Runtime configuration (ends up as env in the Deployment; 1:1 mapping to the
 # server's GSSH_* variables).
 config:
+  # GSSH_PUBLIC_URL: external public base URL of the server, e.g.
+  # https://gssh.example.com — used for the UI login redirect URL, the
+  # install_command, the client install gate, and the pin self-dial. Empty ⇒
+  # the UI login derives the redirect from the request; host rollout and
+  # client install stay disabled (503).
+  publicURL: ""
   # User OIDC (IdP). Without an issuer, /v1/sign/user stays disabled.
+  # Server and clients use SEPARATE IdP clients: the server authenticates
+  # with a client secret (confidential), the clients without one (public).
   oidc:
-    # GSSH_OIDC_ISSUER
+    # GSSH_OIDC_ISSUER — issuer shared by both OIDC clients below.
     issuer: ""
-    # GSSH_OIDC_CLIENT_ID
-    clientID: ""
-    # GSSH_UI_OIDC_CLIENT_ID (leer = clientID)
-    uiClientID: ""
-    # Server-side UI login (BFF): secret with the UI's OIDC client secret.
-    # Set ⇒ the server performs the login itself (/v1/auth/…,
-    # session cookie, no CORS against the IdP); empty ⇒ UI login disabled.
-    uiExistingSecret: ""
-    # Key in the secret with the client secret (GSSH_UI_OIDC_CLIENT_SECRET).
-    uiExistingSecretKey: "client-secret"
-    # GSSH_UI_BASE_URL: external base URL of the UI for the OIDC redirect URL,
-    # e.g. https://gssh.example.com (empty = derived from the request).
-    uiBaseURL: ""
+    # Public OIDC client of the gssh/gssh-admin CLIs — no client secret
+    # (authorization code + PKCE, device flow). Also the audience the server
+    # expects on bearer tokens; advertised to CLI installs via
+    # /v1/ui/config and client.sh.
+    client:
+      # GSSH_CLIENT_OIDC_CLIENT_ID (required when issuer is set)
+      clientID: ""
+    # Confidential OIDC client of the server itself: server-side UI login
+    # (BFF: /v1/auth/…, session cookie, no CORS against the IdP). clientID
+    # and existingSecret must be set together and must name a DIFFERENT IdP
+    # client than oidc.client (startup error otherwise); both empty ⇒ UI
+    # login disabled.
+    server:
+      # GSSH_SERVER_OIDC_CLIENT_ID
+      clientID: ""
+      # Secret with the server's OIDC client secret.
+      existingSecret: ""
+      # Key in the secret with the client secret (GSSH_SERVER_OIDC_CLIENT_SECRET).
+      existingSecretKey: "client-secret"
+      # GSSH_SERVER_OIDC_SCOPES (empty = openid,profile,email,groups)
+      scopes: ""
   # GitLab CI issuer. Without an issuer, /v1/sign/ci stays disabled.
   ci:
     # GSSH_CI_ISSUER (GitLab base URL)
@@ -185,11 +201,10 @@ agent:
 hostRollout:
   # One-command host install (UI button "Add host"). When true, the
   # required envs are enforced (helm otherwise fails at render time).
+  # Requires config.publicURL (https) as the external public URL.
   enabled: false
   # External mTLS agent URL for enrolled agents (mandatory when enabled).
   agentPublicUrl: ""
-  # External public URL (install_command + pin dial); empty = config.oidc.uiBaseURL.
-  publicUrl: ""
   pin:
     # Pin source: dial (default) | file | static — see the table in the README.
     source: dial

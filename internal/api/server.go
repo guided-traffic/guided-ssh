@@ -80,7 +80,7 @@ type Deps struct {
 	// that enrolled hosts write into their config.yaml; empty ⇒ gate closed.
 	AgentPublicURL string
 	// PublicBaseURL is the external base URL of the public listener
-	// (GSSH_PUBLIC_URL, falling back to GSSH_UI_BASE_URL); empty ⇒ gate closed.
+	// (GSSH_PUBLIC_URL); empty ⇒ gate closed.
 	PublicBaseURL string
 }
 
@@ -105,7 +105,9 @@ type ClientSource interface {
 	Open(osName, arch string) (io.ReadCloser, bindist.Info, error)
 }
 
-// UIConfig is the web UI's public bootstrap configuration.
+// UIConfig is the web UI's public bootstrap configuration. OIDCIssuer and
+// OIDCClientID describe the clients' public OIDC client (CLI setup page,
+// client.sh) — never the server's confidential login client.
 type UIConfig struct {
 	OIDCIssuer    string `json:"oidc_issuer"`
 	OIDCClientID  string `json:"oidc_client_id"`

@@ -673,10 +673,19 @@ components:
 
     UiConfig:
       type: object
+      description: >-
+        Public bootstrap configuration. The OIDC fields describe the clients'
+        public OIDC client (consumed by the client-setup page and client.sh) —
+        never the server's confidential login client.
       required: [oidc_issuer, oidc_client_id, admin_group, auditor_group, readonly_group]
       properties:
         oidc_issuer: { type: string }
-        oidc_client_id: { type: string }
+        oidc_client_id:
+          type: string
+          description: >-
+            Public OIDC client of the gssh CLIs (no client secret,
+            GSSH_CLIENT_OIDC_CLIENT_ID); also the audience the server expects
+            on bearer tokens.
         admin_group: { type: string }
         auditor_group: { type: string }
         readonly_group: { type: string }

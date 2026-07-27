@@ -173,7 +173,7 @@ func newUIServerWithDeps(t *testing.T, mutate func(*api.Deps)) *uiTestEnv {
 		CA: certAuthority, Store: fs, Grants: fs, Admin: newFakeAdminStore(fs), UI: ui,
 		Verifier: verifier, Logger: logger,
 		AdminGroup: adminGroupName, AuditorGroup: auditorGroupName, ReadOnlyGroup: readonlyGroupName,
-		UIConfig: api.UIConfig{OIDCIssuer: "https://idp.example.com/realms/gssh", OIDCClientID: "gssh-ui"},
+		UIConfig: api.UIConfig{OIDCIssuer: "https://idp.example.com/realms/gssh", OIDCClientID: "gssh-cli"},
 	}
 	if mutate != nil {
 		mutate(&deps)
@@ -197,7 +197,7 @@ func TestUIConfigPublic(t *testing.T) {
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		t.Fatalf("parsing response: %v", err)
 	}
-	if cfg["oidc_issuer"] != "https://idp.example.com/realms/gssh" || cfg["oidc_client_id"] != "gssh-ui" {
+	if cfg["oidc_issuer"] != "https://idp.example.com/realms/gssh" || cfg["oidc_client_id"] != "gssh-cli" {
 		t.Errorf("oidc configuration wrong: %v", cfg)
 	}
 	if cfg["admin_group"] != adminGroupName || cfg["auditor_group"] != auditorGroupName || cfg["readonly_group"] != readonlyGroupName {

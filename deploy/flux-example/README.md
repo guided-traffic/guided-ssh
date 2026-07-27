@@ -181,14 +181,14 @@ kubectl -n guided-ssh create job --from=cronjob/guided-ssh-grants-sync sync-now
 `gssh-admin` authenticates non-interactively in the CronJob via the
 client-credentials flow (`GSSH_CLIENT_ID`/`GSSH_CLIENT_SECRET`). The issued
 ID token must be verifiable by the server like a user token: issuer =
-`GSSH_OIDC_ISSUER`, audience contains `GSSH_OIDC_CLIENT_ID`, the `groups`
-claim contains the admin group. Setup in Keycloak:
+`GSSH_OIDC_ISSUER`, audience contains `GSSH_CLIENT_OIDC_CLIENT_ID`, the
+`groups` claim contains the admin group. Setup in Keycloak:
 
 1. Create client `gssh-grants-sync`: confidential ("Client authentication"
    on), enable **Service accounts roles**, standard/direct flows off.
 2. Dedicated client scope mappers on the client:
-   - **Audience** mapper: add `GSSH_OIDC_CLIENT_ID` (e.g. `gssh-cli`) to the
-     token audience ("Add to ID token" on).
+   - **Audience** mapper: add `GSSH_CLIENT_OIDC_CLIENT_ID` (e.g. `gssh-cli`)
+     to the token audience ("Add to ID token" on).
    - **Group Membership** mapper: claim `groups` ("Full group path" off,
      "Add to ID token" on).
 3. Add the service account user `service-account-gssh-grants-sync` to the

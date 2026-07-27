@@ -1,5 +1,10 @@
 # One-Command Host Install — Implementation Plan
 
+> **Superseded detail (server/client OIDC split):** `GSSH_UI_BASE_URL` and
+> the `GSSH_PUBLIC_URL` fallback chain described below were merged into a
+> single `GSSH_PUBLIC_URL` (chart: `config.publicURL`; `hostRollout.publicUrl`
+> was removed). The historical text below is unchanged.
+
 > **As of 2026-07-25.** The review feedback from 2026-07-25 (K1–K17) has been
 > **fully incorporated** into this version — each point is resolved at the
 > location where it needs to be addressed. The former separate review

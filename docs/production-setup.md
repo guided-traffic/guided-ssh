@@ -119,10 +119,10 @@ in **both** modes (UI session key).
 
 ### OIDC and role groups
 
-- `GSSH_OIDC_ISSUER` / `GSSH_OIDC_CLIENT_ID`: humans authenticate with ID
-  tokens whose audience must match the client ID; an issuer without a client ID
-  is a startup error (fail-fast). An empty issuer disables the user sign
-  endpoint entirely (503).
+- `GSSH_OIDC_ISSUER` / `GSSH_CLIENT_OIDC_CLIENT_ID`: humans authenticate with
+  ID tokens whose audience must match the clients' public client ID; an issuer
+  without that client ID is a startup error (fail-fast). An empty issuer
+  disables the user sign endpoint entirely (503).
 - **CI is a strictly separate issuer** (`GSSH_CI_ISSUER`, GitLab). User and CI
   tokens are never interchangeable — separate verifiers, and if both point at
   the same issuer the server refuses to start with identical audiences
@@ -132,9 +132,12 @@ in **both** modes (UI session key).
   mapping is fail-closed — no admin group means no admin mutations, all three
   empty disables the admin API. Set all three to dedicated IdP groups and
   manage membership in the IdP, not ad hoc.
-- Give the **web UI its own OIDC client** (`GSSH_UI_OIDC_CLIENT_ID`, secret via
-  `config.oidc.uiExistingSecret`). The UI is a BFF: server-side code flow,
-  HttpOnly session cookie, tokens never reach the browser.
+- Give the **server its own confidential OIDC client** for the web-UI login
+  (`GSSH_SERVER_OIDC_CLIENT_ID`, secret via `config.oidc.server.existingSecret`,
+  redirect URI `<config.publicURL>/v1/auth/callback`). The UI is a BFF:
+  server-side code flow, HttpOnly session cookie, tokens never reach the
+  browser. Reusing the CLIs' public client (`GSSH_CLIENT_OIDC_CLIENT_ID`) is a
+  startup error — one IdP client cannot be public and confidential at once.
 - Enable **group sync** (`GSSH_KC_*`, Keycloak) so removing a user from a
   group offboards them within ~10 minutes even while their certificate is
   still valid (see [lifetimes and revocation](#certificate-lifetimes-and-revocation)).

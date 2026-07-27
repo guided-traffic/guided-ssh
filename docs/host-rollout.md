@@ -51,7 +51,7 @@ the pin). With Helm:
 helm upgrade guided-ssh guided-ssh/guided-ssh -n guided-ssh --reuse-values \
   --set hostRollout.enabled=true \
   --set hostRollout.agentPublicUrl=https://gssh-agent.example.com:8443 \
-  --set hostRollout.publicUrl=https://gssh.example.com
+  --set config.publicURL=https://gssh.example.com
 ```
 
 Pin sources (`dial`/`file`/`static`), the file-based variant for

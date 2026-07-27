@@ -25,9 +25,9 @@ const ROLLOUT_MISSING_LABELS: Record<string, string> = {
   binaries: 'Server build without agent binaries',
   pin: 'SPKI pin not determined (GSSH_PUBLIC_PIN / cert file / self-dial)',
   agent_public_url: 'GSSH_AGENT_PUBLIC_URL is missing',
-  public_url: 'GSSH_PUBLIC_URL or GSSH_UI_BASE_URL is missing',
+  public_url: 'GSSH_PUBLIC_URL is missing',
   agent_public_url_https: 'GSSH_AGENT_PUBLIC_URL is not an https URL',
-  public_url_https: 'GSSH_PUBLIC_URL or GSSH_UI_BASE_URL is not an https URL',
+  public_url_https: 'GSSH_PUBLIC_URL is not an https URL',
 };
 
 /**
