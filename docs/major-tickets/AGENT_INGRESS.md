@@ -77,8 +77,9 @@ Controller specifics (annotation-only, chart stays generic — D2):
 Known limitations (accepted, documented in README):
 
 - **Source IP:** with plain passthrough the server sees the ingress
-  controller's pod IP, not the agent's. Fixed by the optional PROXY protocol
-  support (D5/WP5, default **off**): the controller prepends a PROXY header,
+  controller's pod IP, not the agent's. Fixed by the PROXY protocol support
+  (D5/WP5 — part of this ticket's scope; runtime opt-in, default **off**):
+  the controller prepends a PROXY header,
   the gssh agent listener parses it behind a trust policy. Without WP5 (or
   with the feature off), the controller **must not** send PROXY protocol —
   the listener would read the header as garbage bytes of the TLS handshake.
@@ -99,6 +100,31 @@ Security notes (real ones, no boilerplate):
   and no re-encryption hop exists to misconfigure.
 - SNI is unencrypted routing metadata; it leaks only the hostname — same
   exposure as the DNS record itself.
+
+---
+
+## Supported exposure scenarios
+
+The ingress is **one** way to expose the agent endpoint, not *the* way. The
+chart supports all of these as coequal options; the requirement shared by
+all of them is raw TCP to the server — nothing may terminate the TLS
+session:
+
+| Scenario | Chart config | Real agent source IP | `agentPublicUrl` |
+|---|---|---|---|
+| **Dedicated IP** — `LoadBalancer` Service (cloud LB, MetalLB, …) | `agent.service.type: LoadBalancer` (+ `annotations` for LB class/IP, `externalTrafficPolicy: Local` — WP6) | native via `externalTrafficPolicy: Local`, **no** PROXY protocol needed; or via PROXY protocol if the LB adds it (e.g. AWS NLB) — trusted entry = LB CIDR (WP5) | explicit, `https://<host>:8443` (D3 edge case) |
+| **NodePort** behind an external LB/appliance | `agent.service.type: NodePort` | via PROXY protocol from the appliance (WP5, trusted = appliance IPs) | explicit |
+| **SNI/TLS-passthrough ingress** (this ticket's driver) | `agent.ingress.*` (WP1) | via PROXY protocol from the controller (WP5, trusted = headless service) | derived from `agent.ingress.host` (D3) |
+| **In-cluster only** (agents inside the cluster) | `agent.service` ClusterIP (default today) | native | n/a (no hostRollout) |
+
+Out of scope, documented as bring-your-own manifest: Traefik
+`IngressRouteTCP` (D2) and Gateway API `TLSRoute` (passthrough mode) — the
+latter is a natural follow-up once the target environments run Gateway API,
+and needs no server change (same raw-TCP contract).
+
+WP5 (PROXY protocol) is deliberately transport-neutral: the trust list
+takes CIDRs/IPs (LB, appliance) *and* DNS names (controller pods) — it is
+not tied to the ingress path.
 
 ---
 
@@ -148,16 +174,23 @@ fail-fast philosophy in `guided-ssh.validateValues`):
   `agent.service.enabled=true` (the Ingress needs the backend Service).
 - `agent.ingress.enabled=true` requires `agent.ingress.host` (SNI routing
   without a host is meaningless).
+- `agent.ingress.host` must be a bare DNS name: no scheme, no port, no path,
+  no wildcard. Anything else would silently produce a broken SAN (D3.1) and
+  a broken derived `GSSH_AGENT_PUBLIC_URL` (D3.2) — fail at render time
+  instead.
 
 ### D3 — `agent.ingress.host` becomes the single source of truth (derivations)
 
 Two derivations, both **overridable by the existing explicit values**:
 
 1. **`GSSH_AGENT_TLS_NAMES`** (`guided-ssh.agentTLSNames`): when
-   `agent.tlsNames` is empty and `agent.ingress.host` is set, the default
-   becomes
+   `agent.tlsNames` is empty and `agent.ingress.enabled` with a host, the
+   default becomes
    `<fullname>-agent.<ns>.svc,<fullname>-agent.<ns>.svc.cluster.local,<agent.ingress.host>`.
-   Explicit `agent.tlsNames` wins unchanged.
+   Explicit `agent.tlsNames` wins unchanged. Gated on `enabled` exactly like
+   D3.2 — a disabled ingress must not leak its host into the SANs either
+   (an extra SAN would be harmless, but the asymmetry between the two
+   derivations would be confusing).
 2. **`GSSH_AGENT_PUBLIC_URL`** (`guided-ssh.hostRolloutEnv`): when
    `hostRollout.agentPublicUrl` is empty and `agent.ingress.enabled` with a
    host, the default becomes `https://<agent.ingress.host>` (no port —
@@ -184,7 +217,7 @@ longer from an LB directly. `networkPolicy.agentFrom` already models this
 (`namespaceSelector` of the ingress controller namespace). No template
 change.
 
-### D5 — Optional PROXY protocol on the agent listener, behind a trust policy
+### D5 — PROXY protocol on the agent listener, behind a trust policy
 
 **Why, given mTLS.** mTLS fully covers *access*: without a valid client
 certificate every connection dies in the handshake, PROXY header or not.
@@ -222,8 +255,10 @@ DNS form exists so operators do not have to trust the whole pod CIDR: a
 to the controller pod IPs — the IPs the gssh server actually sees as
 sources. (A normal Service name resolves to the ClusterIP, which is never a
 source address — headless is required. If the controller chart ships none, a
-five-line manifest next to it does.) No Kubernetes API access needed; the
-server keeps `automountServiceAccountToken: false`.
+five-line manifest next to it does — with `publishNotReadyAddresses: true`,
+so a terminating-but-still-forwarding controller pod does not drop out of
+the trusted set mid-rollout.) No Kubernetes API access needed; the server
+keeps `automountServiceAccountToken: false`.
 
 Resolution semantics:
 
@@ -238,6 +273,23 @@ Resolution semantics:
   agent path).
 - **Trust anchor** is the cluster DNS: whoever controls CoreDNS can steer
   the trusted set — and also already owns the cluster. Accepted, documented.
+
+**Transitive trust chain.** In the target environment the controller itself
+sits behind an external LoadBalancer and learns the real client IP via
+accept-proxy from that LB; its send-proxy header carries the learned address
+onward, so gssh audits the **agent's** IP, not the LB's. Flip side: the
+audit source IP is only as trustworthy as the whole chain
+gssh → controller → LB — whoever can inject PROXY protocol at the LB entry
+writes the audit log. Acceptable for a provider-managed LB; documented in
+README next to the trust-policy parameters.
+
+**Controller health checks.** The fail-closed cell (trusted source, header
+absent → rejected) also applies to the controller's own TCP health checks
+against the backend. The controller must send the PROXY header on checks
+too (HAProxy semantics: `check-send-proxy`; haproxy-ingress is expected to
+set this together with the backend `proxy-protocol` key) — otherwise checks
+fail once WP5 is enforced and the backend flaps down: a full agent-path
+outage. Explicitly verified in rollout step 6; see open questions.
 
 **Rollout ordering constraint:** enable the server flag *first*, then the
 controller's send-proxy annotation. The reverse order breaks the endpoint
@@ -267,7 +319,8 @@ reverse for disabling. Documented in README and the rollout section.
    (`host` / `/` / `Prefix` / backend service `{{ fullname }}-agent`, port
    name `agent`), no `tls:` block (D2).
 3. Render guards in `guided-ssh.validateValues` (or inline `fail` in the
-   template): missing `host`, or `agent.ingress.enabled` while
+   template): missing `host`; malformed `host` (scheme, port, path, or
+   wildcard — must be a bare DNS name, D2); or `agent.ingress.enabled` while
    `agent.enabled`/`agent.service.enabled` is false → render error with a
    one-line explanation.
 
@@ -350,7 +403,7 @@ the matching case red.
 **Done when:** every documented value verified against the rendered chart;
 README cross-links this ticket.
 
-### WP5 — Optional PROXY protocol support (server + chart)
+### WP5 — PROXY protocol support (server + chart)
 
 **Files:**
 [cmd/gssh-server/main.go](../../cmd/gssh-server/main.go) (`serve` /
@@ -392,12 +445,20 @@ follows existing package layout),
    → `GSSH_AGENT_PROXY_PROTOCOL` / `GSSH_AGENT_PROXY_TRUSTED` in
    [deployment.yaml](../../deploy/helm/guided-ssh/templates/deployment.yaml);
    render guard: `agent.proxyProtocol.enabled` requires `agent.enabled`.
+   `NOTES.txt`: when `agent.proxyProtocol.enabled=true` with empty
+   `trusted`, print a warning that the PROXY header is now required from
+   **all** connections — direct (non-ingress) agents break.
 5. Golden render cases: env set/unset, trusted list joined correctly, guard.
 6. README: parameter docs incl. the D5 threat model in two sentences
    (what mTLS covers, what the policy adds), headless-service example
-   manifest, send-proxy annotations per controller (haproxytech:
-   `haproxy.org/send-proxy-protocol: "proxy-v2"`; jcmoraisjr: verify first —
-   see Open questions), rollout ordering warning.
+   manifest (`publishNotReadyAddresses: true` — D5), the transitive trust
+   chain note (LB → controller → gssh, D5), the health-check caveat
+   (checks must send the header too, D5), send-proxy annotations per
+   controller (jcmoraisjr:
+   `haproxy-ingress.github.io/proxy-protocol: "v2"` — backend scope,
+   values `v1|v2|v2-ssl|v2-ssl-cn`; haproxytech:
+   `haproxy.org/send-proxy-protocol: "proxy-v2"`), rollout ordering
+   warning.
 
 **Do not:**
 
@@ -417,6 +478,39 @@ an agent heartbeat logs the **agent's real IP**; a direct in-cluster
 connection sending a forged PROXY header is rejected; a direct connection
 without header still works.
 
+### WP6 — LoadBalancer scenario parity: `externalTrafficPolicy`
+
+**Files:**
+[templates/service-agent.yaml](../../deploy/helm/guided-ssh/templates/service-agent.yaml),
+[values.yaml](../../deploy/helm/guided-ssh/values.yaml),
+[hack/helm-render-test.sh](../../hack/helm-render-test.sh),
+[README.md](../../README.md)
+
+**Steps:**
+
+1. New value `agent.service.externalTrafficPolicy: ""` — rendered into the
+   Service only when set. With `Local`, kube-proxy skips the SNAT hop and
+   the server sees the agent's real source IP **without** PROXY protocol —
+   the right default choice for the dedicated-IP scenario.
+2. Values comment + README: only meaningful for `LoadBalancer`/`NodePort`;
+   with `Local`, only nodes running a gssh pod answer (LB health checks
+   handle this — standard Kubernetes behavior, one sentence in README).
+3. Golden render case: set ⇒ present, unset ⇒ absent.
+4. README scenario matrix (from "Supported exposure scenarios" above) into
+   the reference section, so an admin picks the exposure per environment
+   instead of assuming the ingress is mandatory.
+
+**Do not:**
+
+- Do not default to `Local` — it silently changes LB health-check semantics
+  for existing LoadBalancer users; opt-in only.
+- Do not add a `loadBalancerIP` value — deprecated field; per-cloud LB IP
+  pinning goes through `agent.service.annotations` (already exists).
+
+**Done when:** render cases green; README documents the matrix and the
+`Local` trade-off; existing LoadBalancer deployments render unchanged
+without the new value.
+
 ---
 
 ## Rollout / verification (per environment, manual)
@@ -433,20 +527,37 @@ without header still works.
    heartbeats.
 5. Existing agents (old URL, e.g. LoadBalancer) keep working until their
    config is migrated — both paths hit the same server port.
-6. Optional, PROXY protocol (WP5): first roll out the server with
+6. PROXY protocol (WP5) — when enabling it: first roll out the server with
    `agent.proxyProtocol.enabled=true` + `trusted` (headless service of the
    controller pods), **then** add the controller's send-proxy annotation.
-   Verify: agent heartbeat log shows the agent's real IP; a direct
-   connection with a forged PROXY header is rejected.
+   Verify: agent heartbeat log shows the agent's **external** IP (not the
+   controller's, not the LB's — the two-hop PROXY chain propagates it, D5);
+   a direct connection with a forged PROXY header is rejected; the backend
+   stays UP in the controller's stats over several check intervals (health
+   checks send the header too — see open questions).
 
 ## Open questions
 
-- Which HAProxy ingress flavor runs in the target cluster
-  (jcmoraisjr vs. haproxytech)? Determines the annotation used in the
-  environment values — irrelevant to the chart itself (D2). For WP5 the
-  jcmoraisjr **send-proxy** (controller → backend) annotation must be
-  verified against its docs before it lands in the README — only the
-  haproxytech one (`haproxy.org/send-proxy-protocol`) is confirmed.
-- Should the e2e kind suite (`make e2e`) gain a passthrough scenario? Needs
-  an ingress controller in kind — deferred; golden render tests (WP3) cover
-  the chart logic.
+- ~~Which HAProxy ingress flavor runs in the target cluster?~~ **Resolved:**
+  jcmoraisjr haproxy-ingress (haproxy-ingress.github.io). Send-proxy key
+  confirmed against its docs: `haproxy-ingress.github.io/proxy-protocol`
+  (backend scope, `v1|v2|v2-ssl|v2-ssl-cn`). Residual uncertainty, both
+  covered by rollout step 6 and both with the same fallback (a `tcp-service`
+  definition with `tcp-service-proxy-protocol: "true"`):
+  (a) the docs do not explicitly state that this backend-scoped key also
+  applies when the backend is in `ssl-passthrough` TCP mode (other
+  backend-scoped keys do) — real-IP in the heartbeat log proves it end to
+  end; (b) whether the controller sends the PROXY header on its own backend
+  health checks (`check-send-proxy`) once the key is set — if not, the
+  fail-closed policy rejects the checks and the backend flaps down (D5,
+  "Controller health checks"); backend staying UP in step 6 proves it.
+- Target-cluster deployment facts (confirmed 2026-07-27): controller does
+  **not** run in hostNetwork (trusted set = real pod IPs — no overlap with
+  node-IP-SNAT'ed traffic), and itself receives the external client IP via
+  PROXY protocol from its LoadBalancer — the two-hop chain of D5's
+  "Transitive trust chain" note.
+- ~~Should the e2e kind suite (`make e2e`) gain a passthrough scenario?~~
+  **Resolved: no.** The existing e2e path without passthrough suffices — the
+  server behaves identically either way (raw TCP in both cases); the
+  passthrough hop is controller config, covered by the golden render tests
+  (WP3) plus the per-environment rollout verification (openssl step 3).
