@@ -337,16 +337,38 @@ rules. Both follow D3's rationale; the flux-example files are unaffected.
   `config.extraEnv` (the documented mixed-mode escape hatch) makes it report
   a false failure — noted in the template's comment.
 
-### Phase 5 — docs & examples
+### Phase 5 — docs & examples ✅
 
-- [ ] Repo [README.md](../../README.md): extend the GitOps pointer at the end
-      of "Production deployment" with a worked example — see sketch below.
-- [ ] [docs/grants.md](../../docs/grants.md): extend "Declarative management
-      (GitOps)" with the ConfigMap-mount variant and the ownership matrix
-      (D1).
-- [ ] [deploy/flux-example](../../deploy/flux-example/): short note that the
-      ConfigMap mount is the successor of the sync CronJob for chart-based
-      installs (full rewrite of the example: see Out of scope).
+- [x] Repo [README.md](../../README.md): "Rules from Git" paragraph at the end
+      of "Production deployment" — both ConfigMaps, the `config.rules` values,
+      and the three sentences on empty list / propagation / disabled UI
+      editing (sketch below).
+- [x] [docs/grants.md](../../docs/grants.md): "Declarative management
+      (GitOps)" now carries the strict-parsing note, the ownership matrix
+      ("Who is allowed to write", D1) and the reconciler section ("Rules file
+      owned by the server", D4/D5).
+- [x] [deploy/flux-example](../../deploy/flux-example/): note that the chart
+      defaults leave the `…/apply` CronJob path working while in-app editing
+      goes away, plus a "Successor for chart-based installs" subsection (full
+      rewrite of the example: see Out of scope).
+
+**Decisions made while implementing:**
+
+- The ownership matrix in `docs/grants.md` merges D1's "CRUD API" and "UI
+  editing" columns: the UI flag is computed from exactly the same condition,
+  so a separate column would only repeat it. The chart README keeps the
+  four-column form because it is written against values, not env vars.
+- `docs/grants.md` also documents the Phase-1 strictness change of
+  `gssh-admin apply` (unknown keys, missing `grants:` key) — it is the page
+  that defines the file format, and the change is user-visible.
+- The flux-example note names the missing IdP service account as the main
+  win of the ConfigMap variant, and points at the existing
+  `configMapGenerator` with `disableNameSuffixHash: true` as the migration
+  path — a hashed name would break the `existingConfigMap` reference on every
+  rules change.
+- `docs/gitlab-ci.md` stays unchanged: its `ci_grants:` section describes the
+  combined-file semantics of `gssh-admin apply`, which are unaffected;
+  `docs/grants.md` links into it for that detail.
 
 ### README example (target content, Phase 5)
 
