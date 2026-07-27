@@ -102,6 +102,14 @@ internalDatabase:
 # Runtime configuration (ends up as env in the Deployment; 1:1 mapping to the
 # server's GSSH_* variables).
 config:
+  # GSSH_LOG_LEVEL: minimum level of the structured JSON log —
+  # debug | info | warn | error; empty ⇒ info. debug additionally shows
+  # connections that died before the TLS handshake, which behind an ingress
+  # that TCP-health-checks the agent listener is one line per check per proxy
+  # replica; use it only while diagnosing an agent's mTLS connection. The
+  # handshake failures themselves stay countable at any level via
+  # gssh_tls_handshake_errors_total{listener,class}.
+  logLevel: ""
   # GSSH_PUBLIC_URL: external public base URL of the server, e.g.
   # https://gssh.example.com — used for the UI login redirect URL, the
   # install_command, the client install gate, and the pin self-dial. Empty ⇒

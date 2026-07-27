@@ -52,6 +52,7 @@ All values from `cmd/gssh-server/main.go`; mapped 1:1 in the Helm chart via
 | `GSSH_CA_HOST_KEY_FILE` | empty | host CA: OpenSSH private key PEM; as above |
 | `GSSH_CA_MTLS_KEY_FILE` | empty | agent mTLS CA: PKCS#8 PEM (Ed25519); as above |
 | `GSSH_CA_MTLS_CERT_FILE` | empty | agent mTLS CA: X.509 CA certificate (PEM, `CA:TRUE`, `keyCertSign`); as above |
+| `GSSH_LOG_LEVEL` | `info` | minimum level of the structured JSON log: `debug`, `info`, `warn`, `error`. `debug` also surfaces connections that died before the TLS handshake (health check noise on the agent listener); an unknown value is a startup error |
 | `GSSH_OIDC_ISSUER` | empty | issuer URL of the IdP (shared by both OIDC clients); empty ⇒ `/v1/sign/user` disabled (503) |
 | `GSSH_CLIENT_OIDC_CLIENT_ID` | empty | public OIDC client of the gssh/gssh-admin CLIs (no secret); expected audience of bearer ID tokens; missing while issuer is set ⇒ startup error (fail-fast) |
 | `GSSH_CI_ISSUER` | empty | GitLab base URL (OIDC issuer); empty ⇒ `/v1/sign/ci` disabled (503) |
@@ -137,6 +138,7 @@ the Prometheus Operator):
 | `gssh_certificates_issued_total` | `requester` (user/ci/host), `cert_type` (user/host) | successfully issued SSH certificates |
 | `gssh_http_responses_total` | `code` | HTTP responses by status code (API and agent endpoints) |
 | `gssh_agent_heartbeats_total` | — | agent contacts (successful mTLS requests, stamp `last_seen_at`) |
+| `gssh_tls_handshake_errors_total` | `listener` (api/agent/metrics), `class` (transport/tls) | connections that never completed the TLS handshake. `transport` = the peer reset or closed the connection without speaking TLS (TCP health checks of the ingress land here and are logged at debug only); `tls` = a real handshake failure, e.g. a missing or invalid client certificate on the agent listener |
 
 `GET /healthz` is the liveness/readiness probe (chart default).
 
@@ -156,9 +158,30 @@ Useful alerts:
 - **No issuances**: `rate(gssh_certificates_issued_total[1h]) == 0`
   during normal working hours ⇒ check the sign path.
 
+- **mTLS rejections**:
+  `rate(gssh_tls_handshake_errors_total{listener="agent",class="tls"}[15m])`
+  > 0 ⇒ agents with an expired, revoked, or wrong client certificate — or
+  someone probing the agent API. The `class="transport"` series is health
+  check noise and is expected to be constantly non-zero.
+
 In addition: structured JSON logs on stdout (`kubectl logs`), audit events
 to the SIEM via `GSSH_AUDIT_STREAM=true`/`GSSH_AUDIT_WEBHOOK_URL`
 ([web-ui.md](web-ui.md)).
+
+### Log level and handshake noise
+
+`net/http` reports every connection that dies before the TLS handshake. On
+the agent listener that is one line per health check per ingress replica,
+which drowns out everything else. The server therefore classifies these
+lines instead of printing them raw: pure transport aborts (`connection reset
+by peer`, `EOF`, `broken pipe`, `i/o timeout`) go to **debug**, handshake
+failures with an actual TLS reason stay at **warn**. Both increment
+`gssh_tls_handshake_errors_total`, so the silenced class stays measurable.
+
+Set `GSSH_LOG_LEVEL=debug` (chart: `config.logLevel`) to see the suppressed
+lines while diagnosing an agent connection; unknown values are a startup
+error rather than a silent fallback. Valid: `debug`, `info` (default),
+`warn`, `error`.
 
 ## CA key rotation
 
