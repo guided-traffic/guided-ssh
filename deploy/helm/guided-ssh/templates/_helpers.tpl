@@ -52,12 +52,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}
 
-{{/* SANs of the agent mTLS certificate (default: cluster-internal service name) */}}
+{{/* SANs of the agent mTLS certificate (default: cluster-internal service
+names). An enabled agent.ingress adds its public host: agents connect through
+it, so the certificate has to carry that name — otherwise the passthrough path
+fails verification. Explicit agent.tlsNames wins unchanged. */}}
 {{- define "guided-ssh.agentTLSNames" -}}
 {{- if .Values.agent.tlsNames }}
 {{- .Values.agent.tlsNames }}
 {{- else }}
-{{- printf "%s-agent.%s.svc,%s-agent.%s.svc.cluster.local" (include "guided-ssh.fullname" .) .Release.Namespace (include "guided-ssh.fullname" .) .Release.Namespace }}
+{{- $fullname := include "guided-ssh.fullname" . }}
+{{- $names := list (printf "%s-agent.%s.svc" $fullname .Release.Namespace) (printf "%s-agent.%s.svc.cluster.local" $fullname .Release.Namespace) }}
+{{- with .Values.agent.ingress }}
+{{- if and .enabled .host }}
+{{- $names = append $names .host }}
+{{- end }}
+{{- end }}
+{{- join "," $names }}
 {{- end }}
 {{- end }}
 
@@ -216,8 +226,21 @@ here it already fails at render time instead of only out on the fleet. */}}
 {{- if not (hasPrefix "https://" .Values.config.publicURL) -}}
 {{- fail (printf "hostRollout needs an https public URL — config.publicURL is %q" .Values.config.publicURL) -}}
 {{- end -}}
+{{/* Only agent.ingress.host may be derived from: it is an operator-declared
+public name and its Ingress is exactly the path agents take (entry = the
+controller's 443, hence no port). Internal service names stay off limits — they
+would be rolled out to the fleet and be silently wrong. A non-443 exposure
+(e.g. LoadBalancer :8443) still needs the explicit value. */}}
+{{- $agentURL := $rollout.agentPublicUrl -}}
+{{- if not $agentURL -}}
+{{- with .Values.agent.ingress -}}
+{{- if and .enabled .host -}}
+{{- $agentURL = printf "https://%s" .host -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 - name: GSSH_AGENT_PUBLIC_URL
-  value: {{ required "hostRollout.enabled=true requires hostRollout.agentPublicUrl (external mTLS agent URL of the agents, e.g. https://gssh-agent.example.com:8443 — deliberately never derived)" $rollout.agentPublicUrl | quote }}
+  value: {{ required "hostRollout.enabled=true requires hostRollout.agentPublicUrl (external mTLS agent URL of the agents, e.g. https://gssh-agent.example.com:8443) — or enable agent.ingress with a host, then https://<agent.ingress.host> is derived" $agentURL | quote }}
 {{- if eq $source "static" }}
 - name: GSSH_PUBLIC_PIN
   value: {{ required "hostRollout.pin.source=static requires hostRollout.pin.static (base64 SPKI pin, openssl snippet in the README)" $rollout.pin.static | quote }}

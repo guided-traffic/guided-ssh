@@ -213,8 +213,11 @@ agent:
   enabled: true
   port: 8443
   # GSSH_AGENT_TLS_NAMES: SANs of the mTLS server certificate. Empty ⇒ default
-  # "<fullname>-agent.<namespace>.svc" + external access needs the
-  # public DNS name, e.g. "gssh-agent.example.com".
+  # "<fullname>-agent.<namespace>.svc" (+ .cluster.local); with
+  # agent.ingress.enabled its host is appended automatically. Only for other
+  # external access paths (LoadBalancer, NodePort) list the public DNS name
+  # here, e.g. "gssh-agent.example.com" — an explicit value replaces the
+  # whole default list.
   tlsNames: ""
   # Separate service for the agent API; for agents outside the cluster,
   # set type to LoadBalancer — or expose it through agent.ingress below
@@ -248,7 +251,10 @@ hostRollout:
   # required envs are enforced (helm otherwise fails at render time).
   # Requires config.publicURL (https) as the external public URL.
   enabled: false
-  # External mTLS agent URL for enrolled agents (mandatory when enabled).
+  # External mTLS agent URL for enrolled agents (https). Mandatory when
+  # enabled — except with agent.ingress.enabled: then it defaults to
+  # https://<agent.ingress.host> (passthrough entry is the controller's 443).
+  # Set it explicitly for any other port, e.g. a LoadBalancer on :8443.
   agentPublicUrl: ""
   pin:
     # Pin source: dial (default) | file | static — see the table in the README.
