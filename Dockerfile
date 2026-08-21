@@ -20,7 +20,7 @@ RUN npx ng build
 # via GOOS/GOARCH; the stage is platform-invariant, so BuildKit deduplicates
 # it. Every server variant embeds the full agent set (the amd64 server also
 # contains arm64).
-FROM --platform=$BUILDPLATFORM golang:1.26 AS agentbuild
+FROM --platform=$BUILDPLATFORM golang:1.27 AS agentbuild
 WORKDIR /src
 
 COPY go.* ./
@@ -54,7 +54,7 @@ RUN for platform in linux/amd64 linux/arm64 darwin/arm64; do \
     done
 
 # Build stage
-FROM golang:1.26 AS build
+FROM golang:1.27 AS build
 WORKDIR /src
 
 # Dependencies first, for layer caching (go.sum appears with the first external dependency)
