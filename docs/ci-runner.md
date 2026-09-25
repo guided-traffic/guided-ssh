@@ -33,7 +33,7 @@ no fixed Go installation needed on the runner.
 | Secret | Purpose |
 |---|---|
 | `DOCKERHUB_PAT` | Docker Hub access token for pushing to `docker.io/guidedtraffic` (scope read/write, not an account password) |
-| `BOT_PAT` | GitHub PAT for `semantic-release` (tag + release + badge commit) and Renovate (opening PRs); needed so that generated releases/PRs trigger workflows — events created with `GITHUB_TOKEN` do not trigger workflows |
+| `APP_CLIENT_ID`, `APP_PRIVATE_KEY` | Client ID and private key of the org GitHub App `guided-traffic-automation`; the `semantic-release` job (tag + release + badge commit) and the Renovate job (opening PRs) each mint their own installation token with `actions/create-github-app-token`, scoped to this repository, valid for 1 h and revoked at the end of the job; needed so that generated releases/PRs trigger workflows — events created with `GITHUB_TOKEN` do not trigger workflows |
 
 ## Security
 

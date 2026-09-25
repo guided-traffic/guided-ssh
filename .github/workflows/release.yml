@@ -581,11 +581,20 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # GitHub App installation token (guided-traffic-automation), scoped to this
+      # repository; expires after 1 h and is revoked at the end of the job.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write # tag, release, @semantic-release/git commit
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
       - name: Download coverage badge
         uses: actions/download-artifact@v8
         with:
@@ -600,9 +609,9 @@ jobs:
         run: npm install
       - name: Verify the integrity of provenance attestations and registry signatures for installed dependencies
         run: npm audit signatures
-      # BOT_PAT instead of GITHUB_TOKEN: only this way does the created
+      # App token instead of GITHUB_TOKEN: only this way does the created
       # GitHub release trigger the build workflow (build.yml).
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.BOT_PAT }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: npx semantic-release
