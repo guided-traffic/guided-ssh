@@ -245,12 +245,23 @@
       "allowedVersions": "<6.1"
     },
     {
-      "description": "Angular framework, CLI/build tooling and Material are released in lockstep and peer-depend on each other: update them in one PR. Separate PRs produced half-upgrades (@angular/core 22.2 next to @angular/build 22.1), and only @angular/build 22.2 accepts vitest 5.",
+      "description": "Angular framework, CLI/build tooling and Material are released in lockstep and peer-depend on each other: a major update of any of them is one grouped PR. Separate PRs produced half-upgrades (@angular/core 22.2 next to @angular/build 22.1).",
       "matchPackageNames": [
         "@angular/**"
       ],
       "groupName": "angular",
       "groupSlug": "angular"
+    },
+    {
+      "description": "Angular minor and patch updates arrive through lock file maintenance, not as their own PRs. npm cannot move the Angular peer set inside an existing lock file: exact peer pins (@angular/compiler-cli -> @angular/compiler, the optional @angular/localize -> @angular/compiler-cli) make the incremental lock file update fail with ERESOLVE, so the Angular CLI update never got a PR. A freshly generated lock file resolves cleanly, and the ^22 ranges in package.json already allow every minor and patch.",
+      "matchPackageNames": [
+        "@angular/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "enabled": false
     },
     {
       "description": "conventional-changelog-conventionalcommits v10 is incompatible with @semantic-release/release-notes-generator v14: releases get a heading but no commit sections (empty release notes). Cap at v9 until the semantic-release plugins support the v10 preset API.",
@@ -280,7 +291,7 @@
       "semanticCommitType": "chore"
     },
     {
-      "description": "Lock file maintenance: refresh transitive npm dependencies weekly and automerge after CI passes. A stale transitive version broke the Angular 22.2 update: @angular/compiler-cli calls an API of @jridgewell/sourcemap-codec 1.6 but declares ^1.4.14, so the lock file kept 1.5.5.",
+      "description": "Lock file maintenance: regenerate the npm lock files weekly and automerge after CI passes. This carries the Angular minor and patch updates (see above) and keeps transitive versions current: @angular/compiler-cli 22.2 calls an API of @jridgewell/sourcemap-codec 1.6 but declares ^1.4.14, and an incrementally updated lock file kept 1.5.5.",
       "matchUpdateTypes": [
         "lockFileMaintenance"
       ],
