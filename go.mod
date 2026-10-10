@@ -2,6 +2,8 @@ module github.com/guided-traffic/guided-ssh
 
 go 1.26
 
+toolchain go1.27.2
+
 require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/go-jose/go-jose/v4 v4.1.4

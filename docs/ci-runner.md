@@ -36,8 +36,12 @@ Three consequences that the workflows and the rest of this document rely on:
 | ansible | Ansible provisioning path of the E2E suite (job `e2e-tests`); the workflow installs it via `sudo apt-get`; if missing, the Go SSH fallback covers the same certificate path | Phase 13 |
 | Node.js LTS | Angular build (installed via `actions/setup-node`, network access suffices) | Phase 8 |
 
-Go itself is installed and cached by `actions/setup-go` based on `go.mod` —
-no fixed Go installation needed in the runner image.
+Go itself is installed and cached by `actions/setup-go` from the `toolchain`
+directive in `go.mod` — an exact version that Renovate bumps in its "Go version"
+group — so no fixed Go installation is needed in the runner image. The `go`
+directive is only the minimum language version: without the `toolchain` line,
+setup-go installs exactly that minimum (e.g. 1.26.0), and `govulncheck` then
+reports every standard-library fix released since.
 
 ## Resources (guideline values)
 

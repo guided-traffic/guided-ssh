@@ -24,9 +24,20 @@
   ],
   "packageRules": [
     {
-      "description": "Go version: group all Go version updates together to keep them in sync (Dockerfile, go.mod)",
+      "description": "Go version: group all Go version updates together to keep them in sync. The go.mod toolchain directive (gomod manager, datasource golang-version) is what CI installs via setup-go, so a Go security release reaches CI through this group; the go directive is a minimum and is not bumped.",
       "matchDatasources": [
         "golang-version"
+      ],
+      "groupName": "Go version",
+      "groupSlug": "go-version"
+    },
+    {
+      "description": "Go version: the golang builder image in the Dockerfile moves together with the go.mod toolchain, so the released binaries are built with the minor version CI tests",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "golang"
       ],
       "groupName": "Go version",
       "groupSlug": "go-version"
@@ -263,40 +274,15 @@
   ],
   "customManagers": [
     {
-      "description": "Update tool versions pinned in GitHub workflows via renovate comments",
+      "description": "Update tool versions pinned in GitHub workflows via renovate comments: a `version:` action input (golangci-lint) or a shell variable such as KIND_VERSION on the line below the comment",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/.*\\.ya?ml$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\n\\s*version:\\s*(?<currentValue>v[\\d.]+)"
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\n\\s*version:\\s*(?<currentValue>v[\\d.]+)",
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\n\\s*[A-Z_]+=(?<currentValue>v[\\d.]+)"
       ],
-      "versioningTemplate": "semver"
-    },
-    {
-      "description": "Update Go version in Dockerfile",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^Dockerfile$/"
-      ],
-      "matchStrings": [
-        "FROM\\s+golang:(?<currentValue>[\\d.]+)\\s"
-      ],
-      "depNameTemplate": "golang",
-      "datasourceTemplate": "golang-version",
-      "versioningTemplate": "semver"
-    },
-    {
-      "description": "Update Go version in go.mod",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^go\\.mod$/"
-      ],
-      "matchStrings": [
-        "\\ngo\\s+(?<currentValue>[\\d.]+)\\n"
-      ],
-      "depNameTemplate": "golang",
-      "datasourceTemplate": "golang-version",
       "versioningTemplate": "semver"
     }
   ],
