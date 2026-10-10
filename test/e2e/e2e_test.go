@@ -77,9 +77,10 @@ func (e *env) testInternalDatabase(t *testing.T) {
 	if err := os.WriteFile(values, []byte(render(helmValuesInternal, map[string]string{"RELEASE": release})), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := run("", "", "helm", "--kube-context", e.context(),
+	args := append([]string{"--kube-context", e.context(),
 		"upgrade", "--install", release, chart,
-		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m")
+		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m"}, e.helmPullSecretArgs()...)
+	out, err := run("", "", "helm", args...)
 	if err != nil {
 		t.Fatalf("helm install (internal database): %v\n%s", err, out)
 	}

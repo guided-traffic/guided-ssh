@@ -189,6 +189,13 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
+      # Docker Hub rate-limits anonymous pulls, and testcontainers pulls Postgres,
+      # sshd, Ryuk and the Alpine base images on every run (fresh DinD per job).
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: guidedtraffic
+          password: ${{ secrets.DOCKERHUB_PAT }}
       - name: Run integration tests with coverage
         run: make test-integration-coverage
       - name: Upload integration coverage artifact
@@ -213,6 +220,15 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential ansible
+      # Docker Hub rate-limits anonymous pulls. Covers the kind node image and
+      # the image builds here; the suite hands the same credentials to the
+      # cluster as a pull secret (test/e2e/pullsecret.go) for in-cluster pulls.
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: guidedtraffic
+          password: ${{ secrets.DOCKERHUB_PAT }}
+
       # driver "docker": builds via the daemon's BuildKit, images land
       # directly in the local image store (needed for "kind load docker-image").
       - name: Set up Docker Buildx
@@ -254,6 +270,12 @@ jobs:
         run: go mod download
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
+      # Docker Hub rate-limits anonymous pulls (testcontainers Postgres + Ryuk).
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: guidedtraffic
+          password: ${{ secrets.DOCKERHUB_PAT }}
       - name: Load test (testcontainer Postgres, no rate limit)
         run: make loadtest
 
@@ -318,6 +340,13 @@ jobs:
         uses: helm/chart-testing-action@v2
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
+      # The postgresql subchart is an OCI artifact on Docker Hub, fetched by
+      # ct lint and the render checks; helm reads the Docker credentials.
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: guidedtraffic
+          password: ${{ secrets.DOCKERHUB_PAT }}
       - name: Chart-Lint (ct)
         run: ct lint --config .github/ct.yaml
       - name: Chart render checks

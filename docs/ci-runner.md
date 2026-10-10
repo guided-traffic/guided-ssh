@@ -49,7 +49,9 @@ reports every standard-library fix released since.
 - ≥ 40 GB free disk space for the job container plus its DinD sidecar
   (container images, build caches). A per-job DinD daemon starts with an empty
   image store, so every job pulls its images again unless a registry mirror or
-  a pull-through cache is configured.
+  a pull-through cache is configured. Docker Hub pulls are therefore
+  authenticated (`DOCKERHUB_PAT`, see below): the anonymous limit applies per
+  IP and is shared by every job behind the same address.
 - Network access: github.com, registry-1.docker.io (pull + push), gcr.io (distroless), proxy.golang.org,
   ghcr.io (Trivy DB, Dex image), database.clamav.net (freshclam), dl.k8s.io (kubectl),
   kind.sigs.k8s.io (kind)
@@ -58,7 +60,7 @@ reports every standard-library fix released since.
 
 | Secret | Purpose |
 |---|---|
-| `DOCKERHUB_PAT` | Docker Hub access token for pushing to `docker.io/guidedtraffic` (scope read/write, not an account password) |
+| `DOCKERHUB_PAT` | Docker Hub access token of `guidedtraffic` (scope read/write, not an account password): pushes to `docker.io/guidedtraffic`, and authenticates the pulls of every job that pulls from Docker Hub, including the kind cluster's in-cluster pulls in `e2e-tests` |
 | `APP_CLIENT_ID`, `APP_PRIVATE_KEY` | Client ID and private key of the org GitHub App `guided-traffic-automation`; the `semantic-release` job (tag + release + badge commit) and the Renovate job (opening PRs) each mint their own installation token with `actions/create-github-app-token`, scoped to this repository, valid for 1 h and revoked at the end of the job; needed so that generated releases/PRs trigger workflows — events created with `GITHUB_TOKEN` do not trigger workflows |
 
 ## Security
@@ -97,20 +99,28 @@ reports every standard-library fix released since.
 Known gaps, none of them blocking; listed so they are not rediscovered as
 findings.
 
-- `container-malware-scan`
-  ([release.yml:492](../.github/workflows/release.yml#L492)) has no event guard,
-  so it runs on `pull_request`, and it logs into Docker Hub with the
-  push-capable `DOCKERHUB_PAT`
-  ([:503-507](../.github/workflows/release.yml#L503-L507)) although it builds
-  with `push: false`. The login is not required — the base images are public —
-  so it can be deleted, or replaced by a read-only pull token if Docker Hub
-  rate limits become a problem.
+- The push-capable `DOCKERHUB_PAT` reaches every job that pulls from Docker
+  Hub — `integration-tests`, `e2e-tests`, `load-test`, `helm-lint` and
+  `container-malware-scan` (logins at
+  [release.yml:194](../.github/workflows/release.yml#L194),
+  [:226](../.github/workflows/release.yml#L226),
+  [:274](../.github/workflows/release.yml#L274),
+  [:345](../.github/workflows/release.yml#L345),
+  [:532](../.github/workflows/release.yml#L532)) — including their
+  `pull_request` runs. The logins are there because anonymous pulls hit the
+  per-IP rate limit (HTTP 429) once several pipelines run at the same time.
+  The E2E suite hands the same credentials to the kind cluster as an image pull
+  secret ([test/e2e/pullsecret.go](../test/e2e/pullsecret.go)), which dies with
+  the job. This does not widen who can read the token — any same-repo PR job
+  could already reach it — but a separate read-only token (Docker Hub PAT scope
+  *Public Repo Read-only*) for the pulling jobs would leave a leaked pull
+  credential unable to push images.
 - Actions are pinned to mutable tags (`@v7`, `@v4`), and
   `aquasecurity/trivy-action@master`
-  ([:527](../.github/workflows/release.yml#L527)) to a branch. Tags are
+  ([:556](../.github/workflows/release.yml#L556)) to a branch. Tags are
   force-pushable, so this is one class of issue, not two: enable Renovate's
   `helpers:pinGitHubActionDigests` and pin every action to a commit SHA.
-- `semantic-release` ([release.yml:558](../.github/workflows/release.yml#L558))
+- `semantic-release` ([release.yml:587](../.github/workflows/release.yml#L587))
   and `build.yml`'s push job are not behind a GitHub `environment:`, so the
   GitHub App key (`APP_PRIVATE_KEY`) and `DOCKERHUB_PAT` are reachable from any
   job definition that runs on `push` or `workflow_dispatch`.

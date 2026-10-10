@@ -48,6 +48,8 @@ type env struct {
 
 	webFQDN string
 	dbFQDN  string
+
+	pullSecret string // Docker Hub pull secret in the namespace, "" ⇒ anonymous pulls
 }
 
 func (e *env) context() string { return "kind-" + e.cluster }
@@ -238,6 +240,7 @@ func (e *env) applyConfigMap(name string, files map[string]string) {
 func (e *env) deployInfra() {
 	e.t.Helper()
 	e.applyYAML("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: " + e.ns + "\n")
+	e.applyPullSecret()
 
 	vars := map[string]string{"NS": e.ns}
 
@@ -300,9 +303,10 @@ func (e *env) deployServer() {
 	if err := os.WriteFile(values, []byte(render(helmValues, map[string]string{"NS": e.ns})), 0o644); err != nil {
 		e.t.Fatal(err)
 	}
-	out, err := run("", "", "helm", "--kube-context", e.context(),
+	args := append([]string{"--kube-context", e.context(),
 		"upgrade", "--install", "guided-ssh", chart,
-		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m")
+		"-n", e.ns, "-f", values, "--wait", "--timeout", "5m"}, e.helmPullSecretArgs()...)
+	out, err := run("", "", "helm", args...)
 	if err != nil {
 		e.t.Fatalf("helm install: %v\n%s", err, out)
 	}
