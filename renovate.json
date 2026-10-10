@@ -245,6 +245,14 @@
       "allowedVersions": "<6.1"
     },
     {
+      "description": "Angular framework, CLI/build tooling and Material are released in lockstep and peer-depend on each other: update them in one PR. Separate PRs produced half-upgrades (@angular/core 22.2 next to @angular/build 22.1), and only @angular/build 22.2 accepts vitest 5.",
+      "matchPackageNames": [
+        "@angular/**"
+      ],
+      "groupName": "angular",
+      "groupSlug": "angular"
+    },
+    {
       "description": "conventional-changelog-conventionalcommits v10 is incompatible with @semantic-release/release-notes-generator v14: releases get a heading but no commit sections (empty release notes). Cap at v9 until the semantic-release plugins support the v10 preset API.",
       "matchManagers": [
         "npm"
@@ -270,6 +278,13 @@
         "github-actions"
       ],
       "semanticCommitType": "chore"
+    },
+    {
+      "description": "Lock file maintenance: refresh transitive npm dependencies weekly and automerge after CI passes. A stale transitive version broke the Angular 22.2 update: @angular/compiler-cli calls an API of @jridgewell/sourcemap-codec 1.6 but declares ^1.4.14, so the lock file kept 1.5.5.",
+      "matchUpdateTypes": [
+        "lockFileMaintenance"
+      ],
+      "automerge": true
     }
   ],
   "customManagers": [
@@ -291,6 +306,12 @@
     "postUpdateOptions": [
       "gomodTidy",
       "gomodUpdateImportPaths"
+    ]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "on monday"
     ]
   }
 }
