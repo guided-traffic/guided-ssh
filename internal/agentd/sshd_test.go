@@ -133,6 +133,16 @@ func startTestSSHD(t *testing.T, hostKey ssh.Signer) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
+	serveTestSSHD(listener, hostKey)
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
+}
+
+// serveTestSSHD answers the SSH handshake on listener until it is closed.
+func serveTestSSHD(listener net.Listener, hostKey ssh.Signer) {
 	cfg := &ssh.ServerConfig{NoClientAuth: true}
 	cfg.AddHostKey(hostKey)
 	go func() {
@@ -151,11 +161,33 @@ func startTestSSHD(t *testing.T, hostKey ssh.Signer) string {
 			}()
 		}
 	}()
-	_, port, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		t.Fatal(err)
+}
+
+// signalingListener reports each accepted connection on accepted, without
+// blocking once nobody listens anymore.
+type signalingListener struct {
+	net.Listener
+	accepted chan<- struct{}
+}
+
+func (l signalingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err == nil {
+		select {
+		case l.accepted <- struct{}{}:
+		default:
+		}
 	}
-	return port
+	return conn, err
+}
+
+// shortReloadSettle bounds the post-reload wait for tests whose daemon never
+// serves a certificate — they would otherwise wait the full reloadSettle.
+func shortReloadSettle(t *testing.T) {
+	t.Helper()
+	orig := reloadSettle
+	reloadSettle = 300 * time.Millisecond
+	t.Cleanup(func() { reloadSettle = orig })
 }
 
 // testHostSigners returns a plain host key signer and one presenting a host
@@ -195,6 +227,7 @@ func testHostSigners(t *testing.T) (plain, certified ssh.Signer) {
 // TestVerifyRunningSSHD covers the point of the whole exercise: what the
 // *running* daemon serves, not what is on disk.
 func TestVerifyRunningSSHD(t *testing.T) {
+	shortReloadSettle(t)
 	plain, certified := testHostSigners(t)
 
 	certPort := startTestSSHD(t, certified)
@@ -243,6 +276,58 @@ func TestVerifyRunningSSHD(t *testing.T) {
 	}
 }
 
+// TestVerifyRunningSSHDWaitsForReload replays what a reload looks like from
+// the outside: the old process keeps answering with the plain key for a
+// moment, then nothing listens, then the re-executed daemon binds the same
+// port and serves the certificate. Verification must report the daemon it
+// ends up with, not whatever the first probe caught.
+func TestVerifyRunningSSHDWaitsForReload(t *testing.T) {
+	plain, certified := testHostSigners(t)
+	old, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstProbe := make(chan struct{}, 1)
+	serveTestSSHD(signalingListener{Listener: old, accepted: firstProbe}, plain)
+	_, port, err := net.SplitHostPort(old.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The reload starts once the first probe has reached the old process, so
+	// that probe deterministically sees the plain key.
+	reborn := make(chan net.Listener, 1)
+	go func() {
+		select {
+		case <-firstProbe:
+		case <-time.After(5 * time.Second):
+		}
+		time.Sleep(100 * time.Millisecond)
+		_ = old.Close()
+		time.Sleep(300 * time.Millisecond)
+		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", port))
+		if err != nil {
+			close(reborn) // verification below then fails with the cause
+			return
+		}
+		serveTestSSHD(listener, certified)
+		reborn <- listener
+	}()
+	t.Cleanup(func() {
+		if listener, ok := <-reborn; ok {
+			_ = listener.Close()
+		}
+	})
+
+	var out bytes.Buffer
+	if err := verifyRunningSSHD(stubSSHD(t, port, 0), "/etc/ssh", false, &out); err != nil {
+		t.Fatalf("a daemon that serves the certificate after its reload must pass: %v", err)
+	}
+	if !strings.Contains(out.String(), "serves the guided-ssh host certificate") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
 func TestValidateSSHDConfig(t *testing.T) {
 	if err := validateSSHDConfig(stubSSHD(t, "22", 0)); err != nil {
 		t.Errorf("valid configuration: %v", err)
@@ -280,6 +365,7 @@ func TestActivateSSHDReloadFailure(t *testing.T) {
 // TestActivateSSHDWithoutReload: both ways of not reloading say so — the
 // operator must never be left believing the configuration is live.
 func TestActivateSSHDWithoutReload(t *testing.T) {
+	shortReloadSettle(t)
 	tests := map[string]struct {
 		reloadCmd string
 		noReload  bool

@@ -29,6 +29,17 @@ var sshdSearchPaths = []string{"/usr/sbin/sshd", "/usr/local/sbin/sshd", "/sbin/
 // probeTimeout bounds the local handshake used to verify the running daemon.
 const probeTimeout = 5 * time.Second
 
+// reloadSettle bounds how long verification waits for a reloaded daemon. A
+// reload only sends a signal (systemd's ExecReload for sshd is a SIGHUP too),
+// and sshd answers it by closing its listeners and re-executing itself: a
+// probe right after the reload command returns finds either no listener at
+// all or the old process still serving the old host key. A variable so tests
+// can shorten the wait for daemons that never settle.
+var reloadSettle = 10 * time.Second
+
+// reloadPollInterval is the pause between probes while the daemon settles.
+const reloadPollInterval = 200 * time.Millisecond
+
 // probeHostKeyAlgos lists certificate algorithms first: the server picks the
 // first algorithm of the *client's* list that it also supports, so a daemon
 // with our HostCertificate loaded answers with a certificate and one without
@@ -238,7 +249,7 @@ func verifyRunningSSHD(sshdBin, sshDir string, unreloaded bool, stdout io.Writer
 		return nil
 	}
 	addr := probeAddr(effectiveSSHDConfig(sshdBin))
-	key, err := probeHostKey(addr)
+	key, err := probeRunningSSHD(addr, !unreloaded)
 	if err != nil {
 		// Not running, listening elsewhere, or firewalled — inconclusive.
 		fmt.Fprintf(stdout, "sshd not reachable at %s — could not verify the running daemon (%v)\n", addr, err)
@@ -254,6 +265,21 @@ func verifyRunningSSHD(sshdBin, sshDir string, unreloaded bool, stdout io.Writer
 	}
 	return fmt.Errorf("the running sshd at %s still serves a plain host key (%s) — the reload did not take effect; "+
 		"check that %s is included before any Match block, then reload sshd", addr, key.Type(), SnippetPath(sshDir))
+}
+
+// probeRunningSSHD probes once when no reload was performed. After a reload
+// it keeps probing until the daemon serves a certificate or reloadSettle has
+// passed, and returns the last answer — so a daemon that never picks up the
+// configuration still fails, just not on the first probe.
+func probeRunningSSHD(addr string, reloaded bool) (ssh.PublicKey, error) {
+	deadline := time.Now().Add(reloadSettle)
+	for {
+		key, err := probeHostKey(addr)
+		if _, isCert := key.(*ssh.Certificate); isCert || !reloaded || !time.Now().Before(deadline) {
+			return key, err
+		}
+		time.Sleep(reloadPollInterval)
+	}
 }
 
 // probeAddr is the loopback address of the first configured port.
