@@ -165,8 +165,10 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
-      # runner.temp instead of /tmp: /tmp persists across runs on self-hosted
-      # runners, so old chart packages would accumulate and get re-attached.
+      # runner.temp instead of /tmp: the per-job scratch dir, which also keeps
+      # the path free of anything the gh-pages checkout below might carry.
+      # Job containers are one-shot (docs/ci-runner.md), so the rm -rf is
+      # belt-and-braces within this job, not cleanup of a previous run.
       - name: Cache chart package
         run: |
           rm -rf "$RUNNER_TEMP/helm-charts"

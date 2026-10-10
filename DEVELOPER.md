@@ -249,7 +249,9 @@ make fmt     # formatting (gofumpt/goimports)
 make image   # build the container image locally
 ```
 
-CI (GitHub Actions, self-hosted runner — requirements: [docs/ci-runner.md](docs/ci-runner.md)):
+CI (GitHub Actions, self-hosted runners — ephemeral, one container per job with
+its own DinD sidecar, so nothing carries over between jobs; requirements:
+[docs/ci-runner.md](docs/ci-runner.md)):
 lint, test with coverage gate, build, container image (push to `docker.io/guidedtraffic`
 on `main` and tags; tagging SemVer + `sha-<commit>`).
 
