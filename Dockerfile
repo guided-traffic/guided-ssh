@@ -1,5 +1,5 @@
 # Web UI stage: Angular build (Phase 8), embedded into the binary via go:embed
-FROM node:24-bookworm-slim AS webbuild
+FROM node:26-bookworm-slim AS webbuild
 WORKDIR /web
 
 COPY web/package.json web/package-lock.json ./
