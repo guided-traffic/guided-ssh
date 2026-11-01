@@ -4,8 +4,39 @@ entries:
   - annotations:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
+    appVersion: 3.1.27
+    created: "2026-11-01T09:52:39.733509277Z"
+    dependencies:
+    - condition: postgresql.enabled
+      name: postgresql
+      repository: oci://registry-1.docker.io/bitnamicharts
+      version: 18.12.4
+    description: 'SSH certificate authority with IdP-backed access control: short-lived
+      user certificates via OIDC, host enrollment with mTLS agents, GitLab CI certificates,
+      audit log and web UI.'
+    digest: d2a613f45a9a4b36b719f370effd02b2332dc6343256021167dbf6784ed08e40
+    home: https://github.com/guided-traffic/guided-ssh
+    keywords:
+    - ssh
+    - certificate-authority
+    - oidc
+    - security
+    kubeVersion: '>=1.27.0-0'
+    maintainers:
+    - name: Guided Traffic
+      url: https://github.com/guided-traffic
+    name: guided-ssh
+    sources:
+    - https://github.com/guided-traffic/guided-ssh
+    type: application
+    urls:
+    - https://guided-traffic.github.io/guided-ssh/guided-ssh-3.1.27.tgz
+    version: 3.1.27
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
     appVersion: 3.1.26
-    created: "2026-10-25T03:46:16.744080759Z"
+    created: "2026-11-01T09:52:39.725730482Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -36,7 +67,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.25
-    created: "2026-10-25T03:46:16.737559014Z"
+    created: "2026-11-01T09:52:39.717080482Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -67,7 +98,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.24
-    created: "2026-10-25T03:46:16.730439087Z"
+    created: "2026-11-01T09:52:39.70965375Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -98,7 +129,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.23
-    created: "2026-10-25T03:46:16.723448063Z"
+    created: "2026-11-01T09:52:39.700326874Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -129,7 +160,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.22
-    created: "2026-10-25T03:46:16.716066452Z"
+    created: "2026-11-01T09:52:39.691241794Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -160,7 +191,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.21
-    created: "2026-10-25T03:46:16.707827037Z"
+    created: "2026-11-01T09:52:39.682164558Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -191,7 +222,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.20
-    created: "2026-10-25T03:46:16.699509126Z"
+    created: "2026-11-01T09:52:39.675083027Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -222,7 +253,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.19
-    created: "2026-10-25T03:46:16.684888632Z"
+    created: "2026-11-01T09:52:39.65866355Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -253,7 +284,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.18
-    created: "2026-10-25T03:46:16.678591301Z"
+    created: "2026-11-01T09:52:39.650109792Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -284,7 +315,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.17
-    created: "2026-10-25T03:46:16.67123118Z"
+    created: "2026-11-01T09:52:39.64281522Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -315,7 +346,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.16
-    created: "2026-10-25T03:46:16.664417713Z"
+    created: "2026-11-01T09:52:39.635196075Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -346,7 +377,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.15
-    created: "2026-10-25T03:46:16.658210212Z"
+    created: "2026-11-01T09:52:39.62678673Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -377,7 +408,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.14
-    created: "2026-10-25T03:46:16.652517534Z"
+    created: "2026-11-01T09:52:39.619120225Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -408,7 +439,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.13
-    created: "2026-10-25T03:46:16.645903615Z"
+    created: "2026-11-01T09:52:39.61172314Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -439,7 +470,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.12
-    created: "2026-10-25T03:46:16.639247114Z"
+    created: "2026-11-01T09:52:39.603307393Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -470,7 +501,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.11
-    created: "2026-10-25T03:46:16.634116541Z"
+    created: "2026-11-01T09:52:39.594952439Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -501,7 +532,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.10
-    created: "2026-10-25T03:46:16.626091522Z"
+    created: "2026-11-01T09:52:39.587391344Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -532,7 +563,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.9
-    created: "2026-10-25T03:46:16.786654093Z"
+    created: "2026-11-01T09:52:39.790132666Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -563,7 +594,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.8
-    created: "2026-10-25T03:46:16.7804716Z"
+    created: "2026-11-01T09:52:39.783213482Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -594,7 +625,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.7
-    created: "2026-10-25T03:46:16.773856628Z"
+    created: "2026-11-01T09:52:39.7741224Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -625,7 +656,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.6
-    created: "2026-10-25T03:46:16.768530104Z"
+    created: "2026-11-01T09:52:39.764594123Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -656,7 +687,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.5
-    created: "2026-10-25T03:46:16.761834939Z"
+    created: "2026-11-01T09:52:39.75689085Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -687,7 +718,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.4
-    created: "2026-10-25T03:46:16.755894754Z"
+    created: "2026-11-01T09:52:39.750502958Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -718,7 +749,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.3
-    created: "2026-10-25T03:46:16.749031893Z"
+    created: "2026-11-01T09:52:39.741660526Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -749,7 +780,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.2
-    created: "2026-10-25T03:46:16.692366857Z"
+    created: "2026-11-01T09:52:39.666684612Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -780,7 +811,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.1
-    created: "2026-10-25T03:46:16.618471449Z"
+    created: "2026-11-01T09:52:39.580075452Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -811,7 +842,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.1.0
-    created: "2026-10-25T03:46:16.613076605Z"
+    created: "2026-11-01T09:52:39.572045542Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -842,7 +873,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 3.0.0
-    created: "2026-10-25T03:46:16.606494105Z"
+    created: "2026-11-01T09:52:39.563662777Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -873,7 +904,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.6.0
-    created: "2026-10-25T03:46:16.600116031Z"
+    created: "2026-11-01T09:52:39.556283395Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -904,7 +935,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.5.0
-    created: "2026-10-25T03:46:16.592965958Z"
+    created: "2026-11-01T09:52:39.549511208Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -935,7 +966,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.4.0
-    created: "2026-10-25T03:46:16.586817288Z"
+    created: "2026-11-01T09:52:39.542052335Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -966,7 +997,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.3.1
-    created: "2026-10-25T03:46:16.579958224Z"
+    created: "2026-11-01T09:52:39.534542918Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -997,7 +1028,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.3.0
-    created: "2026-10-25T03:46:16.573776923Z"
+    created: "2026-11-01T09:52:39.526390848Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1028,7 +1059,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.2.0
-    created: "2026-10-25T03:46:16.568714116Z"
+    created: "2026-11-01T09:52:39.519650181Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1059,7 +1090,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.1.1
-    created: "2026-10-25T03:46:16.56259349Z"
+    created: "2026-11-01T09:52:39.511971334Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1090,7 +1121,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.1.0
-    created: "2026-10-25T03:46:16.556688351Z"
+    created: "2026-11-01T09:52:39.504066841Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1121,7 +1152,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 2.0.0
-    created: "2026-10-25T03:46:16.551439312Z"
+    created: "2026-11-01T09:52:39.49731336Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1152,7 +1183,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.2.0
-    created: "2026-10-25T03:46:16.546667517Z"
+    created: "2026-11-01T09:52:39.48935257Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1183,7 +1214,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.4
-    created: "2026-10-25T03:46:16.541005528Z"
+    created: "2026-11-01T09:52:39.482690391Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1214,7 +1245,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.3
-    created: "2026-10-25T03:46:16.535266733Z"
+    created: "2026-11-01T09:52:39.476763048Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1245,7 +1276,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.2
-    created: "2026-10-25T03:46:16.529331117Z"
+    created: "2026-11-01T09:52:39.469016844Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1276,7 +1307,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.1
-    created: "2026-10-25T03:46:16.52350602Z"
+    created: "2026-11-01T09:52:39.461566688Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1307,7 +1338,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.1.0
-    created: "2026-10-25T03:46:16.517151129Z"
+    created: "2026-11-01T09:52:39.453767354Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1338,7 +1369,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 1.0.5
-    created: "2026-10-25T03:46:16.511573249Z"
+    created: "2026-11-01T09:52:39.446601915Z"
     dependencies:
     - condition: postgresql.enabled
       name: postgresql
@@ -1458,4 +1489,4 @@ entries:
     urls:
     - https://github.com/guided-traffic/guided-ssh/releases/download/guided-ssh-0.1.0/guided-ssh-0.1.0.tgz
     version: 0.1.0
-generated: "2026-10-25T03:46:16.504705249Z"
+generated: "2026-11-01T09:52:39.439210509Z"
